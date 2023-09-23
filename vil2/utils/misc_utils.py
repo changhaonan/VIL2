@@ -822,7 +822,6 @@ def plot_pcd_o3d(pcd_list, transform_list=None, show_origin: bool = True, color_
     vis.run()
     vis.destroy_window()
 
-
 # -----------------------------------------------------------------------------
 # Transform Utils
 # -----------------------------------------------------------------------------
