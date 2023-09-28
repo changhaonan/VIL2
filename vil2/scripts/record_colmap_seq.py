@@ -126,6 +126,9 @@ if __name__ == "__main__":
     finally:
         pipeline.stop()
 
-    # Save the intrisic.txt
+    # Save the intrisic.txt (for bundle-tracking)
     with open(os.path.join(args.data_folder, args.data_name, "intrinsics.txt"), "w") as f:
         f.writelines([f"fx: {depth_intrinsics.fx}\n", f"fy: {depth_intrinsics.fy}\n", f"cx: {depth_intrinsics.ppx}\n", f"cy: {depth_intrinsics.ppy}\n"])
+    # Save the cam_info.json (for other process)
+    cam_info = {"intrinsic": [[depth_intrinsics.fx, 0, depth_intrinsics.ppx], [0, depth_intrinsics.fy, depth_intrinsics.ppy], [0, 0, 1]], "depth_scale": depth_scale}
+    json.dump(cam_info, open(os.path.join(args.data_folder, args.data_name, "cam_info.json"), "w"))

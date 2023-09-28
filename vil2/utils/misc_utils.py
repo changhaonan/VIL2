@@ -101,6 +101,20 @@ def get_pointcloud_list(color, depth, mask, mask_name_ids, intrinisc, extrinsic,
     return obj_pcd_list
 
 
+def get_pointcloud_o3d(depth_image_file, color_image_file, intriniscs):
+    """Get o3d point cloud from depth and color image"""
+    depth_image = o3d.io.read_image(depth_image_file)
+    color_image = o3d.io.read_image(color_image_file)
+    img_size = np.array(depth_image).shape
+    intrinsics = o3d.camera.PinholeCameraIntrinsic(width=img_size[1], height=img_size[0], fx=intriniscs[0, 0], fy=intriniscs[1, 1], cx=intriniscs[0, 2], cy=intriniscs[1, 2])
+    # full rgbd image
+    rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
+        o3d.geometry.Image(color_image), o3d.geometry.Image(depth_image), depth_scale=1000.0, depth_trunc=1000.0, convert_rgb_to_intensity=False
+    )
+    color_pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd_image, intrinsics)
+    return color_pcd
+
+
 def transform_pointcloud(points, transform):
     """Apply rigid transformation to 3D pointcloud.
 
