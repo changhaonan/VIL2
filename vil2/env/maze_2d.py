@@ -44,6 +44,10 @@ class MazeTree(gym.Env):
     def get_obs(self):
         # encode the current node
         return self.position_encoding[self.cur_node]
+
+    def decode_obs(self, obs):
+        # decode the obs to node
+        return np.argmax(np.matmul(self.position_encoding, obs))
     
     def get_info(self):
         return {}
