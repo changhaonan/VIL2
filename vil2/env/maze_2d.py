@@ -7,9 +7,14 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from io import BytesIO
 from PIL import Image
+import vil2.utils.misc_utils as misc_utils
 
+DIM_OBS = 512
+MAX_NUM_NODES = 1000
 
 class MazeTree(gym.Env):
+    render_mode = "rgb_array"
+
     """A maze tree is a tree with multiple levels and multiple branches."""
     def __init__(self, config: dict[str, any]):
         """Initialize the maze tree"""
@@ -23,18 +28,22 @@ class MazeTree(gym.Env):
         self.noise_level = config.get("noise_level", 0.0)  # probability of dynamic
         if len(self.end_probs) < self.num_level:
             self.end_probs.extend([0.2] * (self.num_level - len(self.end_probs)))
+        # encoding
+        self.position_encoding = misc_utils.get_positional_encoding(MAX_NUM_NODES, DIM_OBS)
+        # reset
         self.reset(reset_maze=True)
 
     @property
     def observation_space(self):
-        return gym.spaces.Box(low=0, high=self.num_nodes, shape=(1, ), dtype=np.int32)
+        return gym.spaces.Box(low=-1.0, high=1.0, shape=(DIM_OBS, ), dtype=np.float32)
 
     @property    
     def action_space(self):
         return gym.spaces.Box(low=0.0, high=1.0, shape=(1, ), dtype=np.float32)
 
     def get_obs(self):
-        return np.array([self.cur_node], dtype=np.int32)
+        # encode the current node
+        return self.position_encoding[self.cur_node]
     
     def get_info(self):
         return {}
@@ -47,13 +56,10 @@ class MazeTree(gym.Env):
         noise = (self.rng.random() * 2.0 - 1.0) * self.noise_level
         action += noise
         # static
-        num_dir = len(self.node_children[self.cur_node] + self.node_parent[self.cur_node]) + 1 # +1 for stop
+        num_dir = len(self.node_children[self.cur_node] + self.node_parent[self.cur_node])
         dir_idx = int(action * num_dir) % num_dir
         if dir_idx < len(self.node_children[self.cur_node]):
             self.cur_node = self.node_children[self.cur_node][dir_idx]
-        elif dir_idx == len(self.node_children[self.cur_node] + self.node_parent[self.cur_node]):
-            # stop
-            pass
         else:
             # go back
             self.cur_node = self.node_parent[self.cur_node][dir_idx - len(self.node_children[self.cur_node])]
@@ -129,7 +135,7 @@ class MazeTree(gym.Env):
         self.step_count = 0
         return self.get_obs(), self.get_info()
 
-    def render(self):
+    def render(self, mode="rgb_array"):
         # visualize the maze-tree
         G = nx.DiGraph()
         for node in self.node_list:
@@ -162,6 +168,9 @@ class MazeTree(gym.Env):
         img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         
         return img
+
+    def get_image(self):
+        return self.render()
 
 
 if __name__  == "__main__":

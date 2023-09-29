@@ -923,3 +923,18 @@ def compute_iou(bbox1, bbox2, iou_type: str = "union"):
         iou = intersection_area / float(min(bbox1_area, bbox2_area))
     # Return the computed IoU
     return iou
+
+
+# -----------------------------------------------------------------------------
+# Transformer Utils
+# -----------------------------------------------------------------------------
+
+def get_positional_encoding(max_length, d_model):
+    pos = np.arange(max_length)[:, np.newaxis]  # Shape (max_length, 1)
+    div_term = np.exp(np.arange(0, d_model, 2) * -(np.log(10000.0) / d_model))  # Shape (d_model//2,)
+
+    pos_encoding = np.zeros((max_length, d_model))  # Initialize positional encoding matrix
+    pos_encoding[:, 0::2] = np.sin(pos * div_term)  # Apply sine to even dimensions
+    pos_encoding[:, 1::2] = np.cos(pos * div_term)  # Apply cosine to odd dimensions
+
+    return pos_encoding
