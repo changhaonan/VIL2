@@ -178,15 +178,23 @@ class MazeTree(gym.Env):
 
 
 if __name__  == "__main__":
-    maze = MazeTree(num_level=5, num_branch=2, num_goal=4, seed=1)
+    config = {
+        "seed": 0,
+        "num_level": 5, 
+        "num_branch": 2,
+        "num_goal": 3,
+        "end_probs": [0.0, 0.0, 0.0, 0.3, 0.3, 0.0],
+        "noise_level": 0.0,
+    }
+    maze = MazeTree(config)
     maze.render()
 
     for i in range(100):
         action = maze.rng.random()
-        next_node, reward, done, _ = maze.step(action)
+        obs, reward, terminated, _, info = maze.step(action)
         image = maze.render()
-        print(f"Step {i}: action={action}, next_node={next_node}, reward={reward}")
+        # print(f"Step {i}: action={action}, next_node={obs}, reward={reward}")
         cv2.imshow("maze", image)
-        cv2.waitKey(1)
-        if done:
-            break
+        cv2.waitKey(0)
+        # if done:
+        #     break

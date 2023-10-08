@@ -45,7 +45,7 @@ if __name__ == "__main__":
     model.learn(total_timesteps=35000)
 
     vec_env = model.get_env()
-    action_d = collect_action_d(vec_env, model, enable_vis=False)
+    action_d = collect_action_d(vec_env, model, enable_vis=True)
     # draw distribution
     for obs_id in action_d:
         actions = action_d[obs_id]

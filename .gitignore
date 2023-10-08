@@ -3,4 +3,10 @@
 test_data/*
 models/*
 
+vil2/test_data/*
+
+checkpoint/*
+
 *.pyc
+
+*.TXT
