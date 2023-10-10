@@ -2,11 +2,10 @@ import os
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import gymnasium as gym
 from vil2.env import env_builder
 from stable_baselines3 import PPO
 import sys
-import gymnasium
-sys.modules["gym"] = gymnasium
 
 
 def collect_action_d(env, model, enable_vis=False):
@@ -42,12 +41,11 @@ if __name__ == "__main__":
         "end_probs": [0.0, 0.0, 0.0, 0.3, 0.3, 0.0],
         "noise_level": 0.0,
     }
-    # env = env_builder(env_name, config=config)
     from minigrid.wrappers import RGBImgPartialObsWrapper, ImgObsWrapper
-    env = gymnasium.make("MiniGrid-SimpleCrossingS9N1-v0", render_mode="human")
+    env = gym.make("MiniGrid-SimpleCrossingS9N1-v0", render_mode="rgb_array")
     env = RGBImgPartialObsWrapper(env)
     env = ImgObsWrapper(env)
-    # env = gymnasium.make("MiniGrid-Empty-5x5-v0", render_mode="rgb_array")
+    obs, _ = env.reset()
     model = PPO("MlpPolicy", env, verbose=1)
     model.learn(total_timesteps=35000)
 

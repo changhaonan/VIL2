@@ -1,5 +1,6 @@
 from .maze_2d import MazeTree
 import gymnasium as gym
+# from .mini_grid import MiniGridEnv
 
 
 def env_builder(env_name, **kwargs):
