@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 from minigrid.core.constants import COLOR_NAMES
 from minigrid.core.grid import Grid
 from minigrid.core.mission import MissionSpace
@@ -68,6 +69,28 @@ class BaseMiniGridEnv(MiniGridEnv):
             self.place_agent()
 
         self.mission = "grand mission"
+
+    def reset(self, **kwargs):
+        """Override the reset function to encode the observation"""
+        obs, info = super().reset(**kwargs)
+        # encode observation
+        obs_encode = self.encode_obs(obs)
+        return obs_encode, info
+
+    def step(self, action):
+        """Override the step function to encode the observation"""
+        obs, reward, terminated, truncated, info = super().step(action)
+        # encode observation
+        obs_encode = self.encode_obs(obs)
+        return obs_encode, reward, terminated, truncated, info
+
+    def encode_obs(self, observation):
+        image = observation["image"]
+        direction = observation["direction"]
+        # sinuoid encoding
+        direction_encode = np.array([np.sin(direction/4.0), np.cos(direction/4.0), np.sin(2 * direction/4.0), np.cos(2 * direction/4.0)])
+        encoded_obs = np.concatenate([image.flatten(), direction_encode], axis=0)
+        return encoded_obs
 
 
 def main():

@@ -89,13 +89,12 @@ class IQL:
         for param, target_param in zip(self.qf2.parameters(), self.target_qf2.parameters()):
             target_param.data.copy_(alpha * param.data + (1.0 - alpha) * target_param.data)
     
-    def train(self, env, batch_size: int = 256, num_epochs: int = 1000, alpha: float = 0.01, tau: float = 0.6, gamma: float = 0.99, update_action: bool = False):
+    def train(self, env, batch_size: int, num_epochs: int, eval_period: int, alpha: float = 0.01, tau: float = 0.6, gamma: float = 0.99, beta: float = 3.0, update_action: bool = False):
         """Train IQL"""
         # train
         print("Start training Q & V...")
         v_loss_sum = 0.0
         q_loss_sum = 0.0
-        eval_period = 10000
         q_update_freq = 1
         target_update_freq = 10
         for epoch in range(num_epochs):
@@ -145,7 +144,7 @@ class IQL:
 
             # update action
             if update_action:
-                self.update_policy(observations=observations, actions=actions, beta=1.0)
+                self.update_policy(observations=observations, actions=actions, beta=beta)
             
             # eval
             v_loss_sum += vf_loss.detach().cpu().numpy()
@@ -181,13 +180,18 @@ class IQL:
         q_target_pred = torch.min(self.target_qf1(torch.cat([observations, actions], dim=1)), self.target_qf2(torch.cat([observations, actions], dim=1)))
         advantages = q_target_pred - self.vf(observations)
         advantages_exp = torch.exp(advantages / beta).detach().clamp(max=EXP_ADV_MAX)  # don't update V & Q network with policy loss
-        if self.policy.is_gaussian:
+        if self.action_discrete:
             action_mean = self.policy(observations)
-            action_std = torch.ones_like(action_mean) * self.policy_std
-            action_dist = torch.distributions.Normal(action_mean, action_std)
-            log_probs = action_dist.log_prob(actions)
+            # use cross entropy loss
+            log_probs = - nn.CrossEntropyLoss(reduction='none')(action_mean, actions.argmax(dim=-1))
         else:
-            assert False, "Not implemented"
+            if self.policy.is_gaussian:
+                action_mean = self.policy(observations)
+                action_std = torch.ones_like(action_mean) * self.policy_std
+                action_dist = torch.distributions.Normal(action_mean, action_std)
+                log_probs = action_dist.log_prob(actions)
+            else:
+                assert False, "Not implemented"
         policy_loss = -(advantages_exp * log_probs).mean()
         self.policy_optimizer.zero_grad(set_to_none=True)
         policy_loss.backward()
@@ -203,17 +207,21 @@ class IQL:
         elif len(observations.shape) == 3:
             # image
             observations = observations.reshape(1, -1)
-        if self.policy.is_gaussian:
-            action_mean = self.policy(observations)
-            action_std = torch.ones_like(action_mean) * self.policy_std
-            action_dist = torch.distributions.Normal(action_mean, action_std)
-            action = action_dist.sample()
-            if action.shape[0] == 1:
-                action = action.squeeze(0)
-        else:
-            assert False, "Not implemented"
+        
         if self.action_discrete:
-            action = action.argmax(dim=-1).int()
+            action_mean = self.policy(observations)
+            action = action_mean.argmax(dim=-1, keepdim=True)
+        else:
+            if self.policy.is_gaussian:
+                with torch.no_grad():
+                    action_mean = self.policy(observations)
+                    action_std = torch.ones_like(action_mean) * self.policy_std
+                    action_dist = torch.distributions.Normal(action_mean, action_std)
+                    action = action_dist.sample()
+            else:
+                assert False, "Not implemented"
+        if action.shape[0] == 1:
+            action = action.squeeze(0)
         return action.detach().cpu().numpy()
 
     def save(self, path: str):
@@ -243,106 +251,34 @@ class IQL:
         # eval on env
         epoch_dir = os.path.join(self.log_path, f"epoch-{epoch}")
         os.makedirs(epoch_dir, exist_ok=True)
+        step_sum = 0.0
+        reward_sum = 0.0
         for i in range(num_epochs):
             obs, _ = env.reset(seed=i)
-            step_count = 0
-            reward_sum = 0.0
+            step_epoch = 0
+            reward_epoch = 0.0
             while True:
                 if enable_render:
                     image = env.render()
                     if self.log_path is not None:
-                        cv2.imwrite(os.path.join(epoch_dir, f"i-{i}-step-{step_count}.png"), image)
+                        cv2.imwrite(os.path.join(epoch_dir, f"i-{i}-step-{step_epoch}.png"), image)
                 if "image" in obs:
                     obs = obs["image"]
                 action = self.predict(obs)
                 obs, reward, terminated, truncated, info = env.step(action)
-                reward_sum += reward
-                step_count += 1
+                reward_epoch += reward
+                step_epoch += 1
                 if terminated or truncated:
-                    print(f"Episode: {i}, Reward: {reward}, Step: {step_count}")
+                    print(f"Episode: {i}, Reward: {reward}, Step: {step_epoch}")
                     break
             # log
+            step_sum += step_epoch
+            reward_sum += reward_epoch
             if self.log_path is not None:
                 with open(os.path.join(self.log_path, "eval.txt"), "a") as f:
                     if i == 0:
-                        f.write(f"---------- Epoch: {epoch} ----------\n")
-                    f.write(f"seed: {i}, reward: {reward_sum}, step: {step_count}\n")
-
-
-if __name__ == "__main__":
-    import d4rl
-    import gym
-    import os
-    import matplotlib.pyplot as plt
-
-    root_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    check_point_path = os.path.join(root_path, 'checkpoint')
-    os.makedirs(check_point_path, exist_ok=True)
-    # Create the environment
-    env = gym.make('maze2d-umaze-v1')
-
-    # d4rl abides by the OpenAI gym interface
-    env.reset()
-    env.step(env.action_space.sample())
-
-    # Each task is associated with a dataset
-    # dataset contains observations, actions, rewards, terminals, and infos
-    dataset = env.get_dataset()
-    print(dataset['observations']) # An N x dim_observation Numpy array of observations
-
-    # Alternatively, use d4rl.qlearning_dataset which
-    # also adds next_observations.
-    dataset = d4rl.qlearning_dataset(env)
-
-    # Bulid IQL module
-    config = {
-        'batch_size': 512,
-        'value_epochs': 50000,
-        'policy_epochs': 50000,
-        'q_hidden_dim': 128,
-        'v_hidden_dim': 128,
-        'policy_hidden_dim': 128,
-        'tau': 0.7, 
-        'enable_save': True,
-        'enable_load': True
-    }
-    iql = IQL(env=env, dataset=dataset, config=config)
-    # test
-    if config['enable_load']:
-        iql.load(os.path.join(check_point_path, 'iql.pth'))
-    else:
-        iql.train(env=env, tau=config['tau'], batch_size=config['batch_size'], num_epochs=config['value_epochs'], update_action=True)
-        # save model
-        if config['enable_save']:
-            iql.save(os.path.join(check_point_path, 'iql.pth'))
-
-    # Debug
-    observations = dataset['observations']
-    # 1. draw observations
-    plt.scatter(observations[:, 0], observations[:, 1], s=0.01)
-    plt.show()
-
-    # 2. draw values
-    # x = np.linspace(0.0, 4.0, 100)
-    # y = np.linspace(0.0, 4.0, 100)
-    # X, Y = np.meshgrid(x, y)
-    # VX, VY = np.zeros_like(X), np.zeros_like(Y)
-    # obs = np.stack([X.flatten(), Y.flatten(), VX.flatten(), VY.flatten()], axis=1)
-    # obs = torch.from_numpy(obs).float().to(iql.device)
-    obs = torch.from_numpy(observations).float().to(iql.device)
-    obs[:, 2:] = 0.0  # set velocity to zero
-    misc_utils.draw_V_map(obs.detach().cpu().numpy(), iql.vf, sample_ratio=1.0, output_path="V.png")
-    misc_utils.draw_A_map(obs.detach().cpu().numpy(), iql.target_qf1, iql.target_qf2, iql.vf, np.array([-1.0, 0.0]), sample_ratio=1.0, output_path="Al.png")
-    misc_utils.draw_A_map(obs.detach().cpu().numpy(), iql.target_qf1, iql.target_qf2, iql.vf, np.array([1.0, 0.0]), sample_ratio=1.0, output_path="Ar.png")
-    misc_utils.draw_A_map(obs.detach().cpu().numpy(), iql.target_qf1, iql.target_qf2, iql.vf, np.array([0.0, 1.0]), sample_ratio=1.0, output_path="Au.png")
-    misc_utils.draw_A_map(obs.detach().cpu().numpy(), iql.target_qf1, iql.target_qf2, iql.vf, np.array([0.0, -1.0]), sample_ratio=1.0, output_path="Ad.png")
-    # for i in range(10):
-    #     obs = env.reset()
-    #     print(f"Episode: {i}")
-    #     while True:
-    #         env.render()
-    #         action = iql.predict(obs)
-    #         obs, reward, done, info = env.step(action)
-    #         if done:
-    #             print(f"Episode: {i}, Reward: {reward}")
-    #             break
+                        f.write(f"========== Epoch: {epoch} ==========\n")
+                    f.write(f"seed: {i}, reward: {reward_epoch}, step: {step_epoch}\n")
+                    if i == num_epochs - 1:
+                        f.write(f"-------- Average: --------\n")
+                        f.write(f"reward: {reward_sum / num_epochs}, step: {step_sum / num_epochs}\n")

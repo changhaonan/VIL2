@@ -4,6 +4,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+
+def position_encoding(x: torch.Tensor, min_timescale: float = 1.0, max_timescale: float = 1.0e2):
+    """Sinusoidal Position Encoding."""
+    length = x.shape[-1]
+    channels = x.shape[-2]
+    position = torch.arange(length, dtype=torch.float32, device=x.device)
+    num_timescales = channels // 2
+    log_timescale_increment = (np.log(float(max_timescale) / float(min_timescale)) / (float(num_timescales) - 1))
+    inv_timescales = min_timescale * torch.exp(
+        torch.arange(num_timescales, dtype=torch.float32, device=x.device) * -log_timescale_increment
+    )
+    scaled_time = position.unsqueeze(1) * inv_timescales.unsqueeze(0)
+    signal = torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], dim=1)
+    signal = signal.unsqueeze(0).repeat(x.shape[:-1] + (1,))
+    return signal
+
 # -----------------------------------------------------------------------------
 # RL Utils
 # -----------------------------------------------------------------------------
