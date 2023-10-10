@@ -2,8 +2,11 @@ import os
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-from vil2.env import ENV_MAP
+from vil2.env import env_builder
 from stable_baselines3 import PPO
+import sys
+import gymnasium
+sys.modules["gym"] = gymnasium
 
 
 def collect_action_d(env, model, enable_vis=False):
@@ -28,7 +31,7 @@ def collect_action_d(env, model, enable_vis=False):
 
 if __name__ == "__main__":
     root_path = os.path.dirname((os.path.abspath(__file__)))
-    env_name = "maze"
+    env_name = "MiniGrid-Empty-5x5-v0"
     export_path = os.path.join(root_path, "test_data", env_name)
     
     config = {
@@ -39,25 +42,14 @@ if __name__ == "__main__":
         "end_probs": [0.0, 0.0, 0.0, 0.3, 0.3, 0.0],
         "noise_level": 0.0,
     }
-    env = ENV_MAP[env_name](config=config)
-
+    # env = env_builder(env_name, config=config)
+    from minigrid.wrappers import RGBImgPartialObsWrapper, ImgObsWrapper
+    env = gymnasium.make("MiniGrid-SimpleCrossingS9N1-v0", render_mode="human")
+    env = RGBImgPartialObsWrapper(env)
+    env = ImgObsWrapper(env)
+    # env = gymnasium.make("MiniGrid-Empty-5x5-v0", render_mode="rgb_array")
     model = PPO("MlpPolicy", env, verbose=1)
     model.learn(total_timesteps=35000)
 
     vec_env = model.get_env()
-    action_d = collect_action_d(vec_env, model, enable_vis=True)
-    # draw distribution
-    for obs_id in action_d:
-        actions = action_d[obs_id]
-        # draw histogram
-        fig = plt.figure(figsize=(8, 8))
-        plt.hist(actions, bins=100)
-        plt.title(f"Obs ID: {obs_id}")
-        plt.xlabel("Action")
-        plt.ylabel("Count")
-        # save figure
-        action_d_path = os.path.join(export_path, "action_d")
-        os.makedirs(action_d_path, exist_ok=True)
-        image_path = os.path.join(action_d_path, f"{obs_id}.png")
-        plt.savefig(image_path)
 
