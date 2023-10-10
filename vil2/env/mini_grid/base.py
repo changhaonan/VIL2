@@ -20,7 +20,9 @@ class BaseMiniGridEnv(MiniGridEnv):
         self.agent_start_pos = agent_start_pos
         self.agent_start_dir = agent_start_dir
 
+        # Define a mission (task)
         mission_space = MissionSpace(mission_func=self._gen_mission)
+        self.goal_poses = []
 
         if max_steps is None:
             max_steps = 4 * size**2
@@ -39,6 +41,7 @@ class BaseMiniGridEnv(MiniGridEnv):
         return "grand mission"
 
     def _gen_grid(self, width, height):
+        """Generate everything in the scene"""
         # Create an empty grid
         self.grid = Grid(width, height)
 
@@ -55,6 +58,7 @@ class BaseMiniGridEnv(MiniGridEnv):
 
         # Place a goal square in the bottom-right corner
         self.put_obj(Goal(), width - 2, height - 2)
+        self.goal_poses = [(width - 2, height - 2)]
 
         # Place the agent
         if self.agent_start_pos is not None:

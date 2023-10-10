@@ -1,17 +1,21 @@
 """Implicit Q learning: https://arxiv.org/abs/2110.06169"""
 from __future__ import annotations
+import os
+import cv2
 import torch
 import torch.nn as nn
 import numpy as np
 import vil2.utils.misc_utils as misc_utils
 from vil2.algo.model import QNetwork, VNetwork, PolicyNetwork
+import gymnasium as gym
 
 # constants
 EXP_ADV_MAX = 100.0
 
+
 class IQL:
     """Implicit Q learning method"""
-    def __init__(self, dataset: dict, config: dict):
+    def __init__(self, env: gym.Env, dataset: dict, config: dict):
         # parameters
         q_lr = config.get('q_lr', 1e-3)
         v_lr = config.get('v_lr', 1e-3)
@@ -19,6 +23,7 @@ class IQL:
         policy_lr = config.get('policy_lr', 1e-3)
         policy_std = config.get('policy_std', 0.1)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.log_path = config.get('log_path', None)
         # extract data from dataset
         self.observations = torch.from_numpy(dataset['observations']).float().to(self.device)
         self.next_observations = torch.from_numpy(dataset['next_observations']).float().to(self.device)
@@ -29,9 +34,24 @@ class IQL:
         self.terminals = torch.from_numpy(dataset['terminals']).float().to(self.device)
         if len(self.terminals.shape) == 1:
             self.terminals = self.terminals.unsqueeze(1)
+        
         # init network
+        # observation
+        if len(self.observations.shape) == 4:
+            # image
+            self.observations = self.observations.reshape(self.observations.shape[0], -1)
+            self.next_observations = self.next_observations.reshape(self.next_observations.shape[0], -1)
         state_dim = self.observations.shape[1]
-        action_dim = self.actions.shape[1]
+        # action
+        if isinstance(env.action_space, gym.spaces.Discrete):
+            self.action_discrete = True
+            action_dim = env.action_space.n
+            # one-hot encoding
+            self.actions = torch.zeros((self.actions.shape[0], action_dim), device=self.device).scatter_(1, self.actions.long(), 1).float()
+        else:
+            self.action_discrete = False
+            action_dim = self.actions.shape[1]
+            
         q_input_dim = state_dim + action_dim
         v_input_dim = state_dim
         policy_input_dim = state_dim
@@ -138,7 +158,6 @@ class IQL:
                 v_loss_sum = 0.0
                 q_loss_sum = 0.0
             
-
     def expectile(self, x: torch.Tensor, tau: float) -> torch.Tensor:
         """Expectile function"""
         return torch.where(x < 0, tau * x.square(), (1 - tau) * x.square())
@@ -181,6 +200,9 @@ class IQL:
         self.policy.eval()
         if len(observations.shape) == 1:
             observations = observations.unsqueeze(0)
+        elif len(observations.shape) == 3:
+            # image
+            observations = observations.reshape(1, -1)
         if self.policy.is_gaussian:
             action_mean = self.policy(observations)
             action_std = torch.ones_like(action_mean) * self.policy_std
@@ -190,6 +212,8 @@ class IQL:
                 action = action.squeeze(0)
         else:
             assert False, "Not implemented"
+        if self.action_discrete:
+            action = action.argmax(dim=-1).int()
         return action.detach().cpu().numpy()
 
     def save(self, path: str):
@@ -217,23 +241,33 @@ class IQL:
 
     def evaluate(self, env, num_epochs: int, epoch: int, enable_render: bool = False):
         # eval on env
-        obs = env.reset()
-        reward_sum = 0.0
+        epoch_dir = os.path.join(self.log_path, f"epoch-{epoch}")
+        os.makedirs(epoch_dir, exist_ok=True)
         for i in range(num_epochs):
+            obs, _ = env.reset(seed=i)
+            step_count = 0
+            reward_sum = 0.0
             while True:
                 if enable_render:
-                    env.render()
-                action = iql.predict(obs)
-                obs, reward, done, info = env.step(action)
+                    image = env.render()
+                    if self.log_path is not None:
+                        cv2.imwrite(os.path.join(epoch_dir, f"i-{i}-step-{step_count}.png"), image)
+                if "image" in obs:
+                    obs = obs["image"]
+                action = self.predict(obs)
+                obs, reward, terminated, truncated, info = env.step(action)
                 reward_sum += reward
-                if done:
-                    print(f"Episode: {i}, Reward: {reward}")
+                step_count += 1
+                if terminated or truncated:
+                    print(f"Episode: {i}, Reward: {reward}, Step: {step_count}")
                     break
-        print(f"Eval: Average reward: {reward_sum / num_epochs}")
-        # eval V map
-        misc_utils.draw_V_map(self.observations.detach().cpu().numpy(), self.vf, output_path=f"V_{epoch}.png")
-        # eval Q map
-        misc_utils.draw_Q_map(self.observations.detach().cpu().numpy(), self.target_qf1, np.array([1.0, 0.0]), output_path=f"Q_{epoch}.png")
+            # log
+            if self.log_path is not None:
+                with open(os.path.join(self.log_path, "eval.txt"), "a") as f:
+                    if i == 0:
+                        f.write(f"---------- Epoch: {epoch} ----------\n")
+                    f.write(f"seed: {i}, reward: {reward_sum}, step: {step_count}\n")
+
 
 if __name__ == "__main__":
     import d4rl
@@ -272,7 +306,7 @@ if __name__ == "__main__":
         'enable_save': True,
         'enable_load': True
     }
-    iql = IQL(dataset=dataset, config=config)
+    iql = IQL(env=env, dataset=dataset, config=config)
     # test
     if config['enable_load']:
         iql.load(os.path.join(check_point_path, 'iql.pth'))

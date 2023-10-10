@@ -1,6 +1,7 @@
 from .maze_2d import MazeTree
 import gymnasium as gym
-# from .mini_grid import MiniGridEnv
+from .mini_grid.base import BaseMiniGridEnv
+from .mini_grid.collect_data import collect_data_mini_grid
 
 
 def env_builder(env_name, **kwargs):
@@ -8,6 +9,16 @@ def env_builder(env_name, **kwargs):
         return MazeTree(**kwargs)
     elif env_name.split("-")[0].lower() == "minigrid":
         render_mode = kwargs.pop("render_mode", "human")
-        return gym.make(env_name, render_mode=render_mode)
+        return BaseMiniGridEnv(agent_start_pos=None, render_mode=render_mode)
+    else:
+        raise ValueError(f"Unknown env_name: {env_name}")
+
+
+def env_data_collect(env, env_name, **kwargs):
+    if env_name.split("-")[0].lower() == "minigrid":
+        num_eposides = kwargs.pop("num_eposides", 1000)
+        max_steps = kwargs.pop("max_steps", 100)
+        strategies = kwargs.pop("strategies", ["navigate", "suboptimal"])
+        return collect_data_mini_grid(env_name=env_name, env=env, num_eposides=num_eposides, max_steps=max_steps, strategies=strategies)
     else:
         raise ValueError(f"Unknown env_name: {env_name}")
