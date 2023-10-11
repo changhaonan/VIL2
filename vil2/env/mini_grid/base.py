@@ -145,6 +145,7 @@ class BaseMiniGridEnv(MiniGridEnv):
 
     def get_action(self, next_pos):
         """Get the corresponding action for the next position"""
+        #TODO: currently don't consider door & key
         agent_pos = self.agent_pos
         agent_dir = self.agent_dir
         next_type = self.grid.get(*next_pos)
