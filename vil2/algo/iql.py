@@ -179,7 +179,7 @@ class IQL:
         """Update policy; beta is inverse temperature"""
         q_target_pred = torch.min(self.target_qf1(torch.cat([observations, actions], dim=1)), self.target_qf2(torch.cat([observations, actions], dim=1)))
         advantages = q_target_pred - self.vf(observations)
-        advantages_exp = torch.exp(advantages / beta).detach().clamp(max=EXP_ADV_MAX)  # don't update V & Q network with policy loss
+        advantages_exp = torch.exp(advantages * beta).detach().clamp(max=EXP_ADV_MAX)  # don't update V & Q network with policy loss
         if self.action_discrete:
             action_mean = self.policy(observations)
             # use cross entropy loss
@@ -210,7 +210,9 @@ class IQL:
         
         if self.action_discrete:
             action_mean = self.policy(observations)
-            action = action_mean.argmax(dim=-1, keepdim=True)
+            actoin_prob = nn.functional.softmax(action_mean, dim=-1)
+            # sample action
+            action = torch.multinomial(actoin_prob, num_samples=1)
         else:
             if self.policy.is_gaussian:
                 with torch.no_grad():

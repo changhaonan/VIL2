@@ -1,6 +1,7 @@
 from .maze_2d import MazeTree
 import gymnasium as gym
 from .mini_grid.base import BaseMiniGridEnv
+from .mini_grid.multi_modality import MultiModalityMiniGridEnv
 from .mini_grid.collect_data import collect_data_mini_grid
 
 
@@ -8,8 +9,12 @@ def env_builder(env_name, **kwargs):
     if env_name == "maze":
         return MazeTree(**kwargs)
     elif env_name.split("-")[0].lower() == "minigrid":
-        render_mode = kwargs.pop("render_mode", "human")
-        return BaseMiniGridEnv(agent_start_pos=None, render_mode=render_mode)
+        render_mode = kwargs.pop("render_mode", "rgb_array")
+        mini_grid_type = env_name.split("-")[1].lower()
+        if mini_grid_type == "mm":
+            return MultiModalityMiniGridEnv(agent_start_pos=None, render_mode=render_mode)
+        else:
+            return BaseMiniGridEnv(agent_start_pos=None, render_mode=render_mode)
     else:
         raise ValueError(f"Unknown env_name: {env_name}")
 

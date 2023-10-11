@@ -5,6 +5,7 @@ import numpy as np
 import tqdm
 from minigrid.core.actions import Actions
 from vil2.env.mini_grid.base import BaseMiniGridEnv
+from vil2.env.mini_grid.multi_modality import MultiModalityMiniGridEnv
 
 
 def collect_data_mini_grid(env_name: str, env: BaseMiniGridEnv, num_eposides: int|list[int], max_steps: int, strategies: list[str], output_path=None):
@@ -82,7 +83,7 @@ def collect_suboptimal_data(env_name: str, env: BaseMiniGridEnv, num_eposides: i
     random_action_prob = 0.7
     for i in tqdm.tqdm(range(num_eposides)):
         obs, _ = env.reset()
-        goal_pos = env.goal_poses[0]
+        goal_pos = env.goal_poses[np.random.choice(len(env.goal_poses))]  # select a random goal
         for j in range(max_steps):
             if np.random.rand() < random_action_prob:
                 action = env.action_space.sample()
@@ -139,5 +140,5 @@ def collect_suboptimal_data(env_name: str, env: BaseMiniGridEnv, num_eposides: i
 
 
 if __name__ == "__main__":
-    env = BaseMiniGridEnv(agent_start_pos=None, render_mode="human")
-    collect_data_mini_grid(env_name="MiniGrid-Empty-5x5-v0", env=env, num_eposides=1000, max_steps=100, strategies=["suboptimal"], output_path="test_data.npz")
+    env = MultiModalityMiniGridEnv(agent_start_pos=None, render_mode="human")
+    collect_data_mini_grid(env_name="MiniGrid-Empty-5x5-v0", env=env, num_eposides=1000, max_steps=100, strategies=["suboptimal"])

@@ -9,7 +9,7 @@ from vil2.algo.iql import IQL
 if __name__ == "__main__":
     # prepare path
     root_path = os.path.dirname((os.path.abspath(__file__)))
-    env_name = "MiniGrid-Empty-5x5-v0"
+    env_name = "MiniGrid-Base"
     export_path = os.path.join(root_path, "test_data", env_name)
     check_point_path = os.path.join(export_path, 'checkpoint')
     log_path = os.path.join(export_path, 'log')
