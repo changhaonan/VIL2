@@ -45,7 +45,7 @@ def collect_navigate_data(env_name: str, env: BaseMiniGridEnv, num_eposides: int
     truncated_list = []
     print("Collecting navigation data")
     for i in tqdm.tqdm(range(num_eposides)):
-        obs, _ = env.reset()
+        obs, _ = env.reset(seed=i)
         for j in range(max_steps):
             # random explore
             action = env.action_space.sample()
@@ -82,7 +82,7 @@ def collect_suboptimal_data(env_name: str, env: BaseMiniGridEnv, num_eposides: i
     print("Collecting suboptimal data")
     random_action_prob = 0.7
     for i in tqdm.tqdm(range(num_eposides)):
-        obs, _ = env.reset()
+        obs, _ = env.reset(seed=i)
         goal_pos = env.goal_poses[np.random.choice(len(env.goal_poses))]  # select a random goal
         for j in range(max_steps):
             if np.random.rand() < random_action_prob:
@@ -137,6 +137,22 @@ def collect_suboptimal_data(env_name: str, env: BaseMiniGridEnv, num_eposides: i
         "truncateds": np.vstack(truncated_list).astype(np.float32),
     }
     return data
+
+
+    def collect_optimal_data(env_name: str, env: BaseMiniGridEnv, num_eposides: int, max_steps: int):
+        """Path planning for mini-grid"""
+        obs_list = []
+        next_obs_list = []
+        reward_list = []
+        action_list = []
+        terminated_list = []
+        truncated_list = []
+        print("Collecting optimal data")
+        mini_grid_type = env_name.split("-")[1].lower()
+        if mini_grid_type == "base":
+            for i in tqdm.tqdm(range(num_eposides)):
+                obs, _ = env.reset(seed=i)
+                path = env.optimal_path(env.agent_pos, env.goal_pos)
 
 
 if __name__ == "__main__":

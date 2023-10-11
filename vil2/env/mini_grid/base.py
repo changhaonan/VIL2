@@ -1,8 +1,9 @@
 from __future__ import annotations
-
 import numpy as np
+import heapq
 from minigrid.core.constants import COLOR_NAMES
 from minigrid.core.grid import Grid
+from minigrid.core.actions import Actions
 from minigrid.core.mission import MissionSpace
 from minigrid.core.world_object import Door, Goal, Key, Wall
 from minigrid.manual_control import ManualControl
@@ -49,9 +50,11 @@ class BaseMiniGridEnv(MiniGridEnv):
         # Generate the surrounding walls
         self.grid.wall_rect(0, 0, width, height)
 
-        # # Generate verical separation wall
-        # for i in range(0, height):
-        #     self.grid.set(5, i, Wall())
+        # Generate verical separation wall
+        for i in range(0, height):
+            if i == 5:
+                continue
+            self.grid.set(5, i, Wall())
         
         # # Place the door and key
         # self.grid.set(5, 6, Door(COLOR_NAMES[0], is_locked=True))
@@ -85,21 +88,109 @@ class BaseMiniGridEnv(MiniGridEnv):
         return obs_encode, reward, terminated, truncated, info
 
     def encode_obs(self, observation):
+        """Encode the observation into a vector"""
         image = observation["image"]
         direction = observation["direction"]
         # sinuoid encoding
         direction_encode = np.array([np.sin(direction/4.0), np.cos(direction/4.0), np.sin(2 * direction/4.0), np.cos(2 * direction/4.0)])
         encoded_obs = np.concatenate([image.flatten(), direction_encode], axis=0)
         return encoded_obs
+    
+    def optimal_path(self, agent_pos, goal_pos):
+        """Path planning for mini-grid using A* search algorithm."""
+        #TODO: currently don't consider door & key
+        def heuristic(a, b):
+            return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+        # Initialize variables
+        height, width = self.grid.height, self.grid.width
+        occupancy_map = np.ones((height, width))
+
+        # Build the occupancy map
+        for i in range(height):
+            for j in range(width):
+                if self.grid.get(i, j) is None or isinstance(self.grid.get(i, j), Goal):
+                    occupancy_map[i, j] = 0
+
+        # Priority queue for open set
+        open_set = [(0, agent_pos)]
+
+        # Data structures for A* algorithm
+        came_from = {}
+        g_score = {agent_pos: 0}
+        f_score = {agent_pos: heuristic(agent_pos, goal_pos)}
+
+        while open_set:
+            current = heapq.heappop(open_set)[1]
+            if current == goal_pos:
+                path = []
+                while current in came_from:
+                    path.append(current)
+                    current = came_from[current]
+                return path[::-1]
+
+            for (dx, dy) in [(0, 1), (1, 0), (0, -1), (-1, 0)]:  # Check all four neighbors
+                    neighbor = (current[0] + dx, current[1] + dy)
+
+                    if 0 <= neighbor[0] < height and 0 <= neighbor[1] < width and occupancy_map[neighbor[0], neighbor[1]] == 0:
+                        tentative_g_score = g_score[current] + 1
+
+                        if tentative_g_score < g_score.get(neighbor, float("inf")):
+                            came_from[neighbor] = current
+                            g_score[neighbor] = tentative_g_score
+                            f_score[neighbor] = tentative_g_score + heuristic(neighbor, goal_pos)
+                            heapq.heappush(open_set, (f_score[neighbor], neighbor))
+
+        return None  # Return None if no path is found
+
+    def get_action(self, next_pos):
+        """Get the corresponding action for the next position"""
+        agent_pos = self.agent_pos
+        agent_dir = self.agent_dir
+        next_type = self.grid.get(*next_pos)
+        if next_type is None or isinstance(next_type, Goal):
+            # next_type is a position or goal
+            diff = np.array(next_pos) - np.array(agent_pos)
+            # go up/down first
+            if diff[1] < 0:
+                if agent_dir == 3:
+                    action = Actions.forward
+                else:
+                    action = Actions.left 
+            elif diff[1] > 0:
+                if agent_dir == 1:
+                    action = Actions.forward
+                else:
+                    action = Actions.right
+            else:
+                # go left/right
+                if diff[0] > 0:
+                    if agent_dir == 0:
+                        action = Actions.forward
+                    else:
+                        action = Actions.left
+                elif diff[0] < 0:
+                    if agent_dir == 2:
+                        action = Actions.forward
+                    else:
+                        action = Actions.right
+                else:
+                    # done
+                    action = None
+        return action
 
 
 def main():
     env = BaseMiniGridEnv(render_mode="human")
+    env.reset()
+    path = env.optimal_path(agent_pos=(1, 1), goal_pos=(8, 8))
+    for next_pos in path:
+        while True:
+            action = env.get_action(next_pos)
+            if action is None:
+                break
+            obs, reward, terminated, truncated, info = env.step(action)
+            env.render()
 
-    # enable manual control for testing
-    manual_control = ManualControl(env, seed=42)
-    manual_control.start()
-
-    
 if __name__ == "__main__":
     main()
