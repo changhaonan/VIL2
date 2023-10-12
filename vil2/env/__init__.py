@@ -23,7 +23,8 @@ def env_data_collect(env, env_name, **kwargs):
     if env_name.split("-")[0].lower() == "minigrid":
         num_eposides = kwargs.pop("num_eposides", 1000)
         max_steps = kwargs.pop("max_steps", 100)
+        min_steps = kwargs.pop("min_steps", 5)
         strategies = kwargs.pop("strategies", ["navigate", "suboptimal"])
-        return collect_data_mini_grid(env_name=env_name, env=env, num_eposides=num_eposides, max_steps=max_steps, strategies=strategies)
+        return collect_data_mini_grid(env_name=env_name, env=env, num_eposides=num_eposides, max_steps=max_steps, min_steps=min_steps, strategies=strategies)
     else:
         raise ValueError(f"Unknown env_name: {env_name}")

@@ -7,75 +7,49 @@ import torch.nn as nn
 import numpy as np
 import vil2.utils.misc_utils as misc_utils
 from vil2.algo.model import QNetwork, VNetwork, PolicyNetwork
+from vil2.algo.offline_policy import OfflinePolicy
 import gymnasium as gym
 
 # constants
 EXP_ADV_MAX = 100.0
 
 
-class IQL:
+class IQL(OfflinePolicy):
     """Implicit Q learning method"""
     def __init__(self, env: gym.Env, dataset: dict, config: dict):
+        super().__init__(env=env, dataset=dataset, config=config)
         # parameters
         q_lr = config.get('q_lr', 1e-3)
         v_lr = config.get('v_lr', 1e-3)
-        weight_decay = config.get('weight_decay', 0.0)
         policy_lr = config.get('policy_lr', 1e-3)
-        policy_std = config.get('policy_std', 0.1)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.log_path = config.get('log_path', None)
-        # extract data from dataset
-        self.observations = torch.from_numpy(dataset['observations']).float().to(self.device)
-        self.next_observations = torch.from_numpy(dataset['next_observations']).float().to(self.device)
-        self.actions = torch.from_numpy(dataset['actions']).float().to(self.device)
-        self.rewards = torch.from_numpy(dataset['rewards']).float().to(self.device)
-        if len(self.rewards.shape) == 1:
-            self.rewards = self.rewards.unsqueeze(1)
-        self.terminals = torch.from_numpy(dataset['terminals']).float().to(self.device)
-        if len(self.terminals.shape) == 1:
-            self.terminals = self.terminals.unsqueeze(1)
-        
-        # init network
-        # observation
-        if len(self.observations.shape) == 4:
-            # image
-            self.observations = self.observations.reshape(self.observations.shape[0], -1)
-            self.next_observations = self.next_observations.reshape(self.next_observations.shape[0], -1)
-        state_dim = self.observations.shape[1]
-        # action
-        if isinstance(env.action_space, gym.spaces.Discrete):
-            self.action_discrete = True
-            action_dim = env.action_space.n
-            # one-hot encoding
-            self.actions = torch.zeros((self.actions.shape[0], action_dim), device=self.device).scatter_(1, self.actions.long(), 1).float()
-        else:
-            self.action_discrete = False
-            action_dim = self.actions.shape[1]
+        weight_decay = config.get('weight_decay', 0.0)
             
-        q_input_dim = state_dim + action_dim
-        v_input_dim = state_dim
-        policy_input_dim = state_dim
+        q_input_dim = self.state_dim + self.action_dim
+        v_input_dim = self.state_dim
+        policy_input_dim = self.state_dim
         q_output_dim = 1
         v_output_dim = 1
-        policy_output_dim = action_dim
+        policy_output_dim = self.action_dim
         q_hidden_dim = config['q_hidden_dim']
         v_hidden_dim = config['v_hidden_dim']
         policy_hidden_dim = config['policy_hidden_dim']
         policy_is_gaussian = True
+
+        # init network 
         self.qf1 = QNetwork(input_dim=q_input_dim, hidden_dim=q_hidden_dim, output_dim=q_output_dim)
         self.qf2 = QNetwork(input_dim=q_input_dim, hidden_dim=q_hidden_dim, output_dim=q_output_dim)
         self.target_qf1 = QNetwork(input_dim=q_input_dim, hidden_dim=q_hidden_dim, output_dim=q_output_dim)
         self.target_qf2 = QNetwork(input_dim=q_input_dim, hidden_dim=q_hidden_dim, output_dim=q_output_dim)
         self.vf = VNetwork(input_dim=v_input_dim, hidden_dim=v_hidden_dim, output_dim=v_output_dim)
         self.policy = PolicyNetwork(input_dim=policy_input_dim, hidden_dim=policy_hidden_dim, output_dim=policy_output_dim, is_gaussian=policy_is_gaussian)
-        self.policy_std = policy_std
-        # init network 
+        
         self.qf1.to(self.device)
         self.qf2.to(self.device)
         self.target_qf1.to(self.device)
         self.target_qf2.to(self.device)
         self.vf.to(self.device)
         self.policy.to(self.device)
+
         # init optimizer
         self.qf1_optimizer = torch.optim.Adam(self.qf1.parameters(), lr=q_lr, weight_decay=weight_decay)
         self.qf2_optimizer = torch.optim.Adam(self.qf2.parameters(), lr=q_lr, weight_decay=weight_decay)
@@ -92,7 +66,6 @@ class IQL:
     def train(self, env, batch_size: int, num_epochs: int, eval_period: int, alpha: float = 0.01, tau: float = 0.6, gamma: float = 0.99, beta: float = 3.0, update_action: bool = False):
         """Train IQL"""
         # train
-        print("Start training Q & V...")
         v_loss_sum = 0.0
         q_loss_sum = 0.0
         q_update_freq = 1
@@ -149,10 +122,10 @@ class IQL:
             # eval
             v_loss_sum += vf_loss.detach().cpu().numpy()
             q_loss_sum += (qf1_loss.detach().cpu().numpy() + qf2_loss.detach().cpu().numpy()) / 2.0
-            print(f"Epoch: {epoch}, V Loss: {v_loss_sum / eval_period}, Q Loss: {q_loss_sum / eval_period}")
+            # print(f"Epoch: {epoch}, V Loss: {v_loss_sum / eval_period}, Q Loss: {q_loss_sum / eval_period}")
             if epoch % eval_period == 0:
                 if update_action:
-                    self.evaluate(env=env, num_epochs=10, epoch=epoch, enable_render=True)
+                    self.evaluate(env=env, num_epochs=10, epoch=epoch, enable_render=self.render_eval)
                 # statics
                 v_loss_sum = 0.0
                 q_loss_sum = 0.0
@@ -163,7 +136,6 @@ class IQL:
 
     def extract_policy(self, batch_size: int = 256, num_epochs: int = 1000, beta: float = 3.0):
         """Extract policy from V & Q network"""
-        print("Start extracting policy...")
         for epoch in range(num_epochs):
             # sample a batch of data
             batch_idx = torch.randint(low=0, high=self.observations.shape[0], size=(batch_size,), device=self.device)
@@ -212,7 +184,10 @@ class IQL:
             action_mean = self.policy(observations)
             actoin_prob = nn.functional.softmax(action_mean, dim=-1)
             # sample action
-            action = torch.multinomial(actoin_prob, num_samples=1)
+            if self.action_deterministic:
+                action = actoin_prob.argmax(dim=-1)
+            else:
+                action = torch.multinomial(actoin_prob, num_samples=1)
         else:
             if self.policy.is_gaussian:
                 with torch.no_grad():
@@ -271,6 +246,8 @@ class IQL:
                 reward_epoch += reward
                 step_epoch += 1
                 if terminated or truncated:
+                    if i == 0:
+                        print(f"========== Epoch: {epoch} ==========")
                     print(f"Episode: {i}, Reward: {reward}, Step: {step_epoch}")
                     break
             # log
