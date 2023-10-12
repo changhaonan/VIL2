@@ -68,3 +68,45 @@ class OfflinePolicy:
             self.action_range = torch.tensor([env.action_space.low, env.action_space.high], device=self.device).transpose(0, 1)
             # scale to [-1, 1]
             self.actions = (self.actions - self.action_range[:, 0]) / (self.action_range[:, 1] - self.action_range[:, 0]) * 2 - 1
+    
+    def predict(self, observations):
+        raise NotImplementedError
+
+    def evaluate(self, env, num_epochs: int, epoch: int, enable_render: bool = False):
+        """Evaluate the policy on env; log the result"""
+        epoch_dir = os.path.join(self.log_path, f"epoch-{epoch}")
+        os.makedirs(epoch_dir, exist_ok=True)
+        step_sum = 0.0
+        reward_sum = 0.0
+        for i in range(num_epochs):
+            obs, _ = env.reset(seed=i)
+            step_epoch = 0
+            reward_epoch = 0.0
+            while True:
+                if enable_render:
+                    image = env.render()
+                    if self.log_path is not None:
+                        cv2.imwrite(os.path.join(epoch_dir, f"i-{i}-step-{step_epoch}.png"), image)
+                if "image" in obs:
+                    obs = obs["image"]
+                action = self.predict(obs)
+                action = action[:self.action_dim]  # use the first action
+                obs, reward, terminated, truncated, info = env.step(action)
+                reward_epoch += reward
+                step_epoch += 1
+                if terminated or truncated:
+                    if i == 0:
+                        print(f"========== Epoch: {epoch} ==========")
+                    print(f"Episode: {i}, Reward: {reward}, Step: {step_epoch}")
+                    break
+            # log
+            step_sum += step_epoch
+            reward_sum += reward_epoch
+            if self.log_path is not None:
+                with open(os.path.join(self.log_path, "eval.txt"), "a") as f:
+                    if i == 0:
+                        f.write(f"========== Epoch: {epoch} ==========\n")
+                    f.write(f"seed: {i}, reward: {reward_epoch}, step: {step_epoch}\n")
+                    if i == num_epochs - 1:
+                        f.write(f"-------- Average: --------\n")
+                        f.write(f"reward: {reward_sum / num_epochs}, step: {step_sum / num_epochs}\n")

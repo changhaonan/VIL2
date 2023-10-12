@@ -91,7 +91,7 @@ class DF(OfflinePolicy):
 
         return loss.item()
 
-    def predict(self, observations):
+    def predict(self, observations, sampling_strategy: str = "ddpm"):
         """Predict using ddpm sampling"""
         observations = torch.from_numpy(observations).float().to(self.device)
         if len(observations.shape) == 1:
@@ -99,18 +99,19 @@ class DF(OfflinePolicy):
         self.noise_model.eval()
         with torch.no_grad():
             horizon_actions = torch.randn([observations.shape[0], self.horizon * self.action_dim], device=self.device)
-            for t in range(self.num_timesteps - 1, 0, -1):
-                t_tensor = torch.ones([observations.shape[0], 1], device=self.device) * t
-                # gradually remove noise
-                noise_pred = self.noise_model(horizon_actions, observations, t_tensor)
-                horizon_actions = self.noise_scheduler.step(noise_pred, t, horizon_actions)
-            # use the first action
-            action = horizon_actions[:, :self.action_dim]
+            if sampling_strategy == "ddpm":
+                for t in range(self.num_timesteps - 1, 0, -1):
+                    t_tensor = torch.ones([observations.shape[0], 1], device=self.device) * t
+                    # gradually remove noise
+                    noise_pred = self.noise_model(horizon_actions, observations, t_tensor)
+                    horizon_actions = self.noise_scheduler.step(noise_pred, t, horizon_actions)
+            else:
+                raise ValueError(f"Unknown sampling strategy: {sampling_strategy}")
             # clip and rescale
             if self.action_range is not None:
-                action = torch.clamp(action, -1, 1)
-                action = (action + 1) / 2 * (self.action_range[:, 1] - self.action_range[:, 0]) + self.action_range[:, 0]
-            return action.detach().cpu().numpy()
+                horizon_actions = torch.clamp(horizon_actions, -1, 1)
+                horizon_actions = (horizon_actions + 1) / 2 * (self.action_range[:, 1] - self.action_range[:, 0]) + self.action_range[:, 0]
+            return horizon_actions.detach().cpu().numpy().squeeze(0)
     
     def save(self, path: str):
         """Save model"""
@@ -125,40 +126,6 @@ class DF(OfflinePolicy):
         self.noise_model.load_state_dict(checkpoint['noise_model'])
         print(f"Load model from {path}")
 
-    def evaluate(self, env, num_epochs: int, epoch: int, enable_render: bool = False):
-        # eval on env
-        epoch_dir = os.path.join(self.log_path, f"epoch-{epoch}")
-        os.makedirs(epoch_dir, exist_ok=True)
-        step_sum = 0.0
-        reward_sum = 0.0
-        for i in range(num_epochs):
-            obs, _ = env.reset(seed=i)
-            step_epoch = 0
-            reward_epoch = 0.0
-            while True:
-                if enable_render:
-                    image = env.render()
-                    if self.log_path is not None:
-                        cv2.imwrite(os.path.join(epoch_dir, f"i-{i}-step-{step_epoch}.png"), image)
-                if "image" in obs:
-                    obs = obs["image"]
-                action = self.predict(obs)
-                obs, reward, terminated, truncated, info = env.step(action)
-                reward_epoch += reward
-                step_epoch += 1
-                if terminated or truncated:
-                    if i == 0:
-                        print(f"========== Epoch: {epoch} ==========")
-                    print(f"Episode: {i}, Reward: {reward}, Step: {step_epoch}")
-                    break
-            # log
-            step_sum += step_epoch
-            reward_sum += reward_epoch
-            if self.log_path is not None:
-                with open(os.path.join(self.log_path, "eval.txt"), "a") as f:
-                    if i == 0:
-                        f.write(f"========== Epoch: {epoch} ==========\n")
-                    f.write(f"seed: {i}, reward: {reward_epoch}, step: {step_epoch}\n")
-                    if i == num_epochs - 1:
-                        f.write(f"-------- Average: --------\n")
-                        f.write(f"reward: {reward_sum / num_epochs}, step: {step_sum / num_epochs}\n")
+    def visualize_diffusion(self, observations, actions, sampling_strategy: str = "ddpm"):
+        """Visualize the diffusion training result"""
+        pred_actions = self.predict(observations, sampling_strategy=sampling_strategy)
