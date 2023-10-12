@@ -47,11 +47,24 @@ class OfflinePolicy:
             self.next_observations = self.next_observations.reshape(self.next_observations.shape[0], -1)
         self.state_dim = self.observations.shape[1]
         # action
+        force_action_continuous = config.get('force_action_continuous', False)
         if isinstance(env.action_space, gym.spaces.Discrete):
-            self.action_discrete = True
-            self.action_dim = env.action_space.n
-            # one-hot encoding
-            self.actions = torch.zeros((self.actions.shape[0], self.action_dim), device=self.device).scatter_(1, self.actions.long(), 1).float()
+            if not force_action_continuous:
+                self.action_discrete = True
+                self.action_dim = env.action_space.n
+                # one-hot encoding
+                self.actions = torch.zeros((self.actions.shape[0], self.action_dim), device=self.device).scatter_(1, self.actions.long(), 1).float()
+                self.action_range = None
+            else:
+                # discrete action space, but force to use continuous action
+                self.action_discrete = False
+                self.action_dim = 1
+                self.action_range = torch.tensor([0, env.action_space.n - 1], device=self.device).unsqueeze(0)
+                # scale to [-1, 1]
+                self.actions = (self.actions - self.action_range[:, 0]) / (self.action_range[:, 1] - self.action_range[:, 0]) * 2 - 1
         else:
             self.action_discrete = False
             self.action_dim = self.actions.shape[1]
+            self.action_range = torch.tensor([env.action_space.low, env.action_space.high], device=self.device).transpose(0, 1)
+            # scale to [-1, 1]
+            self.actions = (self.actions - self.action_range[:, 0]) / (self.action_range[:, 1] - self.action_range[:, 0]) * 2 - 1

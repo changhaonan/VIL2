@@ -2,6 +2,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from vil2.algo.model_utils import PositionalEmbedding
 
 
 # Utils
@@ -99,37 +100,47 @@ class PolicyNetwork(nn.Module):
         return x
 
 
+class Block(nn.Module):
+    def __init__(self, size: int):
+        super().__init__()
+
+        self.ff = nn.Linear(size, size)
+        self.act = nn.GELU()
+
+    def forward(self, x: torch.Tensor):
+        return x + self.act(self.ff(x))
+
+
 class NoiseNetwork(nn.Module):
     """Diffusion noise network; naive version"""
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
+    def __init__(self, input_size: int, condition_size: int,  hidden_size: int = 128, hidden_layers: int = 3, emb_size: int = 128, time_emb: str = "learnable", input_emb: str = "learnable"):
         super(NoiseNetwork, self).__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.output_dim = output_dim
+        self.time_mlp = PositionalEmbedding(1, emb_size, time_emb)
+        self.input_mlp = PositionalEmbedding(input_size, emb_size, input_emb)
+        self.condition_mlp = PositionalEmbedding(condition_size, emb_size, input_emb)
 
-        
-        # build network
-        self.fc1 = nn.Linear(self.input_dim, self.hidden_dim)
-        self.fc2 = nn.Linear(self.hidden_dim, self.hidden_dim)
-        self.fc3 = nn.Linear(self.hidden_dim, self.output_dim)
+        concat_size = len(self.time_mlp.layer) + \
+            len(self.input_mlp.layer) + len(self.condition_mlp.layer)
+        layers = [nn.Linear(concat_size, hidden_size), nn.GELU()]
+        for _ in range(hidden_layers):
+            layers.append(Block(hidden_size))
+        layers.append(nn.Linear(hidden_size, input_size))
+        self.joint_mlp = nn.Sequential(*layers)
 
-        # activation
-        self.activation = nn.ReLU()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.fc1(x)
-        x = self.activation(x)
-        x = self.fc2(x)
-        x = self.activation(x)
-        x = self.fc3(x)
-
+    def forward(self, x: torch.Tensor, c: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        """x being input, c being condition, t being timestep"""
+        x_emb = self.input_mlp(x)
+        c_emb = self.condition_mlp(c)
+        t_emb = self.time_mlp(t)
+        x = torch.cat([x_emb, c_emb, t_emb], dim=-1)
+        x = self.joint_mlp(x)
         return x
 
 
-class DiffusionModel(nn.Module):
+class NoiseScheduler(nn.Module):
     """Diffusion model"""
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, num_timesteps: int, beta_start: float, beta_end: float):
-        super(DiffusionModel, self).__init__()
+    def __init__(self, num_timesteps: int, beta_start: float, beta_end: float):
+        super(NoiseScheduler, self).__init__()
         # constants
         betas = noise_scheduler(
             num_timesteps=num_timesteps,
@@ -157,9 +168,7 @@ class DiffusionModel(nn.Module):
         self.register_buffer("sqrt_inv_alphas_cumprod_minus_one", sqrt_inv_alphas_cumprod_minus_one)
         self.register_buffer("posterior_mean_coef1", posterior_mean_coef1)
         self.register_buffer("posterior_mean_coef2", posterior_mean_coef2)
-
-        # noise model
-        self.noise_model = NoiseNetwork(input_dim=input_dim, hidden_dim=hidden_dim, output_dim=output_dim)
+        
 
     def reconstruct_x0(self, x_t, t, noise):
         s1 = self.sqrt_inv_alphas_cumprod[t]

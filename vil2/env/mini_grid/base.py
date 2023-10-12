@@ -82,6 +82,8 @@ class BaseMiniGridEnv(MiniGridEnv):
 
     def step(self, action):
         """Override the step function to encode the observation"""
+        # process action
+        action = np.rint(action.squeeze())
         obs, reward, terminated, truncated, info = super().step(action)
         # encode observation
         obs_encode = self.encode_obs(obs)
