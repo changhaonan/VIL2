@@ -59,11 +59,11 @@ class BaseMiniGridEnv(MiniGridEnv):
             self.grid.set(7, i, Wall())
         
         # # Place the door and key
-        # self.grid.set(5, 5, Door(COLOR_NAMES[0], is_locked=True))
+        self.grid.set(5, 5, Door(COLOR_NAMES[0], is_locked=True))
         self.grid.set(3, 5, Door(COLOR_NAMES[1], is_locked=True))
         self.grid.set(7, 5, Door(COLOR_NAMES[1], is_locked=True))
         self.grid.set(2, 6, Key(COLOR_NAMES[1]))
-        # self.grid.set(4, 6, Key(COLOR_NAMES[0]))
+        self.grid.set(4, 6, Key(COLOR_NAMES[0]))
 
         # Place a goal square in the bottom-right corner
         self.put_obj(Goal(), width - 2, height - 2)
@@ -192,6 +192,77 @@ class BaseMiniGridEnv(MiniGridEnv):
                             heapq.heappush(open_set, (f_score[neighbor], neighbor))
 
         return None  # Return None if no path is found
+    
+    def optimal_action_trajectory(self, start_pos, goal_pos):
+        prev_render_mode = self.render_mode
+        self.render_mode = "none"
+        action_trajectory = []
+        def execute_action(action):
+            self.step(action)
+            action_trajectory.append(action)
+        occupancy_map, key_info = self.generate_occupancy_map()
+        
+        # Assume all doors are open and find doors on the way
+        doors_to_goal, path = self.compute_doors_to_goal(start_pos, goal_pos, occupancy_map)
+        
+        # For each door on the way, we need to go to it's key and then the door. finally to the goal itself
+        minigoals = []
+        for door in doors_to_goal:
+            minigoals.append({
+                "type" : "key",
+                "color" : door[0],
+            })
+            minigoals.append({
+                "type" : "door",
+                "color" : door[0],
+                "location" : door[1]
+            })
+        minigoals.append({
+            "type" : "goal",
+            "location" : goal_pos
+        })
+
+        for goal_index, goal in enumerate(minigoals):
+            target_pos = goal["location"] if goal["type"] !="key" else key_info[goal["color"]]
+            path = self.modular_a_star(agent_pos=self.agent_pos, goal_pos=target_pos, occupancy_map=occupancy_map)
+            # navigate upto the goal
+            for next_pos in path:
+                while True:
+                    action = self.get_action(next_pos)
+                    if next_pos == path[-1] and action == Actions.forward and goal["type"] != "goal":
+                        break
+                    if action is None:
+                        break
+                    execute_action(action)
+            # We are facing the goal now
+            if goal["type"] == "key":
+                action = Actions.pickup
+                execute_action(action)
+            elif goal["type"] == "door":
+                action = Actions.toggle
+                execute_action(action)
+                if minigoals[goal_index+1]["type"] == "key" and minigoals[goal_index+1]["color"] != goal["color"]:                    
+                    # drop key around the agent location
+                    drop_loc = None
+                    for (dx, dy) in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+                        pos = (self.agent_pos[0] + dx, self.agent_pos[1] + dy)
+                        if pos == path[-1]:
+                            continue
+                        item = self.grid.get(*pos)
+                        if item is None or item.can_contain():
+                            drop_loc = pos
+                            break
+                    while True:
+                        action = self.get_action(drop_loc)
+                        if action == Actions.forward:
+                            execute_action(Actions.drop)
+                            key_info[goal["color"]] = drop_loc
+                            break
+                        execute_action(action)
+        self.reset()
+        self.render_mode = prev_render_mode
+        return action_trajectory
+
 
     def get_action(self, next_pos):
         """Get the corresponding action for the next position"""
@@ -233,74 +304,15 @@ class BaseMiniGridEnv(MiniGridEnv):
 
 
 def main():
-    env = BaseMiniGridEnv(render_mode="human",)
+    env = BaseMiniGridEnv(render_mode="human")
     env.reset()
 
     start_pos = (1,1)
     goal_pos = (8,8)
 
-    occupancy_map, key_info = env.generate_occupancy_map()
-    
-    # Assume all doors are open and find doors on the way
-    doors_to_goal, path = env.compute_doors_to_goal(start_pos, goal_pos, occupancy_map)
-    
-    # For each door on the way, we need to go to it's key and then the door. finally to the goal itself
-    minigoals = []
-    for door in doors_to_goal:
-        minigoals.append({
-            "type" : "key",
-            "color" : door[0],
-        })
-        minigoals.append({
-            "type" : "door",
-            "color" : door[0],
-            "location" : door[1]
-        })
-    minigoals.append({
-        "type" : "goal",
-        "location" : goal_pos
-    })
-
-    for goal_index, goal in enumerate(minigoals):
-        target_pos = goal["location"] if goal["type"] !="key" else key_info[goal["color"]]
-        print("Targetting a {} at {} of color {}".format(goal["type"], target_pos, goal.get("color","NA") ))
-        path = env.modular_a_star(agent_pos=env.agent_pos, goal_pos=target_pos, occupancy_map=occupancy_map)
-        # navigate upto the goal
-        for next_pos in path:
-            while True:
-                action = env.get_action(next_pos)
-                if next_pos == path[-1] and action == Actions.forward and goal["type"] != "goal":
-                    break
-                if action is None:
-                    break
-                obs, reward, terminated, truncated, info = env.step(action)
-                env.render()
-        # We are facing the goal now
-        if goal["type"] == "key":
-            action = Actions.pickup
-            obs, reward, terminated, truncated, info = env.step(action)
-        elif goal["type"] == "door":
-            action = Actions.toggle
-            obs, reward, terminated, truncated, info = env.step(action)
-            if minigoals[goal_index+1]["type"] == "key" and minigoals[goal_index+1]["color"] != goal["color"]:                    
-                # drop key around the agent location
-                drop_loc = None
-                for (dx, dy) in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-                    pos = (env.agent_pos[0] + dx, env.agent_pos[1] + dy)
-                    if pos == path[-1]:
-                        continue
-                    item = env.grid.get(*pos)
-                    if item is None or item.can_contain():
-                        drop_loc = pos
-                        break
-                while True:
-                    action = env.get_action(drop_loc)
-                    if action == Actions.forward:
-                        obs, reward, terminated, truncated, info = env.step(Actions.drop)
-                        key_info[goal["color"]] = drop_loc
-                        break
-                    obs, reward, terminated, truncated, info = env.step(action)
-
+    action_trajectory = env.optimal_action_trajectory(start_pos, goal_pos)
+    for action in action_trajectory:
+        obs, reward, terminated, truncated, info = env.step(action)
 
     
 
