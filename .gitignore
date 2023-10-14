@@ -12,3 +12,5 @@ checkpoint/*
 *.TXT
 
 *.npz
+
+.vscode/
