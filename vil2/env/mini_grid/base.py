@@ -88,7 +88,9 @@ class BaseMiniGridEnv(MiniGridEnv):
     def step(self, action):
         """Override the step function to encode the observation"""
         # process action
-        action = np.rint(action.squeeze())
+        if isinstance(action, np.ndarray):
+            action = np.rint(action.squeeze()).astype(int)
+        
         obs, reward, terminated, truncated, info = super().step(action)
         # encode observation
         obs_encode = self.encode_obs(obs)
@@ -193,7 +195,8 @@ class BaseMiniGridEnv(MiniGridEnv):
 
         return None  # Return None if no path is found
     
-    def optimal_action_trajectory(self, start_pos, goal_pos):
+    def optimal_action_trajectory(self, start_pos, goal_pos, random_action_prob=0.0):
+        """Find the optimal action trajectory to reach the goal from start position"""
         prev_render_mode = self.render_mode
         self.render_mode = "none"
         action_trajectory = []

@@ -109,29 +109,25 @@ def collect_suboptimal_data(env_name: str, env: BaseMiniGridEnv, num_eposides: i
         for i in tqdm.tqdm(range(num_eposides)):
             obs, _ = env.reset(seed=i)
             goal_pose = env.goal_poses[np.random.choice(len(env.goal_poses))]  # select a random goal
-            path = env.optimal_path(env.agent_pos, goal_pose)
+            action_trajectory = env.optimal_action_trajectory(env.agent_pos, goal_pose, random_action_prob=random_action_prob)
             epoch_size = 0
-            for next_pos in path:
-                while True:
-                    action = env.get_action(next_pos)
-                    if action is None:
-                        break
-                    if np.random.rand() < random_action_prob:
-                        action = env.action_space.sample()
-                    # collect data
-                    obs_list.append(obs[None, :])
-                    # step
-                    obs, reward, terminated, truncated, info = env.step(action)
-                    # collect data
-                    next_obs_list.append(obs[None, :])
-                    reward_list.append(reward)
-                    action_list.append(action)
-                    terminated_list.append(terminated)
-                    truncated_list.append(truncated)
-                    epoch_id_list.append(i)
-                    epoch_size += 1
-                    if terminated or truncated:
-                        break
+            for action in action_trajectory:
+                if action is None:
+                    break
+                # collect data
+                obs_list.append(obs[None, :])
+                # step
+                obs, reward, terminated, truncated, info = env.step(action)
+                # collect data
+                next_obs_list.append(obs[None, :])
+                reward_list.append(reward)
+                action_list.append(action)
+                terminated_list.append(terminated)
+                truncated_list.append(truncated)
+                epoch_id_list.append(i)
+                epoch_size += 1
+                if terminated or truncated:
+                    break
             # if size is too small, pad with PAD_VALUE
             if epoch_size < min_steps:
                 for j in range(min_steps - epoch_size):
@@ -160,6 +156,6 @@ def collect_suboptimal_data(env_name: str, env: BaseMiniGridEnv, num_eposides: i
 
 
 if __name__ == "__main__":
-    env = MultiModalityMiniGridEnv(agent_start_pos=None, render_mode="human")
+    env = BaseMiniGridEnv(agent_start_pos=None, render_mode="human")
     random_action_prob = 0.0
-    collect_data_mini_grid(env_name="MiniGrid-MM", env=env, num_eposides=1000, max_steps=100, strategies=["suboptimal"], random_action_prob=random_action_prob)
+    collect_data_mini_grid(env_name="MiniGrid-MM", env=env, num_eposides=1000, max_steps=100, min_steps=5, strategies=["suboptimal"], random_action_prob=random_action_prob)
