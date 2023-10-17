@@ -8,7 +8,7 @@ from minigrid.core.mission import MissionSpace
 from minigrid.core.world_object import Door, Goal, Key, Wall
 from minigrid.manual_control import ManualControl
 from minigrid.minigrid_env import MiniGridEnv
-
+import warnings
 
 class BaseMiniGridEnv(MiniGridEnv):
     def __init__(
@@ -62,8 +62,6 @@ class BaseMiniGridEnv(MiniGridEnv):
         self.grid.set(5, 5, Door(COLOR_NAMES[0], is_locked=True))
         self.grid.set(3, 5, Door(COLOR_NAMES[1], is_locked=True))
         self.grid.set(7, 5, Door(COLOR_NAMES[1], is_locked=True))
-        self.grid.set(2, 6, Key(COLOR_NAMES[1]))
-        self.grid.set(4, 6, Key(COLOR_NAMES[0]))
 
         # Place a goal square in the bottom-right corner
         self.put_obj(Goal(), width - 2, height - 2)
@@ -207,6 +205,9 @@ class BaseMiniGridEnv(MiniGridEnv):
         
         # Assume all doors are open and find doors on the way
         doors_to_goal, path = self.compute_doors_to_goal(start_pos, goal_pos, occupancy_map)
+        if path is None:
+            warnings.warn("Cannot Solve this maze! Returning empty trajectory!")
+            return []
         
         # For each door on the way, we need to go to it's key and then the door. finally to the goal itself
         minigoals = []
@@ -226,8 +227,14 @@ class BaseMiniGridEnv(MiniGridEnv):
         })
 
         for goal_index, goal in enumerate(minigoals):
+            if goal["type"] == "key" and goal["color"] not in key_info:
+                warnings.warn("Not enough keys to solve this grid! Returning empty trajectory.")
+                return []
             target_pos = goal["location"] if goal["type"] !="key" else key_info[goal["color"]]
             path = self.modular_a_star(agent_pos=self.agent_pos, goal_pos=target_pos, occupancy_map=occupancy_map)
+            if path is None:
+                warnings.warn("Cannot Solve this maze! Returning empty trajectory!")
+                return []
             # navigate upto the goal
             for next_pos in path:
                 while True:
