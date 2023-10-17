@@ -8,7 +8,9 @@ from minigrid.core.mission import MissionSpace
 from minigrid.core.world_object import Door, Goal, Key, Wall
 from minigrid.manual_control import ManualControl
 from minigrid.minigrid_env import MiniGridEnv
+import warnings
 
+import random
 
 class BaseMiniGridEnv(MiniGridEnv):
     def __init__(
@@ -207,10 +209,16 @@ class BaseMiniGridEnv(MiniGridEnv):
         
         # Assume all doors are open and find doors on the way
         doors_to_goal, path = self.compute_doors_to_goal(start_pos, goal_pos, occupancy_map)
+        if path is None:
+            warnings.warn("Cannot Solve this maze! Returning empty trajectory!")
+            return []
         
         # For each door on the way, we need to go to it's key and then the door. finally to the goal itself
         minigoals = []
         for door in doors_to_goal:
+            if door[0] not in key_info:
+                warnings.warn("Not enough keys to solve this grid! Returning empty trajectory.")
+                return []
             minigoals.append({
                 "type" : "key",
                 "color" : door[0],
@@ -224,15 +232,46 @@ class BaseMiniGridEnv(MiniGridEnv):
             "type" : "goal",
             "location" : goal_pos
         })
-
+        
+        def not_reached_target(goal):
+            return (goal["type"]=="goal" and self.agent_pos != target_pos) or (goal["type"]!="goal" and np.sum(np.abs(np.array(target_pos) - np.array(self.agent_pos)))>1)    
+        
         for goal_index, goal in enumerate(minigoals):
             target_pos = goal["location"] if goal["type"] !="key" else key_info[goal["color"]]
-            path = self.modular_a_star(agent_pos=self.agent_pos, goal_pos=target_pos, occupancy_map=occupancy_map)
-            # navigate upto the goal
-            for next_pos in path:
+
+            while not_reached_target(goal):
+                path = self.modular_a_star(agent_pos=self.agent_pos, goal_pos=target_pos, occupancy_map=occupancy_map)
+                if path is None:
+                    warnings.warn("Cannot Solve this maze! Returning empty trajectory!")
+                    return []
+                # navigate upto the goal
+                for next_pos in path:
+                    random_action = False
+                    while True:
+                        p = random.random()
+                        if p < random_action_prob:
+                            # take random action
+                            dx, dy = random.choice([(0, 1), (1, 0), (0, -1), (-1, 0)])
+                            pos = (self.agent_pos[0] + dx, self.agent_pos[1] + dy)
+                            action = self.get_action(pos)
+                            if action is not None:
+                                execute_action(action)
+                            random_action = True
+                            break
+                        else:
+                            action = self.get_action(next_pos)
+                            if next_pos == path[-1] and action == Actions.forward and goal["type"] != "goal":
+                                break
+                            if action is None:
+                                break
+                            execute_action(action)
+                    if random_action:
+                        break
+            
+            if goal["type"]!="goal":
                 while True:
-                    action = self.get_action(next_pos)
-                    if next_pos == path[-1] and action == Actions.forward and goal["type"] != "goal":
+                    action = self.get_action(target_pos)
+                    if action == Actions.forward:
                         break
                     if action is None:
                         break
@@ -272,7 +311,7 @@ class BaseMiniGridEnv(MiniGridEnv):
         agent_pos = self.agent_pos
         agent_dir = self.agent_dir
         next_type = self.grid.get(*next_pos)
-        
+        action = None
         if not isinstance(next_type, Wall):
             # next_type is a position or goal
             diff = np.array(next_pos) - np.array(agent_pos)
@@ -313,7 +352,7 @@ def main():
     start_pos = (1,1)
     goal_pos = (8,8)
 
-    action_trajectory = env.optimal_action_trajectory(start_pos, goal_pos)
+    action_trajectory = env.optimal_action_trajectory(start_pos, goal_pos, 0.1)
     for action in action_trajectory:
         obs, reward, terminated, truncated, info = env.step(action)
 
