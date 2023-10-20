@@ -2,10 +2,14 @@
 import os
 import torch
 import gdown
+import numpy as np
+import collections
+from tqdm.auto import tqdm
 from vil2.env import env_builder
 from vil2.model.df_model import DFModel
-from vil2.model.net_factory import build_vision_encoder, build_noise_net
-from vil2.data.dataset import DFImageDataset
+from vil2.model.net_factory import build_vision_encoder, build_noise_pred_net
+from vil2.data.dataset import DFImageDataset, normalize_data, unnormalize_data
+import vil2.utils.misc_utils as utils
 from detectron2.config import LazyConfig, instantiate
 
 
@@ -21,9 +25,9 @@ if __name__ == "__main__":
     cfg = LazyConfig.load(cfg_file)
 
     vision_encoder = build_vision_encoder(cfg.MODEL.VISION_ENCODER.NAME)
-    noise_net = build_noise_net(cfg.MODEL.NOISE_NET.NAME, **cfg.MODEL.NOISE_NET.INIT_ARGS)
+    noise_pred_net = build_noise_pred_net(cfg.MODEL.NOISE_NET.NAME, **cfg.MODEL.NOISE_NET.INIT_ARGS)
 
-    df_model = DFModel(cfg, vision_encoder=vision_encoder, noise_net=noise_net)
+    df_model = DFModel(cfg, vision_encoder=vision_encoder, noise_pred_net=noise_pred_net)
 
     # load dataset
     # download demonstration data from Google Drive
@@ -48,4 +52,71 @@ if __name__ == "__main__":
         pin_memory=True,
         persistent_workers=True,
     )
-    df_model.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
+    # df_model.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
+
+    # load pre-trained
+    load_pretrained = True
+    if load_pretrained:
+        ckpt_path = "pusht_vision_100ep.ckpt"
+        if not os.path.isfile(ckpt_path):
+            id = "1XKpfNSlwYMGaF5CncoFaLKCDTWoLAHf1&confirm=t"
+            gdown.download(id=id, output=ckpt_path, quiet=False)
+
+        state_dict = torch.load(ckpt_path, map_location=df_model.device)
+        df_model.nets.load_state_dict(state_dict)
+        print("Pretrained weights loaded.")
+    else:
+        print("Skipped pretrained weight loading.")
+
+    ################### Start Inference ###################
+    # limit enviornment interaction to 200 steps before termination
+    max_steps = 200
+    # use a seed > 200 to avoid initial states seen in the training dataset
+    env.seed(100000)
+
+    # get first observation
+    obs = env.reset()
+
+    # keep a queue of last 2 steps of observations
+    obs_deque = collections.deque([obs] * cfg.MODEL.OBS_HORIZON, maxlen=cfg.MODEL.OBS_HORIZON)
+    # save visualization and rewards
+    imgs = [env.render(mode="rgb_array")]
+    rewards = list()
+    done = False
+    step_idx = 0
+
+    #
+    with tqdm(total=max_steps, desc="Eval PushTImageEnv") as pbar:
+        while not done:
+            # infer action
+            with torch.no_grad():
+                action_pred = df_model.inference(obs_deque=obs_deque, stats=stats)
+                # pred pred_length, execute action_length
+                # only take action_horizon number of actions
+                start = cfg.MODEL.OBS_HORIZON - 1
+                end = start + cfg.MODEL.ACTION_HORIZON
+                action = action_pred[start:end, :]
+                # (action_horizon, action_dim)
+
+                # execute action_horizon number of steps without replanning
+                for i in range(len(action)):
+                    # stepping env
+                    obs, reward, done, info = env.step(action[i])
+                    # save observations
+                    obs_deque.append(obs)
+                    # and reward/vis
+                    rewards.append(reward)
+                    imgs.append(env.render(mode='rgb_array'))
+
+                    # update progress bar
+                    step_idx += 1
+                    pbar.update(1)
+                    pbar.set_postfix(reward=reward)
+                    if step_idx > max_steps:
+                        done = True
+                    if done:
+                        break
+
+    # print out the maximum target coverage
+    print('Score: ', max(rewards))
+    video = utils.generate_video(imgs, "pusht.mp4")

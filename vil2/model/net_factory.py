@@ -12,7 +12,7 @@ def build_vision_encoder(name: str, **kwargs):
         raise NotImplementedError(f"Unknown vision encoder: {name}")
 
 
-def build_noise_net(name: str, **kwargs):
+def build_noise_pred_net(name: str, **kwargs):
     if name.startswith("UNET1D"):
         return ConditionalUnet1D(**kwargs)
     else:

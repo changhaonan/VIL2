@@ -50,6 +50,7 @@ MODEL = dict(
     PRED_HORIZON=16,
     OBS_HORIZON=2,
     ACTION_HORIZON=8,
+    ACTION_DIM=2,
 )
 
 TRAIN=dict(

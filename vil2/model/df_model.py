@@ -15,7 +15,7 @@ from vil2.data.dataset import normalize_data, unnormalize_data
 class DFModel:
     """Diffusion policy Model"""
 
-    def __init__(self, cfg, vision_encoder, noise_net):
+    def __init__(self, cfg, vision_encoder, noise_pred_net):
         self.cfg = cfg
         # check cuda and mps
         # if torch.cuda.is_available():
@@ -27,6 +27,8 @@ class DFModel:
         self.device = "cpu"
         self.obs_horizon = cfg.MODEL.OBS_HORIZON
         self.action_horizon = cfg.MODEL.ACTION_HORIZON
+        self.pred_horizon = cfg.MODEL.PRED_HORIZON
+        self.action_dim = cfg.MODEL.ACTION_DIM
         # vision encoder
         self.vision_encoder = vision_encoder
         # scheduler
@@ -42,12 +44,12 @@ class DFModel:
             prediction_type="epsilon",
         )
         # noise net
-        self.noise_net = noise_net
+        self.noise_pred_net = noise_pred_net
 
         self.nets = nn.ModuleDict(
             {
                 "vision_encoder": self.vision_encoder,
-                "noise_net": self.noise_net,
+                "noise_pred_net": self.noise_pred_net,
             }
         ).to(self.device)
 
@@ -109,7 +111,7 @@ class DFModel:
                         noisy_actions = self.noise_scheduler.add_noise(naction, noise, timesteps)
 
                         # predict the noise residual
-                        noise_pred = self.noise_net(
+                        noise_pred = self.noise_pred_net(
                             noisy_actions, timesteps, global_cond=obs_cond
                         )
 
@@ -138,7 +140,6 @@ class DFModel:
 
     def inference(self, obs_deque: collections.deque, stats: dict):
         """Inference with the model"""
-        ema_nets = self.ema.averaged_model
         B = 1  # inference batch size is 1
         # stack the last obs_horizon number of observations
         images = np.stack([x["image"] for x in obs_deque])
@@ -158,7 +159,7 @@ class DFModel:
         # infer action
         with torch.no_grad():
             # get image features
-            image_features = ema_nets["vision_encoder"](nimages)
+            image_features = self.nets["vision_encoder"](nimages)
             # (2,512)
 
             # concat with low-dim observations
@@ -176,7 +177,7 @@ class DFModel:
 
             for k in self.noise_scheduler.timesteps:
                 # predict noise
-                noise_pred = ema_nets["noise_net"](
+                noise_pred = self.nets["noise_pred_net"](
                     sample=naction, timestep=k, global_cond=obs_cond
                 )
 
