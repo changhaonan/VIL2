@@ -235,15 +235,18 @@ class BaseMiniGridEnv(MiniGridEnv):
         
         def not_reached_target(goal):
             return (goal["type"]=="goal" and self.agent_pos != target_pos) or (goal["type"]!="goal" and np.sum(np.abs(np.array(target_pos) - np.array(self.agent_pos)))>1)    
-        def no_go_doors(neighbor, value, args):
+
+        def no_go_doors(neighbor, value, args):     
+            if neighbor == args["target_pos"]:
+                return True
             if value == 1 or value & 0b110 == 0b100 or value & 0b110 == 0b110:
                 return False
             return True
+
         for goal_index, goal in enumerate(minigoals):
             target_pos = goal["location"] if goal["type"] !="key" else key_info[goal["color"]]
-
             while not_reached_target(goal):
-                path = self.modular_a_star(agent_pos=self.agent_pos, goal_pos=target_pos, occupancy_map=occupancy_map, can_go=no_go_doors)
+                path = self.modular_a_star(agent_pos=self.agent_pos, goal_pos=target_pos, occupancy_map=occupancy_map, can_go= no_go_doors, can_go_args={"target_pos":target_pos})
                 if path is None:
                     warnings.warn("Cannot Solve this maze! Returning empty trajectory!")
                     return []
@@ -301,9 +304,9 @@ class BaseMiniGridEnv(MiniGridEnv):
                         action = self.get_action(drop_loc)
                         if action == Actions.forward:
                             execute_action(Actions.drop)
-                            key_info[goal["color"]] = drop_loc
                             break
                         execute_action(action)
+            occupancy_map, key_info = self.generate_occupancy_map()
         self.reset()
         self.render_mode = prev_render_mode
         return action_trajectory
@@ -356,6 +359,8 @@ def main():
     goal_pos = (8,8)
 
     action_trajectory = env.optimal_action_trajectory(start_pos, goal_pos, 0.1)
+    # while True:
+    #     env.step(Actions.forward)
     for action in action_trajectory:
         obs, reward, terminated, truncated, info = env.step(action)
 
