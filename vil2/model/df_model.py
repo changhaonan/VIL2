@@ -13,18 +13,25 @@ from vil2.data.dataset import normalize_data, unnormalize_data
 
 
 class DFModel:
-    """Diffusion policy"""
+    """Diffusion policy Model"""
 
     def __init__(self, cfg, vision_encoder, noise_net):
         self.cfg = cfg
-        self.device = cfg.MODEL.DEVICE
-        self.obs_horizon = cfg.MODEL.DIFFUSION.OBS_HORIZON
-        self.action_horizon = cfg.MODEL.DIFFUSION.ACTION_HORIZON
+        # check cuda and mps
+        # if torch.cuda.is_available():
+        #     self.device = torch.device("cuda")
+        # elif torch.backends.mps.is_available():
+        #     self.device = torch.device("mps")
+        # else:
+        #     self.device = torch.device("cpu")
+        self.device = "cpu"
+        self.obs_horizon = cfg.MODEL.OBS_HORIZON
+        self.action_horizon = cfg.MODEL.ACTION_HORIZON
         # vision encoder
         self.vision_encoder = vision_encoder
         # scheduler
         self.num_diffusion_iters = 100
-        self.scheduler = DDPMScheduler(
+        self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=self.num_diffusion_iters,
             # the choise of beta schedule has big impact on performance
             # we found squared cosine works the best
@@ -42,13 +49,13 @@ class DFModel:
                 "vision_encoder": self.vision_encoder,
                 "noise_net": self.noise_net,
             }
-        )
+        ).to(self.device)
 
     def train(self, num_epochs: int, data_loader):
         # Exponential Moving Average
         # accelerates training and improves stability
         # holds a copy of the model weights
-        ema = EMAModel(model=self.nets.parameters(), power=0.75)
+        ema = EMAModel(parameters=self.nets.parameters(), power=0.75)
 
         # Standard ADAM optimizer
         # Note that EMA parametesr are not optimized
@@ -102,7 +109,7 @@ class DFModel:
                         noisy_actions = self.noise_scheduler.add_noise(naction, noise, timesteps)
 
                         # predict the noise residual
-                        noise_pred = self.noise_pred_net(
+                        noise_pred = self.noise_net(
                             noisy_actions, timesteps, global_cond=obs_cond
                         )
 
@@ -125,6 +132,9 @@ class DFModel:
                         epoch_loss.append(loss_cpu)
                         tepoch.set_postfix(loss=loss_cpu)
                 tglobal.set_postfix(loss=np.mean(epoch_loss))
+        # copy ema back to model
+        ema.copy_to(self.nets.parameters())
+        
 
     def inference(self, obs_deque: collections.deque, stats: dict):
         """Inference with the model"""
@@ -166,7 +176,7 @@ class DFModel:
 
             for k in self.noise_scheduler.timesteps:
                 # predict noise
-                noise_pred = ema_nets["noise_pred_net"](
+                noise_pred = ema_nets["noise_net"](
                     sample=naction, timestep=k, global_cond=obs_cond
                 )
 

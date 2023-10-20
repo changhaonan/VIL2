@@ -40,16 +40,16 @@ class Upsample1d(nn.Module):
 
 class Conv1dBlock(nn.Module):
     """
-    Conv1d -> GrounpNorm -> Mish
+    Conv1d -> GrounpNorm -> GELU
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size, n_group=8) -> None:
+    def __init__(self, in_channels, out_channels, kernel_size, n_groups=8) -> None:
         super().__init__()
 
         self.block = nn.Sequential(
             nn.Conv1d(in_channels, out_channels, kernel_size, padding=kernel_size // 2),
-            nn.GroupNorm(n_group, out_channels),
-            nn.Mish(),
+            nn.GroupNorm(n_groups, out_channels),
+            nn.GELU(),
         )
 
     def forward(self, x):
@@ -57,12 +57,14 @@ class Conv1dBlock(nn.Module):
 
 
 class ConditionalResidualBlock1D(nn.Module):
-    def __init__(self, in_channels, out_channels, cond_dim, kernel_size=3, n_group=8) -> None:
+    def __init__(self, in_channels, out_channels, cond_dim, kernel_size=3, n_groups=8) -> None:
         super().__init__()
 
         self.blocks = nn.ModuleList(
-            Conv1dBlock(in_channels, out_channels, kernel_size, n_group),
-            Conv1dBlock(out_channels, out_channels, kernel_size, n_group),
+            [
+                Conv1dBlock(in_channels, out_channels, kernel_size, n_groups),
+                Conv1dBlock(out_channels, out_channels, kernel_size, n_groups),
+            ]
         )
 
         # FiLM modulation
@@ -70,7 +72,7 @@ class ConditionalResidualBlock1D(nn.Module):
         cond_channels = 2 * out_channels
         self.out_channels = out_channels
         self.cond_encoder = nn.Sequential(
-            nn.Mish(), nn.Linear(cond_dim, cond_channels), nn.Unflatten(-1, (-1, 1))
+            nn.GELU(), nn.Linear(cond_dim, cond_channels), nn.Unflatten(-1, (-1, 1))
         )
 
         # make sure dimension matches
@@ -113,12 +115,12 @@ class ConditionalUnet1D(nn.Module):
         diffusion_step_encoder = nn.Sequential(
             SinusoidalPosEmb(dsed),
             nn.Linear(dsed, 4 * dsed),
-            nn.Mish(),
+            nn.GELU(),
             nn.Linear(4 * dsed, dsed),
         )
         cond_dim = dsed + global_cond_dim  # cond on diffusion step and global condition
 
-        in_out = zip(all_dims[:-1], all_dims[1:])
+        in_out = list(zip(all_dims[:-1], all_dims[1:]))
         mid_dim = all_dims[-1]
         self.mid_modules = nn.ModuleList(
             [
@@ -192,7 +194,7 @@ class ConditionalUnet1D(nn.Module):
     def forward(self, sample, timestep, global_cond=None):
         """"""
         # (B,T,C)
-        sample = sample.moveaxis(-1,-2)
+        sample = sample.moveaxis(-1, -2)
         # (B,C,T)
 
         # 1. time
@@ -205,7 +207,7 @@ class ConditionalUnet1D(nn.Module):
         # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
         timesteps = timesteps.expand(sample.shape[0])
 
-        gloabl_feature = self.diffusion_step_encoder(timesteps)
+        global_feature = self.diffusion_step_encoder(timesteps)
 
         if global_cond is not None:
             global_feature = torch.cat([global_feature, global_cond], dim=-1)
@@ -217,7 +219,7 @@ class ConditionalUnet1D(nn.Module):
             x = resnet2(x, global_feature)
             h.append(x)
             x = downsample(x)
-        
+
         for mid_module in self.mid_modules:
             x = mid_module(x, global_feature)
 
@@ -230,6 +232,6 @@ class ConditionalUnet1D(nn.Module):
         x = self.final_conv(x)
 
         # (B,C,T)
-        x = x.moveaxis(-1,-2)
+        x = x.moveaxis(-1, -2)
         # (B,T,C)
         return x
