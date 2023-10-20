@@ -127,7 +127,7 @@ class DFModel:
                         lr_scheduler.step()
 
                         # update Exponential Moving Average of the model weights
-                        ema.step(self.nets)
+                        ema.step(self.nets.parameters())
 
                         # logging
                         loss_cpu = loss.item()
@@ -193,3 +193,13 @@ class DFModel:
         action_pred = unnormalize_data(naction, stats=stats["action"])
 
         return action_pred
+    
+    def save(self, export_path):
+        """Save model weights"""
+        torch.save(self.nets.state_dict(), export_path)
+    
+    def load(self, export_path):
+        """Load model weights"""
+        state_dict = torch.load(export_path, map_location=self.device)
+        self.nets.load_state_dict(state_dict)
+        print("Pretrained weights loaded.")
