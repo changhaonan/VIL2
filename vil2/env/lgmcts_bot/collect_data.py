@@ -58,17 +58,17 @@ def collect_data_lgmcts_bot(
             meta_data_merge[key].append(value)
     if "episode_len" in meta_data_merge:
         meta_data_merge["episode_len"] = np.hstack(meta_data_merge["episode_len"])
-        meta_data_merge["episode_start_idx"] = np.cumsum(meta_data_merge["episode_len"])
+        meta_data_merge["episode_ends"] = np.cumsum(meta_data_merge["episode_len"])
 
     if output_path is not None:
         root = zarr.open(f"{output_path}/{env_name}.zarr", mode="w")
         data = root.create_group("data")
-        data.create_dataset("obs_img", data=data_merge["obs_img"])
-        data.create_dataset("obs_state", data=data_merge["obs_state"])
+        data.create_dataset("img", data=data_merge["img"])
+        data.create_dataset("state", data=data_merge["state"])
         data.create_dataset("action", data=data_merge["action"])
         data.create_dataset("reward", data=data_merge["reward"])
-        data = root.create_group("meta_data")
-        data.create_dataset("episode_start_idx", data=meta_data_merge["episode_start_idx"])
+        data = root.create_group("meta")
+        data.create_dataset("episode_ends", data=meta_data_merge["episode_ends"])
     return data_merge
 
 
@@ -88,6 +88,7 @@ def collect_suboptimal_data(
     obs_state_list = []
     action_list = []
     reward_list = []
+    episode_len_list = []
     task = env.task
     for i in tqdm(range(num_eposides), desc="Collecting suboptimal data"):
         env.reset()
@@ -113,15 +114,16 @@ def collect_suboptimal_data(
                     break
             if terminated or step_count >= max_steps:
                 break
+        episode_len_list.append(step_count)
     # merge
     data = {
-        "obs_img": np.vstack(obs_img_list),
-        "obs_state": np.vstack(obs_state_list),
+        "img": np.vstack(obs_img_list),
+        "state": np.vstack(obs_state_list),
         "action": np.vstack(action_list),
         "reward": np.vstack(reward_list),
     }
     # get meta data
-    episode_len = np.array([obs_img.shape[0] for obs_img in obs_img_list]).astype(np.int32)
+    episode_len = np.array(episode_len_list).astype(np.int32)
     meta_data = {
         "episode_len": episode_len,
     }
@@ -136,7 +138,7 @@ if __name__ == "__main__":
     os.makedirs(export_dir, exist_ok=True)
     
     task_name = f"push_object_{seed}"
-    debug = True
+    debug = False
     env = lgmcts.make(
         task_name=task_name,
         task_kwargs=lgmcts.PARTITION_TO_SPECS["train"][task_name],
