@@ -233,8 +233,8 @@ class BaseMiniGridEnv(MiniGridEnv):
             "location" : goal_pos
         })
         
-        def not_reached_target(goal):
-            return (goal["type"]=="goal" and self.agent_pos != target_pos) or (goal["type"]!="goal" and np.sum(np.abs(np.array(target_pos) - np.array(self.agent_pos)))>1)    
+        def not_reached_target(goal_type, goal_pos):
+            return (goal_type=="goal" and self.agent_pos != goal_pos) or (goal_type!="goal" and np.sum(np.abs(np.array(goal_pos) - np.array(self.agent_pos)))>1)    
 
         def no_go_doors(neighbor, value, args):     
             if neighbor == args["target_pos"]:
@@ -245,79 +245,87 @@ class BaseMiniGridEnv(MiniGridEnv):
 
         for goal_index, goal in enumerate(minigoals):
             target_pos = goal["location"] if goal["type"] !="key" else key_info[goal["color"]]
-            while not_reached_target(goal):
+            done = False
+            # done is set to true only when 
+            #     - key is picked
+            #     - door is opened
+            #     - Goal is reached
+            while not done:
                 path = self.modular_a_star(agent_pos=self.agent_pos, goal_pos=target_pos, occupancy_map=occupancy_map, can_go= no_go_doors, can_go_args={"target_pos":target_pos})
                 if path is None:
                     warnings.warn("Cannot Solve this maze! Returning empty trajectory!")
                     return []
-                # navigate upto the goal
+                # navigate upto the goal with random actions
                 for next_pos in path:
                     random_action = False
                     while True:
-                        p = random.random()
-                        if p < random_action_prob:
-                            # take random action
-                            dx, dy = random.choice([(0, 1), (1, 0), (0, -1), (-1, 0)])
-                            pos = (self.agent_pos[0] + dx, self.agent_pos[1] + dy)
-                            action = self.get_action(pos)
-                            if action is not None:
-                                execute_action(action)
-                            random_action = True
+                        action, random_action = self.get_action(next_pos,random_action_prob)
+                        if next_pos == path[-1] and action == Actions.forward and goal["type"] != "goal":
                             break
-                        else:
-                            action = self.get_action(next_pos)
-                            if next_pos == path[-1] and action == Actions.forward and goal["type"] != "goal":
-                                break
-                            if action is None:
-                                break
-                            execute_action(action)
+                        if action is None:
+                            break
+                        execute_action(action)
+                        if random_action:
+                            break
                     if random_action:
                         break
-            
-            if goal["type"]!="goal":
-                while True:
-                    action = self.get_action(target_pos)
+
+                # we are at the target and now we try to turn towards it, this loop only goes on as long as we are one box away from the goal_pos
+                while not not_reached_target(goal["type"], target_pos):
+                    action, random_action = self.get_action(target_pos,random_action_prob)
                     if action == Actions.forward:
-                        break
+                        # we are still one block away and we are facing the door/ key
+                        if goal["type"] != "goal":
+                            p = random.random()
+                            if p < random_action_prob:
+                                # take random action
+                                action = random.choice(list(Actions))
+                                execute_action(action)
+                                continue
+                            else:
+                                action = None
+                                if goal["type"] == "key":
+                                    action = Actions.pickup
+                                elif goal["type"] == "door":
+                                    action = Actions.toggle
+                                elif goal["type"] == "drop":
+                                    action = Actions.drop
+                                execute_action(action)
+                                # drop the key after unlocking a door
+                                if goal["type"] == "door" and minigoals[goal_index+1]["type"] == "key" and minigoals[goal_index+1]["color"] != goal["color"]:
+                                    # drop key around the agent location
+                                    drop_loc = None
+                                    for (dx, dy) in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+                                        pos = (self.agent_pos[0] + dx, self.agent_pos[1] + dy)
+                                        if pos == path[-1]:
+                                            continue
+                                        item = self.grid.get(*pos)
+                                        if item is None or item.can_contain():
+                                            drop_loc = pos
+                                            # this is our new mini-goal to drop the key
+                                            minigoals.insert(goal_index+1, {
+                                                "type" : "drop",
+                                                "location":drop_loc
+                                            })
+                                            break
                     if action is None:
                         break
                     execute_action(action)
-            # We are facing the goal now
-            if goal["type"] == "key":
-                action = Actions.pickup
-                execute_action(action)
-            elif goal["type"] == "door":
-                action = Actions.toggle
-                execute_action(action)
-                if minigoals[goal_index+1]["type"] == "key" and minigoals[goal_index+1]["color"] != goal["color"]:                    
-                    # drop key around the agent location
-                    drop_loc = None
-                    for (dx, dy) in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-                        pos = (self.agent_pos[0] + dx, self.agent_pos[1] + dy)
-                        if pos == path[-1]:
-                            continue
-                        item = self.grid.get(*pos)
-                        if item is None or item.can_contain():
-                            drop_loc = pos
-                            break
-                    while True:
-                        action = self.get_action(drop_loc)
-                        if action == Actions.forward:
-                            execute_action(Actions.drop)
-                            break
-                        execute_action(action)
-            occupancy_map, key_info = self.generate_occupancy_map()
+            
         self.reset()
         self.render_mode = prev_render_mode
         return action_trajectory
 
 
-    def get_action(self, next_pos):
+    def get_action(self, next_pos, random_action_prob = 0.0):
         """Get the corresponding action for the next position"""
         agent_pos = self.agent_pos
         agent_dir = self.agent_dir
         next_type = self.grid.get(*next_pos)
         action = None
+        p = random.random()
+        if p < random_action_prob:
+            return random.choice(list(Actions)), True
         if not isinstance(next_type, Wall):
             # next_type is a position or goal
             diff = np.array(next_pos) - np.array(agent_pos)
@@ -348,7 +356,7 @@ class BaseMiniGridEnv(MiniGridEnv):
                 else:
                     # done
                     action = None
-        return action
+        return action, False
 
 
 def main():
@@ -359,8 +367,6 @@ def main():
     goal_pos = (8,8)
 
     action_trajectory = env.optimal_action_trajectory(start_pos, goal_pos, 0.1)
-    # while True:
-    #     env.step(Actions.forward)
     for action in action_trajectory:
         obs, reward, terminated, truncated, info = env.step(action)
 
