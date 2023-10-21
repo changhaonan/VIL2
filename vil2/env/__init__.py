@@ -3,6 +3,7 @@ from .mini_grid.base import BaseMiniGridEnv
 from .mini_grid.multi_modality import MultiModalityMiniGridEnv
 from .mini_grid.collect_data import collect_data_mini_grid
 from .push_t.push_t_base import PushTEnv, PushTImageEnv
+import lgmcts
 
 
 def env_builder(env_name, **kwargs):
@@ -16,6 +17,19 @@ def env_builder(env_name, **kwargs):
     elif env_name.split("-")[0].lower() == "push_t":
         render_mode = kwargs.pop("render_mode", "rgb_array")
         return PushTImageEnv()  # default PushT
+    elif env_name.split("-")[0].lower() == "lgmcts":
+        task_name = env_name.split("-")[1].lower()
+        debug = kwargs.pop("debug", False)
+        env = lgmcts.make(
+            task_name=task_name,
+            task_kwargs=lgmcts.PARTITION_TO_SPECS["train"][task_name],
+            modalities=["rgb", "segm", "depth"],
+            seed=0,
+            debug=debug,
+            display_debug_window=debug,
+            hide_arm_rgb=(not debug),
+        )
+        return env
     else:
         raise ValueError(f"Unknown env_name: {env_name}")
 
