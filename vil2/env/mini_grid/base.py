@@ -142,13 +142,13 @@ class BaseMiniGridEnv(MiniGridEnv):
                 args["doors_array"].append((color, neighbor))
                 args["doors_set"].add(neighbor)
             return True
-        args = {"doors_array":doors_to_goal, "doors_set" : doors_set}
-        path = self.modular_a_star(agent_pos, goal_pos, can_go_collect_doors, args, occupancy_map)
+        args = {"can_go":{"doors_array":doors_to_goal, "doors_set" : doors_set}}
+        path = self.modular_a_star(agent_pos, goal_pos, can_go=can_go_collect_doors, occupancy_map=occupancy_map, args=args)
         return doors_to_goal, path
 
-    def modular_a_star(self, agent_pos, goal_pos, can_go = None, can_go_args = None,  occupancy_map = None):
+    def modular_a_star(self, agent_pos, goal_pos, can_go = None, heuristic = None , args = None,  occupancy_map = None):
         """Path planning for mini-grid using A* search algorithm."""
-        def heuristic(a, b):
+        def default_heuristic(a, b, args):
             return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
         # Initialize variables
@@ -165,10 +165,12 @@ class BaseMiniGridEnv(MiniGridEnv):
         # Priority queue for open set
         open_set = [(0, agent_pos)]
 
+        heuristic = default_heuristic if heuristic is None else heuristic
+
         # Data structures for A* algorithm
         came_from = {}
         g_score = {agent_pos: 0}
-        f_score = {agent_pos: heuristic(agent_pos, goal_pos)}
+        f_score = {agent_pos: heuristic(agent_pos, goal_pos, args.get("heuristic", None))}
 
         while open_set:
             current = heapq.heappop(open_set)[1]
@@ -184,7 +186,7 @@ class BaseMiniGridEnv(MiniGridEnv):
                     if 0 <= neighbor[0] < height and 0 <= neighbor[1] < width:
                         if can_go is None and occupancy_map[neighbor[0],neighbor[1]] == 1:
                             continue
-                        if can_go is not None and not can_go(neighbor, occupancy_map[neighbor[0],neighbor[1]], can_go_args):
+                        if can_go is not None and not can_go(neighbor, occupancy_map[neighbor[0],neighbor[1]], args["can_go"]):
                             continue
 
                         tentative_g_score = g_score[current] + 1
@@ -192,7 +194,7 @@ class BaseMiniGridEnv(MiniGridEnv):
                         if tentative_g_score < g_score.get(neighbor, float("inf")):
                             came_from[neighbor] = current
                             g_score[neighbor] = tentative_g_score
-                            f_score[neighbor] = tentative_g_score + heuristic(neighbor, goal_pos)
+                            f_score[neighbor] = tentative_g_score + heuristic(neighbor, goal_pos, args.get("heuristic", None))
                             heapq.heappush(open_set, (f_score[neighbor], neighbor))
 
         return None  # Return None if no path is found
@@ -251,7 +253,7 @@ class BaseMiniGridEnv(MiniGridEnv):
             #     - door is opened
             #     - Goal is reached
             while not done:
-                path = self.modular_a_star(agent_pos=self.agent_pos, goal_pos=target_pos, occupancy_map=occupancy_map, can_go= no_go_doors, can_go_args={"target_pos":target_pos})
+                path = self.modular_a_star(agent_pos=self.agent_pos, goal_pos=target_pos, occupancy_map=occupancy_map, can_go= no_go_doors, args={"can_go":{"target_pos":target_pos}})
                 if path is None:
                     warnings.warn("Cannot Solve this maze! Returning empty trajectory!")
                     return []
