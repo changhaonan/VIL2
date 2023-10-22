@@ -1,3 +1,4 @@
+# from .maze_2d import MazeTree
 import gymnasium as gym
 from .mini_grid.base import BaseMiniGridEnv
 from .mini_grid.multi_modality import MultiModalityMiniGridEnv
@@ -7,7 +8,10 @@ import lgmcts
 
 
 def env_builder(env_name, **kwargs):
-    if env_name.split("-")[0].lower() == "minigrid":
+    if env_name == "maze":
+        # return MazeTree(**kwargs)
+        raise ImportError("Maze env not defined")
+    elif env_name.split("-")[0].lower() == "minigrid":
         render_mode = kwargs.pop("render_mode", "rgb_array")
         mini_grid_type = env_name.split("-")[1].lower()
         if mini_grid_type == "mm":
