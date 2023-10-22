@@ -14,3 +14,8 @@ checkpoint/*
 *.npz
 
 .vscode/
+
+*.zip
+
+*.mp4
+*.ckpt
