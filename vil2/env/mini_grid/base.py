@@ -146,10 +146,12 @@ class BaseMiniGridEnv(MiniGridEnv):
         path = self.modular_a_star(agent_pos, goal_pos, can_go=can_go_collect_doors, occupancy_map=occupancy_map, args=args)
         return doors_to_goal, path
 
-    def modular_a_star(self, agent_pos, goal_pos, can_go = None, heuristic = None , args = None,  occupancy_map = None):
+    def modular_a_star(self, agent_pos, goal_pos, can_go = None, heuristic = None, score = None , args = None,  occupancy_map = None):
         """Path planning for mini-grid using A* search algorithm."""
         def default_heuristic(a, b, args):
             return abs(a[0] - b[0]) + abs(a[1] - b[1])
+        def default_score(current_score, neighbor, args):
+            return current_score + 1
 
         # Initialize variables
         height, width = self.grid.height, self.grid.width
@@ -166,6 +168,7 @@ class BaseMiniGridEnv(MiniGridEnv):
         open_set = [(0, agent_pos)]
 
         heuristic = default_heuristic if heuristic is None else heuristic
+        score = default_score if score is None else score
 
         # Data structures for A* algorithm
         came_from = {}
@@ -189,7 +192,7 @@ class BaseMiniGridEnv(MiniGridEnv):
                         if can_go is not None and not can_go(neighbor, occupancy_map[neighbor[0],neighbor[1]], args["can_go"]):
                             continue
 
-                        tentative_g_score = g_score[current] + 1
+                        tentative_g_score = score(g_score[current], neighbor, args.get("score", None))
 
                         if tentative_g_score < g_score.get(neighbor, float("inf")):
                             came_from[neighbor] = current
@@ -199,51 +202,72 @@ class BaseMiniGridEnv(MiniGridEnv):
 
         return None  # Return None if no path is found
     
-    def optimal_action_trajectory(self, start_pos, goal_pos, random_action_prob=0.0):
+    def optimal_action_trajectory(self, start_pos, goal_pos, random_action_prob=0.0, max_steps = None):
         """Find the optimal action trajectory to reach the goal from start position"""
-        prev_render_mode = self.render_mode
-        self.render_mode = "none"
-        action_trajectory = []
-        def execute_action(action):
-            self.step(action)
-            action_trajectory.append(action)
-        occupancy_map, key_info = self.generate_occupancy_map()
-        
-        # Assume all doors are open and find doors on the way
-        doors_to_goal, path = self.compute_doors_to_goal(start_pos, goal_pos, occupancy_map)
-        if path is None:
-            warnings.warn("Cannot Solve this maze! Returning empty trajectory!")
-            return []
-        
-        # For each door on the way, we need to go to it's key and then the door. finally to the goal itself
-        minigoals = []
-        for door in doors_to_goal:
-            if door[0] not in key_info:
-                warnings.warn("Not enough keys to solve this grid! Returning empty trajectory.")
-                return []
-            minigoals.append({
-                "type" : "key",
-                "color" : door[0],
-            })
-            minigoals.append({
-                "type" : "door",
-                "color" : door[0],
-                "location" : door[1]
-            })
-        minigoals.append({
-            "type" : "goal",
-            "location" : goal_pos
-        })
-        
         def not_reached_target(goal_type, goal_pos):
+            # checks if the agent is
+            #       - at goal_pos, if goal_type is goal
+            #       - around goal_pos (1 block away), elsewhere
             return (goal_type=="goal" and self.agent_pos != goal_pos) or (goal_type!="goal" and np.sum(np.abs(np.array(goal_pos) - np.array(self.agent_pos)))>1)    
 
-        def no_go_doors(neighbor, value, args):     
+        def no_go_doors(neighbor, value, args):
+            # custom can_go function that blocks doors & keys
             if neighbor == args["target_pos"]:
                 return True
             if value == 1 or value & 0b110 == 0b100 or value & 0b110 == 0b110:
                 return False
             return True
+        
+        def execute_action(action):
+            # self.step wrapper to build action trajectory
+            self.step(action)
+            if max_steps is not None and len(action_trajectory) == max_steps:
+                return -1
+            action_trajectory.append(action)
+
+        def generate_mini_goals_from_path(path, goal_pos, occupancy_map, key_info):
+            minigoals = []
+            for entry in path:
+                value = occupancy_map[entry]
+                if  value & 0b110 == 0b110:
+                    # door
+                    color = COLOR_NAMES[(value & 0b111000) >> 3]
+                    if color not in key_info:
+                        warnings.warn("Not enough keys to solve this grid! Returning empty trajectory.")
+                        return []
+                    minigoals.append({
+                        "type" : "key",
+                        "color" : color
+                    })
+                    minigoals.append({
+                        "type" : "door",
+                        "color" : color,
+                        "location" : entry
+                    })
+            minigoals.append({
+                "type" : "goal",
+                "location" : goal_pos
+            })
+            return minigoals
+
+        
+        def weighted_score(current_score, neighbor, args):
+            value = args["occupancy_map"][neighbor]
+            if value & 0b110 == 0b100:
+                # key 
+                return current_score + 2
+            if value & 0b110 == 0b110:
+                # door
+                return current_score + 5
+            return current_score + 1
+        
+        prev_render_mode = self.render_mode
+        self.render_mode = "none"
+        action_trajectory = []
+        occupancy_map, key_info = self.generate_occupancy_map()
+        
+        path = self.modular_a_star(start_pos, goal_pos, occupancy_map=occupancy_map, score=weighted_score, args={"score":{"occupancy_map":occupancy_map}})
+        minigoals = generate_mini_goals_from_path(path, goal_pos, occupancy_map, key_info)
 
         for goal_index, goal in enumerate(minigoals):
             target_pos = goal["location"] if goal["type"] !="key" else key_info[goal["color"]]
@@ -262,57 +286,64 @@ class BaseMiniGridEnv(MiniGridEnv):
                     random_action = False
                     while True:
                         action, random_action = self.get_action(next_pos,random_action_prob)
+                        if random_action:
+                            stat = execute_action(action)
+                            if stat == -1:
+                                return action_trajectory
+                            
+                            break
                         if next_pos == path[-1] and action == Actions.forward and goal["type"] != "goal":
                             break
                         if action is None:
                             break
-                        execute_action(action)
-                        if random_action:
-                            break
+                        stat = execute_action(action)
+                        if stat == -1:
+                            return action_trajectory
                     if random_action:
                         break
-
-                # we are at the target and now we try to turn towards it, this loop only goes on as long as we are one box away from the goal_pos
+                if goal["type"] == "goal" and not not_reached_target(goal["type"], target_pos):
+                    # reached goal target
+                    done = True
+                    break
+                 # we are at the target and now we try to turn towards it, this loop only goes on as long as we are one box away from the goal_pos
                 while not not_reached_target(goal["type"], target_pos):
                     action, random_action = self.get_action(target_pos,random_action_prob)
                     if action == Actions.forward:
                         # we are still one block away and we are facing the door/ key
-                        if goal["type"] != "goal":
-                            p = random.random()
-                            if p < random_action_prob:
-                                # take random action
-                                action = random.choice(list(Actions))
-                                execute_action(action)
-                                continue
-                            else:
-                                action = None
-                                if goal["type"] == "key":
-                                    action = Actions.pickup
-                                elif goal["type"] == "door":
-                                    action = Actions.toggle
-                                elif goal["type"] == "drop":
-                                    action = Actions.drop
-                                execute_action(action)
-                                # drop the key after unlocking a door
-                                if goal["type"] == "door" and minigoals[goal_index+1]["type"] == "key" and minigoals[goal_index+1]["color"] != goal["color"]:
-                                    # drop key around the agent location
-                                    drop_loc = None
-                                    for (dx, dy) in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-                                        pos = (self.agent_pos[0] + dx, self.agent_pos[1] + dy)
-                                        if pos == path[-1]:
-                                            continue
-                                        item = self.grid.get(*pos)
-                                        if item is None or item.can_contain():
-                                            drop_loc = pos
-                                            # this is our new mini-goal to drop the key
-                                            minigoals.insert(goal_index+1, {
-                                                "type" : "drop",
-                                                "location":drop_loc
-                                            })
-                                            break
+                        if goal["type"] == "key":
+                            action = Actions.pickup
+                        elif goal["type"] == "door":
+                            action = Actions.toggle
+                        elif goal["type"] == "drop":
+                            action = Actions.drop
+                        stat = execute_action(action)
+                        if stat == -1:
+                            return action_trajectory
+                        done = True
+                        # drop the key after unlocking a door
+                        if goal["type"] == "door" and minigoals[goal_index+1]["type"] == "key" and minigoals[goal_index+1]["color"] != goal["color"]:
+                            # drop key around the agent location
+                            drop_loc = None
+                            for (dx, dy) in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+                                pos = (self.agent_pos[0] + dx, self.agent_pos[1] + dy)
+                                if pos == path[-1]:
+                                    continue
+                                item = self.grid.get(*pos)
+                                if item is None or item.can_contain():
+                                    drop_loc = pos
+                                    # this is our new mini-goal to drop the key
+                                    minigoals.insert(goal_index+1, {
+                                        "type" : "drop",
+                                        "location":drop_loc
+                                    })
+                                    break
+                        break
                     if action is None:
                         break
-                    execute_action(action)
+                    stat = execute_action(action)
+                    if stat == -1:
+                        return action_trajectory
+                occupancy_map, key_info = self.generate_occupancy_map()
             
         self.reset()
         self.render_mode = prev_render_mode
@@ -326,12 +357,12 @@ class BaseMiniGridEnv(MiniGridEnv):
         next_type = self.grid.get(*next_pos)
         action = None
         p = random.random()
+        action_list = [Actions.left, Actions.right, Actions.forward]
         if p < random_action_prob:
-            return random.choice(list(Actions)), True
+            return random.choice(action_list), True
         if not isinstance(next_type, Wall):
             # next_type is a position or goal
             diff = np.array(next_pos) - np.array(agent_pos)
-            # print(next_pos, " >> ", agent_dir," || ", diff)
             # go up/down first
             if diff[1] < 0:
                 if agent_dir == 3:
@@ -362,11 +393,12 @@ class BaseMiniGridEnv(MiniGridEnv):
 
 
 def main():
-    env = BaseMiniGridEnv(render_mode="human")
+    start_pos = (2,2)
+    goal_pos = (8,8)
+
+    env = BaseMiniGridEnv(render_mode="human", agent_start_pos=start_pos)
     env.reset()
 
-    start_pos = (1,1)
-    goal_pos = (8,8)
 
     action_trajectory = env.optimal_action_trajectory(start_pos, goal_pos, 0.1)
     for action in action_trajectory:

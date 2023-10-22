@@ -109,7 +109,9 @@ def collect_suboptimal_data(env_name: str, env: BaseMiniGridEnv, num_eposides: i
         for i in tqdm.tqdm(range(num_eposides)):
             obs, _ = env.reset(seed=i)
             goal_pose = env.goal_poses[np.random.choice(len(env.goal_poses))]  # select a random goal
-            action_trajectory = env.optimal_action_trajectory(env.agent_pos, goal_pose, random_action_prob=random_action_prob)
+            
+            print(" Agent position: ",env.agent_pos , " || ", goal_pose)
+            action_trajectory = env.optimal_action_trajectory(env.agent_pos, goal_pose, random_action_prob=random_action_prob, max_steps= max_steps)
             epoch_size = 0
             for action in action_trajectory:
                 if action is None:
@@ -156,6 +158,6 @@ def collect_suboptimal_data(env_name: str, env: BaseMiniGridEnv, num_eposides: i
 
 
 if __name__ == "__main__":
-    env = BaseMiniGridEnv(agent_start_pos=None, render_mode="human")
-    random_action_prob = 0.0
+    env = BaseMiniGridEnv(agent_start_pos=None, render_mode="none")
+    random_action_prob = 0.1
     collect_data_mini_grid(env_name="MiniGrid-MM", env=env, num_eposides=1000, max_steps=100, min_steps=5, strategies=["suboptimal"], random_action_prob=random_action_prob)
