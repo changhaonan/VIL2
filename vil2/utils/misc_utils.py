@@ -156,6 +156,12 @@ def plot_hist_scatter(
     plt.savefig(f"{save_path}/{fig_name}")
 
 
+def resize_image(image, image_size):
+    """Resize image to image_size."""
+    image_resize = cv2.resize(image, (image_size, image_size))
+    return image_resize
+
+
 # -----------------------------------------------------------------------------
 # RL Utils
 # -----------------------------------------------------------------------------

@@ -7,6 +7,7 @@ from lgmcts.env import seed
 import cv2
 import zarr
 import os
+from vil2.env.lgmcts_bot.lgmcts_wrapper import LgmctsEnvWrapper
 from tqdm.auto import tqdm
 
 
@@ -101,12 +102,8 @@ def collect_suboptimal_data(
             for action in opt_action_list:
                 # execute action
                 obs, reward, terminated, truncated, info = env.step(action)
-                front_rgb = obs["rgb"]["front"].copy().transpose(1, 2, 0)
-                front_rgb = cv2.cvtColor(front_rgb, cv2.COLOR_RGB2BGR)
-                # cv2.imshow("front_rgb", front_rgb)
-                # cv2.waitKey(1)
-                obs_img_list.append(front_rgb[None, ...])
-                obs_state_list.append(obs["robot_joints"][None, ...])
+                obs_img_list.append(obs["image"][None, ...])
+                obs_state_list.append(obs["state"][None, ...])
                 reward_list.append(reward)
                 action_list.append(np.hstack([action["pose0_position"], action["pose1_position"]]))
                 step_count += 1
@@ -139,7 +136,8 @@ if __name__ == "__main__":
     
     task_name = f"push_object_{seed}"
     debug = False
-    env = lgmcts.make(
+
+    env = LgmctsEnvWrapper(
         task_name=task_name,
         task_kwargs=lgmcts.PARTITION_TO_SPECS["train"][task_name],
         modalities=["rgb", "segm", "depth"],
@@ -151,7 +149,7 @@ if __name__ == "__main__":
     collect_data_lgmcts_bot(
         env_name=task_name,
         env=env,
-        num_eposides=100,
+        num_eposides=200,
         max_steps=100,
         strategies=["suboptimal"],
         random_action_prob=0.0,

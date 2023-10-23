@@ -87,8 +87,7 @@ class DFImageDataset(torch.utils.data.Dataset):
 
         # (N, D)
         train_data = {
-            # first two dims of state vector are agent (i.e. gripper) locations
-            "agent_pos": dataset_root["data"]["state"][:, :2],
+            "state": dataset_root["data"]["state"][:, :],
             "action": dataset_root["data"]["action"][:],
         }
         episode_ends = dataset_root["meta"]["episode_ends"][:]
@@ -138,5 +137,6 @@ class DFImageDataset(torch.utils.data.Dataset):
 
         # discard unused observations
         nsample["image"] = nsample["image"][: self.obs_horizon, :]
-        nsample["agent_pos"] = nsample["agent_pos"][: self.obs_horizon, :]
+        nsample["state"] = nsample["state"][: self.obs_horizon, :]
+        nsample["action"] = nsample["action"][: self.action_horizon, :]
         return nsample

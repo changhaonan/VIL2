@@ -81,7 +81,7 @@ class DFModel:
                         # data normalized in dataset
                         # device transfer
                         nimage = nbatch["image"][:, : self.obs_horizon].to(self.device)
-                        nagent_pos = nbatch["agent_pos"][:, : self.obs_horizon].to(self.device)
+                        nagent_pos = nbatch["state"][:, : self.obs_horizon].to(self.device)
                         naction = nbatch["action"].to(self.device)
                         B = nagent_pos.shape[0]
 
@@ -142,18 +142,18 @@ class DFModel:
         """Inference with the model"""
         B = 1  # inference batch size is 1
         # stack the last obs_horizon number of observations
-        images = np.stack([x["image"] for x in obs_deque])
-        agent_poses = np.stack([x["agent_pos"] for x in obs_deque])
+        images = np.stack([x["image"].transpose(2, 0, 1) for x in obs_deque])
+        agent_poses = np.stack([x["state"] for x in obs_deque])
 
         # normalize observation
-        nagent_poses = normalize_data(agent_poses, stats=stats["agent_pos"])
+        nstates = normalize_data(agent_poses, stats=stats["state"])
         # images are already normalized to [0,1]
         nimages = images
 
         # device transfer
         nimages = torch.from_numpy(nimages).to(self.device, dtype=torch.float32)
         # (2,3,96,96)
-        nagent_poses = torch.from_numpy(nagent_poses).to(self.device, dtype=torch.float32)
+        nstates = torch.from_numpy(nstates).to(self.device, dtype=torch.float32)
         # (2,2)
 
         # infer action
@@ -163,7 +163,7 @@ class DFModel:
             # (2,512)
 
             # concat with low-dim observations
-            obs_features = torch.cat([image_features, nagent_poses], dim=-1)
+            obs_features = torch.cat([image_features, nstates], dim=-1)
 
             # reshape observation to (B,obs_horizon*obs_dim)
             obs_cond = obs_features.unsqueeze(0).flatten(start_dim=1)

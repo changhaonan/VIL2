@@ -39,8 +39,8 @@ MODEL = dict(
     NOISE_NET=dict(
         NAME="UNET1D",
         INIT_ARGS=dict(
-            input_dim=2,
-            global_cond_dim=1028,
+            input_dim=6,
+            global_cond_dim=(512 + 6) * 2,
             diffusion_step_embed_dim=256,
             down_dims=[256, 512, 1024],
             kernel_size=5,
@@ -50,7 +50,7 @@ MODEL = dict(
     PRED_HORIZON=16,
     OBS_HORIZON=2,
     ACTION_HORIZON=8,
-    ACTION_DIM=2,
+    ACTION_DIM=6,
 )
 
 TRAIN=dict(

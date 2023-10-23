@@ -48,16 +48,12 @@ if __name__ == "__main__":
         pin_memory=True,
         persistent_workers=True,
     )
-    # df_model.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
+    df_model.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
 
     # load pre-trained
     load_pretrained = False
     if load_pretrained:
         ckpt_path = "pusht_vision_100ep.ckpt"
-        if not os.path.isfile(ckpt_path):
-            id = "1XKpfNSlwYMGaF5CncoFaLKCDTWoLAHf1&confirm=t"
-            gdown.download(id=id, output=ckpt_path, quiet=False)
-
         state_dict = torch.load(ckpt_path, map_location=df_model.device)
         df_model.nets.load_state_dict(state_dict)
         print("Pretrained weights loaded.")
@@ -68,10 +64,10 @@ if __name__ == "__main__":
     # limit enviornment interaction to 200 steps before termination
     max_steps = 200
     # use a seed > 200 to avoid initial states seen in the training dataset
-    env.seed(100000)
+    # env.seed(seed=100000)
 
     # get first observation
-    obs = env.reset()
+    obs, info = env.reset()
 
     # keep a queue of last 2 steps of observations
     obs_deque = collections.deque([obs] * cfg.MODEL.OBS_HORIZON, maxlen=cfg.MODEL.OBS_HORIZON)
@@ -82,7 +78,7 @@ if __name__ == "__main__":
     step_idx = 0
 
     #
-    with tqdm(total=max_steps, desc="Eval PushTImageEnv") as pbar:
+    with tqdm(total=max_steps, desc="Eval Push Object") as pbar:
         while not done:
             # infer action
             with torch.no_grad():
@@ -97,7 +93,7 @@ if __name__ == "__main__":
                 # execute action_horizon number of steps without replanning
                 for i in range(len(action)):
                     # stepping env
-                    obs, reward, done, info = env.step(action[i])
+                    obs, reward, done, truncated, info = env.step(action[i])
                     # save observations
                     obs_deque.append(obs)
                     # and reward/vis
