@@ -202,7 +202,7 @@ class BaseMiniGridEnv(MiniGridEnv):
 
         return None  # Return None if no path is found
     
-    def optimal_action_trajectory(self, start_pos, goal_pos, random_action_prob=0.0, max_steps = None):
+    def optimal_action_trajectory(self, start_pos, goal_pos, random_action_prob=0.0, max_steps = None, seed=None):
         """Find the optimal action trajectory to reach the goal from start position"""
         def not_reached_target(goal_type, goal_pos):
             # checks if the agent is
@@ -345,7 +345,7 @@ class BaseMiniGridEnv(MiniGridEnv):
                         return action_trajectory
                 occupancy_map, key_info = self.generate_occupancy_map()
             
-        self.reset()
+        self.reset(seed=seed)  #FIXME: we need to recover the scene
         self.render_mode = prev_render_mode
         return action_trajectory
 
@@ -399,7 +399,7 @@ def main():
     env = BaseMiniGridEnv(render_mode="human", agent_start_pos=start_pos)
     env.reset()
 
-
+    start_pos = env.agent_pos
     action_trajectory = env.optimal_action_trajectory(start_pos, goal_pos, 0.1)
     for action in action_trajectory:
         obs, reward, terminated, truncated, info = env.step(action)

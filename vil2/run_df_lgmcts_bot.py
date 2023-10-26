@@ -1,7 +1,6 @@
 """Run Diffusion policy on PushT scene"""
 import os
 import torch
-import gdown
 import numpy as np
 import collections
 from tqdm.auto import tqdm
