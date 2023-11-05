@@ -13,6 +13,7 @@ export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libGLEW.so
 
 ## TODO:
 
+- [ ] Finish the orcale motion and finish decision
 - [ ] Add imitation learning data generation
 - [ ] IL
 - [ ] Offline-RL

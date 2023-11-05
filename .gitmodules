@@ -1,0 +1,3 @@
+[submodule "external/LGMCTS-D"]
+	path = external/LGMCTS-D
+	url = git@github.com:changhaonan/LGMCTS-D.git

@@ -11,7 +11,16 @@ from vil2.env.mini_grid.multi_modality import MultiModalityMiniGridEnv
 PAD_VALUE = 0
 
 
-def collect_data_mini_grid(env_name: str, env: BaseMiniGridEnv, num_eposides: int|list[int], max_steps: int, min_steps: int, strategies: list[str], random_action_prob: float = 0.0, output_path = None):
+def collect_data_mini_grid(
+    env_name: str,
+    env: BaseMiniGridEnv,
+    num_eposides: int | list[int],
+    max_steps: int,
+    min_steps: int,
+    strategies: list[str],
+    random_action_prob: float = 0.0,
+    output_path=None,
+):
     """Collect offline data for MiniGrid"""
     data_list = []
     if isinstance(num_eposides, int):
@@ -20,7 +29,16 @@ def collect_data_mini_grid(env_name: str, env: BaseMiniGridEnv, num_eposides: in
         if strategy == "navigate":
             data_list.append(collect_navigate_data(env_name, env, num_eposides[i], max_steps, min_steps))
         elif strategy == "suboptimal":
-            data_list.append(collect_suboptimal_data(env_name, env, num_eposides[i], max_steps, min_steps, random_action_prob=random_action_prob))
+            data_list.append(
+                collect_suboptimal_data(
+                    env_name,
+                    env,
+                    num_eposides[i],
+                    max_steps,
+                    min_steps,
+                    random_action_prob=random_action_prob,
+                )
+            )
         else:
             raise ValueError(f"Unknown strategy: {strategy}")
     # merge data
@@ -93,7 +111,14 @@ def collect_navigate_data(env_name: str, env: BaseMiniGridEnv, num_eposides: int
     return data
 
 
-def collect_suboptimal_data(env_name: str, env: BaseMiniGridEnv, num_eposides: int, max_steps: int, min_steps: int, random_action_prob: float=0.0):
+def collect_suboptimal_data(
+    env_name: str,
+    env: BaseMiniGridEnv,
+    num_eposides: int,
+    max_steps: int,
+    min_steps: int,
+    random_action_prob: float = 0.0,
+):
     """Path planning for mini-grid"""
     obs_list = []
     next_obs_list = []
@@ -107,31 +132,34 @@ def collect_suboptimal_data(env_name: str, env: BaseMiniGridEnv, num_eposides: i
     mini_grid_type = env_name.split("-")[1].lower()
     if mini_grid_type == "base" or mini_grid_type == "mm":
         for i in tqdm.tqdm(range(num_eposides)):
-            obs, _ = env.reset(seed=i)
+            seed_i = i
+            obs, _ = env.reset(seed=seed_i)
             goal_pose = env.goal_poses[np.random.choice(len(env.goal_poses))]  # select a random goal
-            path = env.optimal_path(env.agent_pos, goal_pose)
+
+            # print("Agent position: ", env.agent_pos, " || ", goal_pose)
+            action_trajectory = env.optimal_action_trajectory(
+                env.agent_pos, goal_pose, random_action_prob=random_action_prob, max_steps=max_steps,seed=seed_i
+            )
+            if len(action_trajectory) == 0:
+                continue  # No path found
             epoch_size = 0
-            for next_pos in path:
-                while True:
-                    action = env.get_action(next_pos)
-                    if action is None:
-                        break
-                    if np.random.rand() < random_action_prob:
-                        action = env.action_space.sample()
-                    # collect data
-                    obs_list.append(obs[None, :])
-                    # step
-                    obs, reward, terminated, truncated, info = env.step(action)
-                    # collect data
-                    next_obs_list.append(obs[None, :])
-                    reward_list.append(reward)
-                    action_list.append(action)
-                    terminated_list.append(terminated)
-                    truncated_list.append(truncated)
-                    epoch_id_list.append(i)
-                    epoch_size += 1
-                    if terminated or truncated:
-                        break
+            for action in action_trajectory:
+                if action is None:
+                    break
+                # collect data
+                obs_list.append(obs[None, :])
+                # step
+                obs, reward, terminated, truncated, info = env.step(action)
+                # collect data
+                next_obs_list.append(obs[None, :])
+                reward_list.append(reward)
+                action_list.append(action)
+                terminated_list.append(terminated)
+                truncated_list.append(truncated)
+                epoch_id_list.append(i)
+                epoch_size += 1
+                if terminated or truncated:
+                    break
             # if size is too small, pad with PAD_VALUE
             if epoch_size < min_steps:
                 for j in range(min_steps - epoch_size):
@@ -146,6 +174,7 @@ def collect_suboptimal_data(env_name: str, env: BaseMiniGridEnv, num_eposides: i
             epoch_size_list.append(epoch_size)
     else:
         raise ValueError(f"Unknown mini_grid_type: {mini_grid_type}")
+    print(f"{len(epoch_size_list)} valid episodes collected")
     data = {
         "observations": np.vstack(obs_list).astype(np.float32),
         "next_observations": np.vstack(next_obs_list).astype(np.float32),
@@ -160,6 +189,14 @@ def collect_suboptimal_data(env_name: str, env: BaseMiniGridEnv, num_eposides: i
 
 
 if __name__ == "__main__":
-    env = MultiModalityMiniGridEnv(agent_start_pos=None, render_mode="human")
-    random_action_prob = 0.0
-    collect_data_mini_grid(env_name="MiniGrid-MM", env=env, num_eposides=1000, max_steps=100, strategies=["suboptimal"], random_action_prob=random_action_prob)
+    env = BaseMiniGridEnv(agent_start_pos=None, render_mode="human")
+    random_action_prob = 0.1
+    collect_data_mini_grid(
+        env_name="MiniGrid-Base",
+        env=env,
+        num_eposides=1000,
+        max_steps=100,
+        min_steps=5,
+        strategies=["suboptimal"],
+        random_action_prob=random_action_prob,
+    )

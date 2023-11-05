@@ -12,3 +12,10 @@ checkpoint/*
 *.TXT
 
 *.npz
+
+.vscode/
+
+*.zip
+
+*.mp4
+*.ckpt
