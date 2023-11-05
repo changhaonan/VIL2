@@ -31,6 +31,7 @@ if __name__ == '__main__':
         'tau': 0.7, 
         'beta': 3.0,
         'horizon': 5,
+        'execute_horizon': 5,
         'enable_save': True,
         'enable_load': False,
         'log_path': log_path,
@@ -44,7 +45,7 @@ if __name__ == '__main__':
     if config['enable_load']:
         df.load(os.path.join(check_point_path, 'df.pth'))
     else:
-        df.train(env=env, batch_size=config['batch_size'], num_epochs=config['value_epochs'], eval_period=config['eval_period'])
+        df.train(env=env, batch_size=config['batch_size'], num_epochs=config['value_epochs'], eval_period=config['eval_period'], execute_horizon=config['execute_horizon'])
         # save model
         if config['enable_save']:
             df.save(os.path.join(check_point_path, 'df.pth'))

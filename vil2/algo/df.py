@@ -38,11 +38,11 @@ class DF(OfflinePolicy):
             hidden_size=df_hidden_dim, hidden_layers=df_hidden_layer, emb_size=df_emb_size).to(self.device)
         self.noise_optimizer = torch.optim.Adam(self.noise_model.parameters(), lr=policy_lr, weight_decay=weight_decay)
         
-    def train(self, env, batch_size: int, num_epochs: int, eval_period: int):
+    def train(self, env, batch_size: int, num_epochs: int, eval_period: int, execute_horizon: int = 1):
         """Train DF"""
         #TODO: maybe use torch scatter to accelerate the sampling process
-        self.noise_model.train()
         for epoch in range(num_epochs):
+            self.noise_model.train()
             # sample a batch of epochs
             # randomly select a chunk of horizon
             batch_epoch_ids = torch.randint(low=0, high=self.num_data_epochs, size=(batch_size,), device=self.device)
@@ -71,7 +71,9 @@ class DF(OfflinePolicy):
             policy_loss = self.update_policy(batch_observations, batch_actions, batch_rewards, batch_terminals)
             if epoch % eval_period == 0:
                 print(f"Epoch {epoch}, policy loss {policy_loss}")
-                self.evaluate(env, num_epochs=10, epoch=epoch, enable_render=self.render_eval)
+                # visualize the diffusion
+                self.visualize_diffusion(batch_observations, batch_actions, epoch, sampling_strategy="ddpm")
+                self.evaluate(env, num_epochs=10, epoch=epoch, enable_render=self.render_eval, execute_horizon=execute_horizon)
 
     def update_policy(self, observations, actions, rewards, terminals):
         """Update policy; using ddpm"""
@@ -91,9 +93,10 @@ class DF(OfflinePolicy):
 
         return loss.item()
 
-    def predict(self, observations, sampling_strategy: str = "ddpm"):
+    def predict(self, observations, sampling_strategy: str = "ddpm", normalized: bool = False):
         """Predict using ddpm sampling"""
-        observations = torch.from_numpy(observations).float().to(self.device)
+        if isinstance(observations, np.ndarray):
+            observations = torch.from_numpy(observations).float().to(self.device)
         if len(observations.shape) == 1:
             observations = observations.unsqueeze(0)
         self.noise_model.eval()
@@ -108,10 +111,10 @@ class DF(OfflinePolicy):
             else:
                 raise ValueError(f"Unknown sampling strategy: {sampling_strategy}")
             # clip and rescale
-            if self.action_range is not None:
-                horizon_actions = torch.clamp(horizon_actions, -1, 1)
+            horizon_actions = torch.clamp(horizon_actions, -1, 1)
+            if (not normalized) and self.action_range is not None:
                 horizon_actions = (horizon_actions + 1) / 2 * (self.action_range[:, 1] - self.action_range[:, 0]) + self.action_range[:, 0]
-            return horizon_actions.detach().cpu().numpy().squeeze(0)
+            return horizon_actions.detach().cpu().numpy().squeeze()
     
     def save(self, path: str):
         """Save model"""
@@ -126,6 +129,18 @@ class DF(OfflinePolicy):
         self.noise_model.load_state_dict(checkpoint['noise_model'])
         print(f"Load model from {path}")
 
-    def visualize_diffusion(self, observations, actions, sampling_strategy: str = "ddpm"):
+    def visualize_diffusion(self, observations, actions, epoch: int, sampling_strategy: str = "ddpm"):
         """Visualize the diffusion training result"""
-        pred_actions = self.predict(observations, sampling_strategy=sampling_strategy)
+        # pred_actions = self.predict(observations, sampling_strategy=sampling_strategy, normalized=True)
+        # actions_np = actions.detach().cpu().numpy()
+        # # visualize
+        # misc_utils.plot_hist_scatter(pred_actions, title="pred_actions", fig_name=f"pred_actions_{epoch}.png", save_path=self.log_path)
+
+        # # actions are already normalized
+        # misc_utils.plot_hist_scatter(actions_np, title="actions", fig_name=f"actions_{epoch}.png", save_path=self.log_path)
+
+        # check the distribution
+        repeat_times = 100
+        repeat_observation = observations[0, :].repeat(repeat_times, 1)
+        pred_actions = self.predict(repeat_observation, sampling_strategy=sampling_strategy, normalized=True)
+        misc_utils.plot_hist_scatter(pred_actions, title="pred_actions", fig_name=f"pred_actions_{epoch}.png", save_path=self.log_path)

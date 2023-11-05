@@ -72,10 +72,13 @@ class OfflinePolicy:
     def predict(self, observations):
         raise NotImplementedError
 
-    def evaluate(self, env, num_epochs: int, epoch: int, enable_render: bool = False):
+    def evaluate(self, env, num_epochs: int, epoch: int, execute_horizon: int = 1, enable_render: bool = False):
         """Evaluate the policy on env; log the result"""
         epoch_dir = os.path.join(self.log_path, f"epoch-{epoch}")
         os.makedirs(epoch_dir, exist_ok=True)
+        # clean files in epoch_dir
+        for file in os.listdir(epoch_dir):
+            os.remove(os.path.join(epoch_dir, file))
         step_sum = 0.0
         reward_sum = 0.0
         for i in range(num_epochs):
@@ -83,17 +86,21 @@ class OfflinePolicy:
             step_epoch = 0
             reward_epoch = 0.0
             while True:
-                if enable_render:
-                    image = env.render()
-                    if self.log_path is not None:
-                        cv2.imwrite(os.path.join(epoch_dir, f"i-{i}-step-{step_epoch}.png"), image)
                 if "image" in obs:
                     obs = obs["image"]
                 action = self.predict(obs)
-                action = action[:self.action_dim]  # use the first action
-                obs, reward, terminated, truncated, info = env.step(action)
-                reward_epoch += reward
-                step_epoch += 1
+                execute_horizon = min(execute_horizon, int(action.shape[0] / self.action_dim))
+                for j in range(int(execute_horizon)):
+                    if enable_render:
+                        image = env.render()
+                        if self.log_path is not None:
+                            cv2.imwrite(os.path.join(epoch_dir, f"i-{i}-step-{step_epoch}.png"), image)
+                    action_j = action[j * self.action_dim: (j + 1) * self.action_dim]  # use the first action
+                    obs, reward, terminated, truncated, info = env.step(action_j)
+                    reward_epoch += reward
+                    step_epoch += 1
+                    if terminated or truncated:
+                        break
                 if terminated or truncated:
                     if i == 0:
                         print(f"========== Epoch: {epoch} ==========")
