@@ -3,9 +3,11 @@
 from __future__ import annotations
 import numpy as np
 import tqdm
+from copy import deepcopy
 from minigrid.core.actions import Actions
-from vil2.env.mini_grid.base import BaseMiniGridEnv
+from vil2.env.mini_grid.base import BaseMiniGridEnv, minigrid_plan
 from vil2.env.mini_grid.multi_modality import MultiModalityMiniGridEnv
+from vil2.env.mini_grid.local_min import LocalMinGridEnv
 
 
 PAD_VALUE = 0
@@ -19,6 +21,7 @@ def collect_data_mini_grid(
     min_steps: int,
     strategies: list[str],
     random_action_prob: float = 0.0,
+    way_points_list: list[tuple[int, int]] = None,
     output_path=None,
 ):
     """Collect offline data for MiniGrid"""
@@ -27,7 +30,8 @@ def collect_data_mini_grid(
         num_eposides = [num_eposides] * len(strategies)
     for i, strategy in enumerate(strategies):
         if strategy == "navigate":
-            data_list.append(collect_navigate_data(env_name, env, num_eposides[i], max_steps, min_steps))
+            data_list.append(collect_navigate_data(
+                env_name, env, num_eposides[i], max_steps, min_steps))
         elif strategy == "suboptimal":
             data_list.append(
                 collect_suboptimal_data(
@@ -37,6 +41,7 @@ def collect_data_mini_grid(
                     max_steps,
                     min_steps,
                     random_action_prob=random_action_prob,
+                    way_points_list=way_points_list,
                 )
             )
         else:
@@ -118,6 +123,7 @@ def collect_suboptimal_data(
     max_steps: int,
     min_steps: int,
     random_action_prob: float = 0.0,
+    way_points_list: list[tuple[int, int]] = None,
 ):
     """Path planning for mini-grid"""
     obs_list = []
@@ -130,36 +136,40 @@ def collect_suboptimal_data(
     epoch_size_list = []
     print("Collecting optimal data")
     mini_grid_type = env_name.split("-")[1].lower()
-    if mini_grid_type == "base" or mini_grid_type == "mm":
+    if mini_grid_type == "base" or mini_grid_type == "mm" or mini_grid_type == "lm":
         for i in tqdm.tqdm(range(num_eposides)):
             seed_i = i
             obs, _ = env.reset(seed=seed_i)
-            goal_pose = env.goal_poses[np.random.choice(len(env.goal_poses))]  # select a random goal
+            goal_pose = env.goal_poses[np.random.choice(
+                len(env.goal_poses))]  # select a random goal
 
-            # print("Agent position: ", env.agent_pos, " || ", goal_pose)
-            action_trajectory = env.optimal_action_trajectory(
-                env.agent_pos, goal_pose, random_action_prob=random_action_prob, max_steps=max_steps,seed=seed_i
-            )
-            if len(action_trajectory) == 0:
-                continue  # No path found
-            epoch_size = 0
-            for action in action_trajectory:
-                if action is None:
-                    break
-                # collect data
-                obs_list.append(obs[None, :])
-                # step
-                obs, reward, terminated, truncated, info = env.step(action)
-                # collect data
-                next_obs_list.append(obs[None, :])
-                reward_list.append(reward)
-                action_list.append(action)
-                terminated_list.append(terminated)
-                truncated_list.append(truncated)
-                epoch_id_list.append(i)
-                epoch_size += 1
-                if terminated or truncated:
-                    break
+            way_points_ep = deepcopy(
+                way_points_list[np.random.choice(len(way_points_list))])
+            way_points_ep.append(goal_pose)
+            for way_point in way_points_ep:
+                # print("Agent position: ", env.agent_pos, " || ", goal_pose)
+                action_trajectory = minigrid_plan(
+                    env, way_point, random_action_prob=random_action_prob)
+                if len(action_trajectory) == 0:
+                    continue  # No path found
+                epoch_size = 0
+                for action in action_trajectory:
+                    if action is None:
+                        break
+                    # collect data
+                    obs_list.append(obs[None, :])
+                    # step
+                    obs, reward, terminated, truncated, info = env.step(action)
+                    # collect data
+                    next_obs_list.append(obs[None, :])
+                    reward_list.append(reward)
+                    action_list.append(action)
+                    terminated_list.append(terminated)
+                    truncated_list.append(truncated)
+                    epoch_id_list.append(i)
+                    epoch_size += 1
+                    if terminated or truncated:
+                        break
             # if size is too small, pad with PAD_VALUE
             if epoch_size < min_steps:
                 for j in range(min_steps - epoch_size):
