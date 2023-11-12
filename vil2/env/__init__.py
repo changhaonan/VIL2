@@ -9,15 +9,14 @@ from .push_t.push_t_base import PushTEnv, PushTImageEnv
 from .lgmcts_bot import LgmctsEnvWrapper
 
 
-def env_builder(env_name, **kwargs):
+def env_builder(env_name, render_mode="rgb_array", cfg=None):
     if env_name == "maze":
         # return MazeTree(**kwargs)
         raise ImportError("Maze env not defined")
     elif env_name.split("-")[0].lower() == "minigrid":
-        render_mode = kwargs.pop("render_mode", "rgb_array")
         mini_grid_type = env_name.split("-")[1].lower()
-        agent_start_pos = kwargs.pop("agent_start_pos", None)
-        goal_poses = kwargs.pop("goal_poses", None)
+        agent_start_pos = cfg.pop("START_POS", None)
+        goal_poses = cfg.pop("GOAL_POSES", None)
         if mini_grid_type == "mm":
             return MultiModalityMiniGridEnv(agent_start_pos=agent_start_pos, render_mode=render_mode)
         elif mini_grid_type == "lm":
@@ -25,11 +24,10 @@ def env_builder(env_name, **kwargs):
         else:
             return BaseMiniGridEnv(agent_start_pos=agent_start_pos, render_mode=render_mode)
     elif env_name.split("-")[0].lower() == "push_t":
-        render_mode = kwargs.pop("render_mode", "rgb_array")
         return PushTImageEnv()  # default PushT
     elif env_name.split("-")[0].lower() == "lgmcts":
         task_name = env_name.split("-")[1].lower()
-        debug = kwargs.pop("debug", False)
+        debug = cfg.pop("debug", False)
         env = LgmctsEnvWrapper(
             task_name=task_name,
             task_kwargs=lgmcts.PARTITION_TO_SPECS["train"][task_name],

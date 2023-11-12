@@ -24,12 +24,12 @@ class BaseMiniGridEnv(MiniGridEnv):
         max_steps: int | None = None,
         **kwargs,
     ):
-        self.agent_start_pos = agent_start_pos
+        self.agent_start_pos = tuple(agent_start_pos)
         self.agent_start_dir = agent_start_dir
 
         # Define a mission (task)
         mission_space = MissionSpace(mission_func=self._gen_mission)
-        self.goal_poses = goal_poses
+        self.goal_poses = [tuple(goal_pos) for goal_pos in goal_poses]
         if max_steps is None:
             max_steps = 4 * grid_size**2
 

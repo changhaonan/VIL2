@@ -149,7 +149,7 @@ def collect_suboptimal_data(
             for way_point in way_points_ep:
                 # print("Agent position: ", env.agent_pos, " || ", goal_pose)
                 action_trajectory = minigrid_plan(
-                    env, way_point, random_action_prob=random_action_prob)
+                    env, tuple(way_point), random_action_prob=random_action_prob)
                 if len(action_trajectory) == 0:
                     continue  # No path found
                 epoch_size = 0
