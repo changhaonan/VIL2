@@ -434,7 +434,7 @@ if __name__ == "__main__":
     start_pos = (2, 2)
     goal_pos = (8, 8)
 
-    env = BaseMiniGridEnv(render_mode="human", agent_start_pos=start_pos)
+    env = BaseMiniGridEnv(grid_size=20, render_mode="human", agent_start_pos=start_pos)
     env.reset()
 
     start_pos = env.agent_pos

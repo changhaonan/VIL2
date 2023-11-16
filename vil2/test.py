@@ -1,15 +1,13 @@
-import d4rl
-import gym
-import os
+from vil2.env import env_builder
 
-root_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-check_point_path = os.path.join(root_path, 'checkpoint')
-os.makedirs(check_point_path, exist_ok=True)
-# Create the environment
-env = gym.make('maze2d-umaze-v1')
 
-# d4rl abides by the OpenAI gym interface
-env.reset()
-for i in range(1000):
-    env.step(env.action_space.sample())
-    env.render()
+if __name__ == "__main__":
+    env_name = "GYM-PointMaze_UMaze-v3"
+    env = env_builder(env_name, render_mode="human", cfg={})
+    env.reset()
+    for i in range(1000):
+        action = env.action_space.sample()
+        obs, reward, done, truncated, info = env.step(action)
+        env.render()
+        if done:
+            env.reset()

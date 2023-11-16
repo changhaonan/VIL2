@@ -38,6 +38,9 @@ def env_builder(env_name, render_mode="rgb_array", cfg=None):
             hide_arm_rgb=(not debug),
         )
         return env
+    elif env_name.split("-")[0].lower() == "gym":
+        gym_env_name = env_name[4:]
+        return gym.make(gym_env_name, render_mode=render_mode)
     else:
         raise ValueError(f"Unknown env_name: {env_name}")
 

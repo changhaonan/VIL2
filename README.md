@@ -19,3 +19,10 @@ export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libGLEW.so
 - [ ] Offline-RL
 - [ ] Diffusion-policies
 - [ ] Max-diff RL
+
+## Trouble-shooting
+
+There is `cypython` problem can be found [here](https://github.com/openai/mujoco-py/issues/773).
+```bash
+pip install "cython<3"
+```
