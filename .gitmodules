@@ -1,3 +1,6 @@
 [submodule "external/LGMCTS-D"]
 	path = external/LGMCTS-D
 	url = git@github.com:changhaonan/LGMCTS-D.git
+[submodule "external/IsaacGymEnvs"]
+	path = external/IsaacGymEnvs
+	url = https://github.com/NVIDIA-Omniverse/IsaacGymEnvs.git
