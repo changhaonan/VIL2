@@ -24,24 +24,28 @@ if __name__ == "__main__":
 
     config = {
         'batch_size': 512,
-        'value_epochs': 1000,
+        'num_epochs': 600,
         'eval_period': 1000,
         'q_hidden_dim': 256,
         'v_hidden_dim': 256,
-        'policy_hidden_dim': 256,
-        'tau': 0.7,
-        'beta': 10.0,
+        'tau': 0.7,  # iql related
+        'gamma': 0.99,  # reward discount
+        'alpha': 0.1,
         'enable_save': True,
         'enable_load': False,
         'log_path': log_path,
-        "action_deterministic": False,
         'render_eval': True,  # render evaluation
+        'lamda': 10.0,  # regularization parameter
+        'policy_std': 0.1,
+        'sample_size': 32,
+        'num_diffusion_iters': 5,
+        'a_lazy_init': True,  # use last a_0 to init current a_T
     }
 
     oqdp = OQDP(env=env, config=config)
 
     # do train
     oqdp.train(batch_size=config['batch_size'],
-               num_epochs=config['value_epochs'],)
+               num_epochs=config['num_epochs'],)
 
-    oqdp.save(check_point_path)
+    oqdp.save(os.path.join(check_point_path, 'model.pt'))

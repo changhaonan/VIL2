@@ -1,12 +1,10 @@
 # from .maze_2d import MazeTree
 import gymnasium as gym
-import lgmcts
 from .mini_grid.base import BaseMiniGridEnv
 from .mini_grid.multi_modality import MultiModalityMiniGridEnv
 from .mini_grid.local_min import LocalMinGridEnv
 from .mini_grid.collect_data import collect_data_mini_grid
 from .push_t.push_t_base import PushTEnv, PushTImageEnv
-from .lgmcts_bot import LgmctsEnvWrapper
 
 
 def env_builder(env_name, render_mode="rgb_array", cfg=None):
@@ -28,6 +26,8 @@ def env_builder(env_name, render_mode="rgb_array", cfg=None):
     elif env_name.split("-")[0].lower() == "lgmcts":
         task_name = env_name.split("-")[1].lower()
         debug = cfg.pop("debug", False)
+        import lgmcts
+        from .lgmcts_bot import LgmctsEnvWrapper
         env = LgmctsEnvWrapper(
             task_name=task_name,
             task_kwargs=lgmcts.PARTITION_TO_SPECS["train"][task_name],

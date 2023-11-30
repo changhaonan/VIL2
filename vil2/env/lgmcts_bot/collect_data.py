@@ -27,15 +27,16 @@ def collect_data_lgmcts_bot(
         num_eposides = [num_eposides] * len(strategies)
     for i, strategy in enumerate(strategies):
         if strategy == "navigate":
-            data_list.append(collect_random_data(env_name, env, num_eposides[i], max_steps))
-        elif strategy == "suboptimal":   
+            data_list.append(collect_random_data(
+                env_name, env, num_eposides[i], max_steps))
+        elif strategy == "suboptimal":
             data, meta_data = collect_suboptimal_data(
-                    env_name=env_name,
-                    env=env,
-                    num_eposides=num_eposides[i],
-                    max_steps=max_steps,
-                    random_action_prob=random_action_prob,
-                )
+                env_name=env_name,
+                env=env,
+                num_eposides=num_eposides[i],
+                max_steps=max_steps,
+                random_action_prob=random_action_prob,
+            )
             data_list.append(data)
             meta_data_list.append(meta_data)
         else:
@@ -58,8 +59,10 @@ def collect_data_lgmcts_bot(
                 meta_data_merge[key] = []
             meta_data_merge[key].append(value)
     if "episode_len" in meta_data_merge:
-        meta_data_merge["episode_len"] = np.hstack(meta_data_merge["episode_len"])
-        meta_data_merge["episode_ends"] = np.cumsum(meta_data_merge["episode_len"])
+        meta_data_merge["episode_len"] = np.hstack(
+            meta_data_merge["episode_len"])
+        meta_data_merge["episode_ends"] = np.cumsum(
+            meta_data_merge["episode_len"])
 
     if output_path is not None:
         root = zarr.open(f"{output_path}/{env_name}.zarr", mode="w")
@@ -69,7 +72,8 @@ def collect_data_lgmcts_bot(
         data.create_dataset("action", data=data_merge["action"])
         data.create_dataset("reward", data=data_merge["reward"])
         data = root.create_group("meta")
-        data.create_dataset("episode_ends", data=meta_data_merge["episode_ends"])
+        data.create_dataset(
+            "episode_ends", data=meta_data_merge["episode_ends"])
     return data_merge
 
 
@@ -105,7 +109,8 @@ def collect_suboptimal_data(
                 obs_img_list.append(obs["image"][None, ...])
                 obs_state_list.append(obs["state"][None, ...])
                 reward_list.append(reward)
-                action_list.append(np.hstack([action["pose0_position"], action["pose1_position"]]))
+                action_list.append(
+                    np.hstack([action["pose0_position"], action["pose1_position"]]))
                 step_count += 1
                 if terminated:
                     break
@@ -124,16 +129,16 @@ def collect_suboptimal_data(
     meta_data = {
         "episode_len": episode_len,
     }
-    return data, meta_data  
-    
+    return data, meta_data
 
 
 if __name__ == "__main__":
     # prepare env
-    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    root_dir = os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     export_dir = os.path.join(root_dir, "test_data", "lgmcts_bot")
     os.makedirs(export_dir, exist_ok=True)
-    
+
     task_name = f"push_object_{seed}"
     debug = False
 

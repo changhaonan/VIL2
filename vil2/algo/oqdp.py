@@ -62,9 +62,10 @@ class OQDP:
         # parameters to search
         self.action_noise_type = config.get('action_noise_type', 'gaussian')
         self.policy_std = config.get('policy_std', 0.1)
-        self.lambda_ = config.get('lambda_', 10.0)  # balancing parameter
+        self.lambda_ = config.get('lambda', 10.0)  # balancing parameter
         self.sample_size = config.get('sample_size', 1)
         self.num_diffusion_iters = config.get('num_diffusion_iters', 10)
+        self.a_lazy_init = config.get('a_lazy_init', True)
         # optimization related
         self.q_update_freq = config.get('q_update_freq', 1)
         self.target_update_freq = config.get('target_update_freq', 10)
@@ -151,23 +152,37 @@ class OQDP:
             obs, _ = self.env.reset(seed=epoch)
             step_epoch = 0
             reward_epoch = 0.0
+            actions = None
+            epoch_dir = os.path.join(self.log_path, f"epoch-{epoch}")
             while True:
-                action = self.predict(obs, track_a=(epoch == 0))
-                if enable_render:
+                actions = self.predict(
+                    obs, prev_actions=actions, noise_level=self.policy_std)
+                action = actions[np.random.choice(actions.shape[0])]
+                next_obs, reward, terminated, truncated, info = self.env.step(
+                    action)
+
+                if reward > 0:
+                    terminated = True  # force early termination
+                    reward = 10.0  # amplify reward
+                # move to gpu
+                # add to memory
+                self.memory.push(obs, action, next_obs, reward, terminated)
+                # update info
+                obs = next_obs
+                reward_epoch += reward
+                step_epoch += 1
+                if terminated or truncated:
+                    break
+                # do visualization
+                if enable_render and epoch % 50 == 0:
                     image = self.env.render()
-                    next_obs, reward, terminated, truncated, info = self.env.step(
-                        action)
-                    # move to gpu
-                    # add to memory
-                    self.memory.push(obs, action, next_obs, reward, terminated)
-                    # update info
-                    obs = next_obs
-                    reward_epoch += reward
-                    step_epoch += 1
-                    if terminated or truncated:
-                        break
-                    # optimize model
-                    self.optimize_model(epoch, batch_size=batch_size)
+                    if self.log_path is not None:
+                        if not os.path.exists(epoch_dir):
+                            os.makedirs(epoch_dir, exist_ok=True)
+                        cv2.imwrite(os.path.join(
+                            epoch_dir, f"step-{step_epoch}.png"), image)
+                # optimize model
+                self.optimize_model(epoch, batch_size=batch_size)
                 if terminated or truncated:
                     if epoch == 0:
                         print(f"========== Epoch: {epoch} ==========")
@@ -177,7 +192,7 @@ class OQDP:
             t_epoch.set_description(
                 f"Epoch: {epoch}, Reward: {reward_epoch}, Step: {step_epoch}")
             # log
-            if epoch % 10 == 0:
+            if epoch % 1 == 0:
                 if self.log_path is not None:
                     with open(os.path.join(self.log_path, "eval.txt"), "a") as f:
                         f.write(
@@ -245,17 +260,22 @@ class OQDP:
 
     def predict(self, observations: np.ndarray | dict[str, np.ndarray],  **kwargs) -> np.ndarray:
         """a_i = 2 * beta_i / lambda * nabla_{a_{i-1}}Q(s, a_{i-1}) + a_{i-1}"""
-        track_a = kwargs.get('track_a', True)
-        # Step 1: Sample a batch of actions from pure guassian/uniform noise
-        if self.action_noise_type == "gaussian":
-            a_T = np.random.normal(
-                loc=0.0, scale=1.0/3.0, size=(self.sample_size, self.action_dim))
-        elif self.action_noise_type == "uniform":
-            a_T = np.random.uniform(
-                low=-1.0, high=1.0, size=(self.sample_size, self.action_dim))
+        noise_level = kwargs.get('noise_level', 0.0)
+        # Step 1: Sample a batch of actions from pure guassian/uniform noise or previous actions
+        if self.a_lazy_init and (prev_actions := kwargs.get('prev_actions', None)) is not None:
+            a_T = prev_actions + \
+                np.random.normal(loc=0.0, scale=self.policy_std, size=(
+                    self.sample_size, self.action_dim))
         else:
-            raise ValueError(
-                "Unknown action noise type: {}".format(self.action_noise_type))
+            if self.action_noise_type == "gaussian":
+                a_T = np.random.normal(
+                    loc=0.0, scale=1.0/3.0, size=(self.sample_size, self.action_dim))
+            elif self.action_noise_type == "uniform":
+                a_T = np.random.uniform(
+                    low=-1.0, high=1.0, size=(self.sample_size, self.action_dim))
+            else:
+                raise ValueError(
+                    "Unknown action noise type: {}".format(self.action_noise_type))
         # Step 2: Do denoising process
         if isinstance(observations, np.ndarray):
             s = torch.from_numpy(observations).float().to(self.device)
@@ -263,7 +283,6 @@ class OQDP:
             s = observations
         s = torch.repeat_interleave(
             s[None, :], self.sample_size, dim=0).detach()  # no-gradient
-        a_ts = []
         for t in range(self.num_diffusion_iters):
             if t == 0:
                 a_t = torch.from_numpy(a_T).float().to(
@@ -271,21 +290,19 @@ class OQDP:
             else:
                 a_t = a_t.clone().detach()
                 a_t.requires_grad_(True)
-            if track_a:
-                a_t_numpy = a_t.detach().cpu().numpy()
-                # sorted by x
-                a_t_numpy = a_t_numpy[a_t_numpy[:, 0].argsort()]
-                a_ts.append(a_t_numpy)
             a_t = self.denoise(a_t, s, t)
         # Step 3: Scale back to action range
-        action = torch.clamp(a_t, -1, 1)
-        action = action.detach().cpu().numpy()
+        # add noise (for exploration)
+        if noise_level > 0.0:
+            a_t = a_t + \
+                torch.from_numpy(np.random.normal(
+                    loc=0.0, scale=noise_level, size=a_t.shape)).float().to(self.device)
+        actions = torch.clamp(a_t, -1, 1)
+        actions = actions.detach().cpu().numpy()
         if self.action_range is not None:
-            action = (action + 1) / 2 * (
+            actions = (actions + 1) / 2 * (
                 self.action_range[:, 1] - self.action_range[:, 0]) + self.action_range[:, 0]
-        # Step 4: Sample one from the batch
-        action = action[0]
-        return action
+        return actions
 
     def denoise(self, a: torch.Tensor, s: torch.Tensor, t: int):
         """Denoising step"""
