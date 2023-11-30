@@ -25,4 +25,5 @@ if __name__ == "__main__":
             0: np.array([0.0, 0.0, 0.5 * np.sin(i * 0.1), 0.0, 0.0, 0.0, 1.0]),
         }
         obs, reward, done, info = env.step(action)
-        env.render()
+        env.render(show_super_patch=True)
+        print(obs)

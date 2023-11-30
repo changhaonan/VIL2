@@ -6,6 +6,7 @@ from vil2.utils import load_utils
 from vil2.utils import misc_utils
 import open3d as o3d
 from copy import deepcopy
+from vil2.algo.super_patch import generate_random_patch
 
 
 class ObjSim(gym.Env):
@@ -15,7 +16,7 @@ class ObjSim(gym.Env):
         super().__init__()
         self.cfg = cfg
         # load objs
-        self.objs = []
+        self.objs: list[ObjData] = []
         self._obj_names = dict()
         self._obj_init_poses = dict()
         obj_source = cfg.ENV.obj_source
@@ -23,6 +24,11 @@ class ObjSim(gym.Env):
             self._load_objs_google_scanned_objects()
         else:
             raise ValueError(f"Unknown obj_source: {obj_source}")
+        # generate super patch
+        for obj in self.objs:
+            obj.super_patch, obj.patch_center = self.generate_obj_super_patch(
+                obj.semantic_id, cfg.ENV.super_patch_size
+            )
 
     def _load_objs_google_scanned_objects(self):
         obj_names = self.cfg.ENV.obj_names
@@ -63,7 +69,17 @@ class ObjSim(gym.Env):
         if isinstance(action, dict):
             for obj_name, action in action.items():
                 self._step_single_obj(obj_name, action)
-        return None, None, None, None
+        # Compute observation
+        obs = {}
+        # compute pairwise distance
+        for i, obj1 in enumerate(self.objs):
+            for j, obj2 in enumerate(self.objs):
+                if i == j:
+                    continue
+                obs[f"dist_{i}_{j}"] = self.compute_pairwise_patch_distance(
+                    obj1.semantic_id, obj2.semantic_id
+                )
+        return obs, None, None, None
 
     def _step_single_obj(self, obj_id, action):
         delta_pos = action[:3]
@@ -73,14 +89,47 @@ class ObjSim(gym.Env):
         pose[:3, :3] = misc_utils.quat_to_mat(delta_quat) @ pose[:3, :3]
         self.objs[obj_id].pose = pose
 
-    def render(self):
+    def generate_obj_super_patch(self, obj_id, patch_size):
+        """Generate super-patch for a given object."""
+        obj = self.objs[obj_id]
+        super_patch, patch_centers = generate_random_patch(obj.geometry, num_points=patch_size)
+        return super_patch, patch_centers
+
+    def compute_pairwise_patch_distance(self, obj_id1, obj_id2):
+        """Compute pairwise distance between all patches of two objects."""
+        distances = np.zeros((len(self.objs[obj_id1].super_patch), len(self.objs[obj_id2].super_patch)))
+        patch_centers1 = self.objs[obj_id1].patch_center
+        patch_centers2 = self.objs[obj_id2].patch_center
+        for i, patch_center1 in enumerate(patch_centers1):
+            for j, patch_center2 in enumerate(patch_centers2):
+                distances[i, j] = np.linalg.norm(patch_center1 - patch_center2)
+        return distances
+
+    def render(self, show_super_patch=False):
         """Render object in open3d."""
         # render in open3d
         vis_list = []
         for obj in self.objs:
-            vis_obj = deepcopy(obj.geometry)
-            vis_obj.transform(obj.pose)
-            vis_list.append(vis_obj)
+            if not show_super_patch:
+                vis_obj = deepcopy(obj.geometry)
+                vis_obj.transform(obj.pose)
+                vis_list.append(vis_obj)
+            else:
+                for i, patch in enumerate(obj.super_patch):
+                    vis_patch = deepcopy(patch)
+                    vis_patch.transform(obj.pose)
+                    # random color
+                    color = np.random.rand(3)
+                    vis_patch.paint_uniform_color(color)
+                    vis_list.append(vis_patch)
+                    # patch center
+                    patch_center = obj.patch_center[i]
+                    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
+                    sphere.translate(patch_center)
+                    sphere.transform(obj.pose)
+                    sphere.paint_uniform_color(color)
+                    vis_list.append(sphere)
+
         # add coordinate frame
         coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
             size=0.1, origin=[0, 0, 0]
