@@ -70,7 +70,6 @@ def generate_random_patch(geometry: o3d.geometry.TriangleMesh, num_points: int, 
         # remove duplicated vertices
         patch.remove_duplicated_vertices()
         #
-        patch_pcd = o3d.geometry.PointCloud()
-        patch_pcd.points = o3d.utility.Vector3dVector(patch.vertices)
+        patch_pcd = deepcopy(np.asarray(patch.vertices))
         super_patch.append(patch_pcd)
     return super_patch, np.asarray(sampled_points.points)

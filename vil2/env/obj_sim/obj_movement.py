@@ -15,6 +15,7 @@ class ObjSim(gym.Env):
     def __init__(self, cfg: dict) -> None:
         super().__init__()
         self.cfg = cfg
+        self.max_iter = cfg.ENV.max_iter
         # load objs
         self.objs: list[ObjData] = []
         self._obj_names = dict()
@@ -24,10 +25,12 @@ class ObjSim(gym.Env):
             self._load_objs_google_scanned_objects()
         else:
             raise ValueError(f"Unknown obj_source: {obj_source}")
+        self._obj_traj = dict()
+        self._t = 0
         # generate super patch
         for obj in self.objs:
             obj.super_patch, obj.patch_center = self.generate_obj_super_patch(
-                obj.semantic_id, cfg.ENV.super_patch_size
+                obj.id, cfg.ENV.super_patch_size
             )
 
     def _load_objs_google_scanned_objects(self):
@@ -52,7 +55,7 @@ class ObjSim(gym.Env):
             obj_data = ObjData(
                 pose=pose,
                 semantic_str=obj_name,
-                semantic_id=semantic_id,
+                id=semantic_id,
                 semantic_feature=None,
                 pcd=geometry.vertices,
                 geometry=geometry,
@@ -64,22 +67,38 @@ class ObjSim(gym.Env):
         # set obj back to init pose
         for obj in self.objs:
             obj.pose = self._obj_init_poses[obj.semantic_str]
+        # set obj traj to empty
+        self._obj_traj = dict()
+        self._t = 0
 
     def step(self, action):
         if isinstance(action, dict):
             for obj_name, action in action.items():
                 self._step_single_obj(obj_name, action)
-        # Compute observation
-        obs = {}
-        # compute pairwise distance
-        for i, obj1 in enumerate(self.objs):
-            for j, obj2 in enumerate(self.objs):
-                if i == j:
-                    continue
-                obs[f"dist_{i}_{j}"] = self.compute_pairwise_patch_distance(
-                    obj1.semantic_id, obj2.semantic_id
-                )
-        return obs, None, None, None
+        # record traj
+        for obj in self.objs:
+            if obj.id not in self._obj_traj:
+                self._obj_traj[obj.id] = []
+            self._obj_traj[obj.id].append(deepcopy(obj.pose))
+        # compute observation
+        obs = self._compute_obs()
+        # update time
+        self._t += 1
+        # check done
+        done = self._t >= self.max_iter
+        # compute reward
+        reward = self._compute_reward()
+        # compute info
+        info = self._compute_info()
+        return obs, reward, done, info
+
+    def _compute_reward(self):
+        """Compute reward for each object."""
+        return 0.0
+
+    def _compute_info(self):
+        """Compute info for each object."""
+        return {}
 
     def _step_single_obj(self, obj_id, action):
         delta_pos = action[:3]
@@ -105,7 +124,7 @@ class ObjSim(gym.Env):
                 distances[i, j] = np.linalg.norm(patch_center1 - patch_center2)
         return distances
 
-    def render(self, show_super_patch=False):
+    def render(self, show_super_patch=False, return_image=False):
         """Render object in open3d."""
         # render in open3d
         vis_list = []
@@ -116,7 +135,8 @@ class ObjSim(gym.Env):
                 vis_list.append(vis_obj)
             else:
                 for i, patch in enumerate(obj.super_patch):
-                    vis_patch = deepcopy(patch)
+                    vis_patch = o3d.geometry.PointCloud()
+                    vis_patch.points = o3d.utility.Vector3dVector(patch)
                     vis_patch.transform(obj.pose)
                     # random color
                     color = np.random.rand(3)
@@ -135,4 +155,43 @@ class ObjSim(gym.Env):
             size=0.1, origin=[0, 0, 0]
         )
         vis_list.append(coord_frame)
-        o3d.visualization.draw_geometries(vis_list)
+        if not return_image:
+            o3d.visualization.draw_geometries(vis_list)
+            return None, None
+        else:
+            # render image
+            vis = o3d.visualization.Visualizer()
+            vis.create_window(width=640, height=480, visible=False)
+            vis.add_geometry(coord_frame)
+            for obj in self.objs:
+                vis_obj = deepcopy(obj.geometry)
+                vis_obj.transform(obj.pose)
+                vis.add_geometry(vis_obj)
+            vis.poll_events()
+            vis.update_renderer()
+            image = vis.capture_screen_float_buffer(do_render=True)
+            depth_image = vis.capture_depth_float_buffer(do_render=True)  # Capture depth buffer
+            # Convert the image to a numpy array
+            image = np.asarray(image)
+            # Convert the image from BGR to RGB
+            image = image[:, :, [2, 1, 0]]
+            image = (image * 255).astype(np.uint8)
+            vis.destroy_window()
+            return np.asarray(image).copy(), np.asarray(depth_image).copy()
+
+    def _compute_obs(self):
+        # compute observation
+        obs = {}
+
+        # record traj
+        obs["trajectory"] = deepcopy(self._obj_traj)
+
+        # record geometry
+        obs["geometry"] = [deepcopy(np.asarray(obj.geometry.vertices)) for obj in self.objs]
+
+        # record super patch
+        obs["super_patch"] = [deepcopy(obj.super_patch) for obj in self.objs]
+
+        # record patch center
+        obs["patch_center"] = [deepcopy(obj.patch_center) for obj in self.objs]
+        return obs
