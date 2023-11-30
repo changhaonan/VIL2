@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import cv2
 import os
+from scipy.spatial.transform import Rotation as R
 
 
 def position_encoding(x: torch.Tensor, min_timescale: float = 1.0, max_timescale: float = 1.0e2):
@@ -180,3 +181,72 @@ def generate_video(frames, video_name="video.mp4"):
     cv2.destroyAllWindows()
 
     return video
+
+
+####################### Transform #######################
+
+
+def quat_to_mat(quat_pose):
+    if len(quat_pose.shape) > 1:
+        quat_pose = quat_pose.squeeze()
+    if quat_pose.shape[0] == 7:
+        quat = quat_pose[3:]
+        if np.linalg.norm(quat) < 1e-8:
+            quat = np.array([1.0, 0.0, 0.0, 0.0])
+        quat = quat / (np.linalg.norm(quat) + 1e-8)
+        mat = np.eye(4)
+        mat[:3, :3] = R.from_quat(quat).as_matrix()
+        mat[:3, 3] = quat_pose[:3]
+        return mat
+    elif quat_pose.shape[0] == 4:
+        quat = quat_pose
+        quat = quat / np.linalg.norm(quat)
+        mat = np.eye(3)
+        mat = R.from_quat(quat).as_matrix()
+        return mat
+    else:
+        raise NotImplementedError
+
+
+def mat_to_quat(mat_pose):
+    if mat_pose.shape == (4, 4):
+        quat = R.from_matrix(mat_pose[:3, :3]).as_quat()
+        quat_pose = np.zeros(7)
+        quat_pose[:3] = mat_pose[:3, 3]
+        quat_pose[3:] = quat
+        return quat_pose
+    elif mat_pose.shape == (3, 3):
+        quat = R.from_matrix(mat_pose).as_quat()
+        return quat
+    else:
+        raise NotImplementedError
+
+
+def mat_to_rotvec(mat_pose):
+    if mat_pose.shape == (4, 4):
+        rotvec = R.from_matrix(mat_pose[:3, :3]).as_rotvec()
+        return rotvec
+    elif mat_pose.shape == (3, 3):
+        rotvec = R.from_matrix(mat_pose).as_rotvec()
+        return rotvec
+    else:
+        raise NotImplementedError
+
+
+def quat_to_rotvec(quat_pose):
+    if quat_pose.shape == (7,):
+        quat = quat_pose[3:]
+        if np.linalg.norm(quat) < 1e-8:
+            quat = np.array([1.0, 0.0, 0.0, 0.0])
+        quat = quat / np.linalg.norm(quat)
+        rotvec = R.from_quat(quat).as_rotvec()
+        return rotvec
+    elif quat_pose.shape == (4,):
+        quat = quat_pose
+        if np.linalg.norm(quat) < 1e-8:
+            quat = np.array([1.0, 0.0, 0.0, 0.0])
+        quat = quat / np.linalg.norm(quat)
+        rotvec = R.from_quat(quat).as_rotvec()
+        return rotvec
+    else:
+        raise NotImplementedError

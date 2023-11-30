@@ -4,7 +4,7 @@ from .mini_grid.base import BaseMiniGridEnv
 from .mini_grid.multi_modality import MultiModalityMiniGridEnv
 from .mini_grid.local_min import LocalMinGridEnv
 from .mini_grid.collect_data import collect_data_mini_grid
-from .push_t.push_t_base import PushTEnv, PushTImageEnv
+# from .push_t.push_t_base import PushTEnv, PushTImageEnv
 
 
 def env_builder(env_name, render_mode="rgb_array", cfg=None):
