@@ -6,7 +6,7 @@ from vil2.utils import load_utils
 from vil2.utils import misc_utils
 import open3d as o3d
 from copy import deepcopy
-from vil2.algo.super_voxel import generate_random_patch
+from vil2.algo.super_voxel import generate_random_voxel
 
 
 class ObjSim(gym.Env):
@@ -25,14 +25,15 @@ class ObjSim(gym.Env):
             self._load_objs_google_scanned_objects()
         else:
             raise ValueError(f"Unknown obj_source: {obj_source}")
-        self._obj_traj = dict()
+        self._super_voxel_traj = dict()
         self._t = 0
         self._active_obj_id = []
-        # generate super patch
+        # generate super voxel
         for obj in self.objs:
-            obj.super_voxel, obj.voxel_center = self.generate_obj_super_patch(
+            obj.super_voxel, obj.voxel_center = self.generate_obj_super_voxel(
                 obj.id, cfg.ENV.super_patch_size
             )
+        self.super_patch_size = cfg.ENV.super_patch_size
 
     def _load_objs_google_scanned_objects(self):
         obj_names = self.cfg.ENV.obj_names
@@ -69,7 +70,7 @@ class ObjSim(gym.Env):
         for obj in self.objs:
             obj.pose = self._obj_init_poses[obj.semantic_str]
         # set obj traj to empty
-        self._obj_traj = dict()
+        self._super_voxel_traj = dict()
         self._t = 0
         self._active_obj_id = []
 
@@ -83,9 +84,14 @@ class ObjSim(gym.Env):
                 self._active_obj_id.append(obj_id)
         # record traj
         for obj in self.objs:
-            if obj.id not in self._obj_traj:
-                self._obj_traj[obj.id] = []
-            self._obj_traj[obj.id].append(deepcopy(obj.pose))
+            if obj.id not in self._super_voxel_traj:
+                self._super_voxel_traj[obj.id] = []
+            rot_vec = misc_utils.mat_to_rotvec(obj.pose)
+            obj_pose = np.concatenate([obj.pose[:3, 3], rot_vec])
+            super_voxel_pose = np.tile(obj_pose[None, :], (self.super_patch_size, 1))
+            self._super_voxel_traj[obj.id].append(
+                super_voxel_pose[None, ...]
+            )
         # compute observation
         obs = self._compute_obs()
         # update time
@@ -114,10 +120,10 @@ class ObjSim(gym.Env):
         pose[:3, :3] = misc_utils.quat_to_mat(delta_quat) @ pose[:3, :3]
         self.objs[obj_id].pose = pose
 
-    def generate_obj_super_patch(self, obj_id, patch_size):
-        """Generate super-patch for a given object."""
+    def generate_obj_super_voxel(self, obj_id, patch_size):
+        """Generate super-voxel for a given object."""
         obj = self.objs[obj_id]
-        super_voxel, voxel_centers = generate_random_patch(obj.geometry, num_points=patch_size)
+        super_voxel, voxel_centers = generate_random_voxel(obj.geometry, num_points=patch_size)
         return super_voxel, voxel_centers
 
     def compute_pairwise_patch_distance(self, obj_id1, obj_id2):
@@ -140,15 +146,15 @@ class ObjSim(gym.Env):
                 vis_obj.transform(obj.pose)
                 vis_list.append(vis_obj)
             else:
-                for i, patch in enumerate(obj.super_voxel):
+                for i, voxel in enumerate(obj.super_voxel):
                     vis_patch = o3d.geometry.PointCloud()
-                    vis_patch.points = o3d.utility.Vector3dVector(patch)
+                    vis_patch.points = o3d.utility.Vector3dVector(voxel)
                     vis_patch.transform(obj.pose)
                     # random color
                     color = np.random.rand(3)
                     vis_patch.paint_uniform_color(color)
                     vis_list.append(vis_patch)
-                    # patch center
+                    # voxel center
                     voxel_center = obj.voxel_center[i]
                     sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
                     sphere.translate(voxel_center)
@@ -190,7 +196,7 @@ class ObjSim(gym.Env):
         obs = {}
 
         # record traj
-        obs["trajectory"] = deepcopy(self._obj_traj)
+        obs["trajectory"] = deepcopy(self._super_voxel_traj)
 
         # record geometry
         obs["geometry"] = [deepcopy(np.asarray(obj.geometry.vertices)) for obj in self.objs]
@@ -198,7 +204,7 @@ class ObjSim(gym.Env):
         # record super voxel
         obs["super_voxel"] = [deepcopy(obj.super_voxel) for obj in self.objs]
 
-        # record patch center
+        # record voxel center
         obs["voxel_center"] = [deepcopy(obj.voxel_center) for obj in self.objs]
 
         # record active obj id

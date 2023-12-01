@@ -10,7 +10,7 @@ from tqdm.auto import tqdm
 
 def collect_data_sim_obj(
     env_name: str,
-    env,
+    env: ObjSim,
     num_eposides: int | list[int],
     max_steps: int,
     obs_noise_level: float,
@@ -41,15 +41,11 @@ if __name__ == "__main__":
     root_path = os.path.dirname(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     env_name = "ObjSim"
-    export_path = os.path.join(root_path, "test_data", env_name)
-    check_point_path = os.path.join(export_path, 'oqdp', 'checkpoint')
-    log_path = os.path.join(export_path, 'oqdp', 'log')
+    export_path = os.path.join(root_path, "test_data", env_name, "raw_data")
     # remove old data
     if os.path.exists(export_path):
         os.system(f"rm -r {export_path}")
     os.makedirs(export_path, exist_ok=True)
-    os.makedirs(check_point_path, exist_ok=True)
-    os.makedirs(log_path, exist_ok=True)
     cfg = LazyConfig.load(os.path.join(root_path, "config", "obj_sim.py"))
     env = ObjSim(cfg=cfg)
 

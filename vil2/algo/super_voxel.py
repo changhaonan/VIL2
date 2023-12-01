@@ -28,7 +28,7 @@ def furthest_point_sampling(points, num_samples):
     return points[sampled_indices]
 
 
-def generate_random_patch(geometry: o3d.geometry.TriangleMesh, num_points: int, seed: int = 0):
+def generate_random_voxel(geometry: o3d.geometry.TriangleMesh, num_points: int, seed: int = 0):
     np.random.seed(seed)
     # sample point using furthest point sampling
     sampled_points = o3d.geometry.PointCloud()

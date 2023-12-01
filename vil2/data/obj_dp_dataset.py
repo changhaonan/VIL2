@@ -39,28 +39,11 @@ def parser_obs(obs: dict, predict_type: str, carrier_type: str, geometry_encoder
     Return:
         img: (H, W, 3)
         depth: (H, W)
-        active_obj_traj: (horizon_length, 3/6)
+        active_obj_super_voxel_traj: (horizon_length, 3/6)
         active_obj_geometry_feat: (num_super_voxel/1, feat_dim)
         active_obj_voxel_center: (num_super_voxel/1, 3)
     """
     active_obj_id = obs["active_obj_id"][0]  # only one object
-    # Get active obj traj
-    active_obj_traj = np.vstack(obs["trajectory"][active_obj_id]).reshape(-1, 4, 4)
-    if predict_type == "horizon":
-        if active_obj_traj.shape[0] < horizon_length:
-            active_obj_traj = np.vstack(
-                [
-                    active_obj_traj,
-                    np.tile(
-                        active_obj_traj[-1][None, ...],
-                        (horizon_length - active_obj_traj.shape[0], 1, 1),
-                    ),
-                ]
-            )
-        else:
-            active_obj_traj = active_obj_traj[:horizon_length]
-    else:
-        raise ValueError(f"Unknown predict_type: {predict_type}")
 
     # Get image
     img = obs["image"]
@@ -89,16 +72,35 @@ def parser_obs(obs: dict, predict_type: str, carrier_type: str, geometry_encoder
         active_obj_voxel_center = np.mean(active_obj_super_voxels, axis=1)
     else:
         raise ValueError(f"Unknown carrier_type: {carrier_type}")
-    return img, depth, active_obj_traj, active_obj_geometry_feat, active_obj_voxel_center
+
+    # Get active obj trajectory
+    active_obj_super_voxel_traj = np.vstack(obs["trajectory"][active_obj_id])
+    if predict_type == "horizon":
+        if active_obj_super_voxel_traj.shape[0] < horizon_length:
+            active_obj_super_voxel_traj = np.vstack(
+                [
+                    active_obj_super_voxel_traj,
+                    np.tile(
+                        active_obj_super_voxel_traj[-1][None, ...],
+                        (horizon_length - active_obj_super_voxel_traj.shape[0], 1, 1),
+                    ),
+                ]
+            )
+        else:
+            active_obj_super_voxel_traj = active_obj_super_voxel_traj[:horizon_length]
+    else:
+        raise ValueError(f"Unknown predict_type: {predict_type}")
+
+    return img, depth, active_obj_super_voxel_traj, active_obj_geometry_feat, active_obj_voxel_center
 
 
-def build_objdp_dataset(data_path: str, predict_type: str, carrier_type: str, geometry_encoder: str, aggretator: str, horizon_length: int = 10):
+def build_objdp_dataset(data_path: str, export_path: str, predict_type: str, carrier_type: str, geometry_encoder: str, aggretator: str, horizon_length: int = 10):
     """Build dataset for Objwise Diffusion Policy; Transfer raw data to a standard zarr dataset
     """
     # data buffer
     img_buffer = []
     depth_buffer = []
-    obj_traj_buffer = []
+    obj_super_voxel_traj_buffer = []
     obj_geometry_feat_buffer = []
     obj_voxel_center_buffer = []
     dones_buffer = []
@@ -111,13 +113,13 @@ def build_objdp_dataset(data_path: str, predict_type: str, carrier_type: str, ge
                 with open(os.path.join(epoch_path, file_name), "rb") as f:
                     obs = pickle.load(f)
                 # parse obs
-                img, depth, active_obj_traj, active_obj_geometry_feat, active_obj_voxel_center = parser_obs(
+                img, depth, active_obj_super_voxel_traj, active_obj_geometry_feat, active_obj_voxel_center = parser_obs(
                     obs, predict_type, carrier_type, geometry_encoder, aggretator, horizon_length
                 )
                 # append to buffer
                 img_buffer.append(img)
                 depth_buffer.append(depth)
-                obj_traj_buffer.append(active_obj_traj)
+                obj_super_voxel_traj_buffer.append(active_obj_super_voxel_traj)
                 obj_geometry_feat_buffer.append(active_obj_geometry_feat)
                 obj_voxel_center_buffer.append(active_obj_voxel_center)
                 dones_buffer.append(False)
@@ -126,15 +128,15 @@ def build_objdp_dataset(data_path: str, predict_type: str, carrier_type: str, ge
     # convert to numpy & save to zarr
     img_buffer = np.stack(img_buffer)
     depth_buffer = np.stack(depth_buffer)
-    obj_traj_buffer = np.stack(obj_traj_buffer)
+    obj_super_voxel_traj_buffer = np.stack(obj_super_voxel_traj_buffer)
     obj_geometry_feat_buffer = np.stack(obj_geometry_feat_buffer)
     obj_voxel_center_buffer = np.stack(obj_voxel_center_buffer)
     dones_buffer = np.array(dones_buffer)
     # save to zarr
-    root = zarr.open(f"{data_path}/obj_dp_dataset.zarr", mode="w")
+    root = zarr.open(f"{export_path}/obj_dp_dataset.zarr", mode="w")
     root.create_dataset("img", data=img_buffer)
     root.create_dataset("depth", data=depth_buffer)
-    root.create_dataset("obj_traj", data=obj_traj_buffer)
+    root.create_dataset("obj_voxel_traj", data=obj_super_voxel_traj_buffer)
     root.create_dataset("obj_geometry_feat", data=obj_geometry_feat_buffer)
     root.create_dataset("obj_voxel_center", data=obj_voxel_center_buffer)
     root.create_dataset("dones", data=dones_buffer)
@@ -155,9 +157,10 @@ def build_objdp_dataset(data_path: str, predict_type: str, carrier_type: str, ge
 
 if __name__ == "__main__":
     build_objdp_dataset(
-        data_path="/home/robot-learning/Projects/VIL2/vil2/test_data/ObjSim",
+        data_path="/home/robot-learning/Projects/VIL2/vil2/test_data/ObjSim/raw_data",
+        export_path="/home/robot-learning/Projects/VIL2/vil2/test_data/ObjSim",
         predict_type="horizon",
         carrier_type="super_voxel",
         geometry_encoder="fake",
         aggretator="mean",
-        horizon_length=4)
+        horizon_length=8)
