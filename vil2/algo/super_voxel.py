@@ -55,8 +55,8 @@ def generate_random_patch(geometry: o3d.geometry.TriangleMesh, num_points: int, 
             sampled_points.points[i], radius
         )
         cluster_labels[indices] = i + 1  # 0 is background
-    # generate super-patch
-    super_patch = []
+    # generate super voxel
+    super_voxel = []
     for i in range(len(sampled_points.points)):
         indices = np.where(cluster_labels == (i + 1))[0]
         patch = deepcopy(geometry)
@@ -71,5 +71,5 @@ def generate_random_patch(geometry: o3d.geometry.TriangleMesh, num_points: int, 
         patch.remove_duplicated_vertices()
         #
         patch_pcd = deepcopy(np.asarray(patch.vertices))
-        super_patch.append(patch_pcd)
-    return super_patch, np.asarray(sampled_points.points)
+        super_voxel.append(patch_pcd)
+    return super_voxel, np.asarray(sampled_points.points)

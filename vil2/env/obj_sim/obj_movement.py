@@ -6,7 +6,7 @@ from vil2.utils import load_utils
 from vil2.utils import misc_utils
 import open3d as o3d
 from copy import deepcopy
-from vil2.algo.super_patch import generate_random_patch
+from vil2.algo.super_voxel import generate_random_patch
 
 
 class ObjSim(gym.Env):
@@ -27,9 +27,10 @@ class ObjSim(gym.Env):
             raise ValueError(f"Unknown obj_source: {obj_source}")
         self._obj_traj = dict()
         self._t = 0
+        self._active_obj_id = []
         # generate super patch
         for obj in self.objs:
-            obj.super_patch, obj.patch_center = self.generate_obj_super_patch(
+            obj.super_voxel, obj.voxel_center = self.generate_obj_super_patch(
                 obj.id, cfg.ENV.super_patch_size
             )
 
@@ -70,11 +71,16 @@ class ObjSim(gym.Env):
         # set obj traj to empty
         self._obj_traj = dict()
         self._t = 0
+        self._active_obj_id = []
 
     def step(self, action):
+        """Step the environment."""
+        # step each object
+        self._active_obj_id = []
         if isinstance(action, dict):
-            for obj_name, action in action.items():
-                self._step_single_obj(obj_name, action)
+            for obj_id, action in action.items():
+                self._step_single_obj(obj_id, action)
+                self._active_obj_id.append(obj_id)
         # record traj
         for obj in self.objs:
             if obj.id not in self._obj_traj:
@@ -111,17 +117,17 @@ class ObjSim(gym.Env):
     def generate_obj_super_patch(self, obj_id, patch_size):
         """Generate super-patch for a given object."""
         obj = self.objs[obj_id]
-        super_patch, patch_centers = generate_random_patch(obj.geometry, num_points=patch_size)
-        return super_patch, patch_centers
+        super_voxel, voxel_centers = generate_random_patch(obj.geometry, num_points=patch_size)
+        return super_voxel, voxel_centers
 
     def compute_pairwise_patch_distance(self, obj_id1, obj_id2):
         """Compute pairwise distance between all patches of two objects."""
-        distances = np.zeros((len(self.objs[obj_id1].super_patch), len(self.objs[obj_id2].super_patch)))
-        patch_centers1 = self.objs[obj_id1].patch_center
-        patch_centers2 = self.objs[obj_id2].patch_center
-        for i, patch_center1 in enumerate(patch_centers1):
-            for j, patch_center2 in enumerate(patch_centers2):
-                distances[i, j] = np.linalg.norm(patch_center1 - patch_center2)
+        distances = np.zeros((len(self.objs[obj_id1].super_voxel), len(self.objs[obj_id2].super_voxel)))
+        voxel_centers1 = self.objs[obj_id1].voxel_center
+        voxel_centers2 = self.objs[obj_id2].voxel_center
+        for i, voxel_center1 in enumerate(voxel_centers1):
+            for j, voxel_center2 in enumerate(voxel_centers2):
+                distances[i, j] = np.linalg.norm(voxel_center1 - voxel_center2)
         return distances
 
     def render(self, show_super_patch=False, return_image=False):
@@ -134,7 +140,7 @@ class ObjSim(gym.Env):
                 vis_obj.transform(obj.pose)
                 vis_list.append(vis_obj)
             else:
-                for i, patch in enumerate(obj.super_patch):
+                for i, patch in enumerate(obj.super_voxel):
                     vis_patch = o3d.geometry.PointCloud()
                     vis_patch.points = o3d.utility.Vector3dVector(patch)
                     vis_patch.transform(obj.pose)
@@ -143,9 +149,9 @@ class ObjSim(gym.Env):
                     vis_patch.paint_uniform_color(color)
                     vis_list.append(vis_patch)
                     # patch center
-                    patch_center = obj.patch_center[i]
+                    voxel_center = obj.voxel_center[i]
                     sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
-                    sphere.translate(patch_center)
+                    sphere.translate(voxel_center)
                     sphere.transform(obj.pose)
                     sphere.paint_uniform_color(color)
                     vis_list.append(sphere)
@@ -189,9 +195,15 @@ class ObjSim(gym.Env):
         # record geometry
         obs["geometry"] = [deepcopy(np.asarray(obj.geometry.vertices)) for obj in self.objs]
 
-        # record super patch
-        obs["super_patch"] = [deepcopy(obj.super_patch) for obj in self.objs]
+        # record super voxel
+        obs["super_voxel"] = [deepcopy(obj.super_voxel) for obj in self.objs]
 
         # record patch center
-        obs["patch_center"] = [deepcopy(obj.patch_center) for obj in self.objs]
+        obs["voxel_center"] = [deepcopy(obj.voxel_center) for obj in self.objs]
+
+        # record active obj id
+        obs["active_obj_id"] = deepcopy(self._active_obj_id)
+
+        # record image
+        obs["image"], obs["depth"] = self.render(return_image=True)
         return obs

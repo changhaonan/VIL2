@@ -12,5 +12,5 @@ class ObjData:
     semantic_feature: np.ndarray | None = None  # for open-vocab
     pcd: np.ndarray | None = None
     geometry: np.ndarray | None = None
-    super_patch: list | None = None
-    patch_center: np.ndarray | None = None
+    super_voxel: list | None = None
+    voxel_center: np.ndarray | None = None
