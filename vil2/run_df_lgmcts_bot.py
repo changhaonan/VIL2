@@ -7,7 +7,7 @@ from tqdm.auto import tqdm
 from vil2.env import env_builder
 from vil2.model.df_model import DFModel
 from vil2.model.net_factory import build_vision_encoder, build_noise_pred_net
-from vil2.data.dataset import DFImageDataset, normalize_data, unnormalize_data
+from vil2.data.dataset import DPDataset, normalize_data, unnormalize_data
 import vil2.utils.misc_utils as utils
 from detectron2.config import LazyConfig, instantiate
 
@@ -31,7 +31,7 @@ if __name__ == "__main__":
     # load dataset
     # download demonstration data from Google Drive
     dataset_path = f"{root_path}/test_data/lgmcts_bot/push_object_0.zarr"
-    dataset = DFImageDataset(
+    dataset = DPDataset(
         dataset_path=dataset_path,
         pred_horizon=cfg.MODEL.PRED_HORIZON,
         obs_horizon=cfg.MODEL.OBS_HORIZON,
