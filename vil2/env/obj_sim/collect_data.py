@@ -64,7 +64,7 @@ if __name__ == "__main__":
         env_name=env_name,
         env=env,
         num_eposides=10,
-        max_steps=10,
+        max_steps=20,
         obs_noise_level=0.0,
         action_trajecotry=action_trajecotry,
         output_path=export_path,

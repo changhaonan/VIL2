@@ -7,6 +7,7 @@ from vil2.utils import misc_utils
 import open3d as o3d
 from copy import deepcopy
 from vil2.algo.super_voxel import generate_random_voxel
+from collections import deque
 
 
 class ObjSim(gym.Env):
@@ -14,8 +15,14 @@ class ObjSim(gym.Env):
 
     def __init__(self, cfg: dict) -> None:
         super().__init__()
+        # parameters
         self.cfg = cfg
         self.max_iter = cfg.ENV.max_iter
+        self.super_patch_size = cfg.ENV.super_patch_size
+        self.track_horizon = cfg.ENV.track_horizon
+        self.action_horizon = cfg.ENV.action_horizon
+        self.obs_horizon = self.track_horizon - self.action_horizon
+
         # load objs
         self.objs: list[ObjData] = []
         self._obj_names = dict()
@@ -28,12 +35,12 @@ class ObjSim(gym.Env):
         self._super_voxel_traj = dict()
         self._t = 0
         self._active_obj_id = []
+
         # generate super voxel
         for obj in self.objs:
             obj.super_voxel, obj.voxel_center = self.generate_obj_super_voxel(
                 obj.id, cfg.ENV.super_patch_size
             )
-        self.super_patch_size = cfg.ENV.super_patch_size
 
     def _load_objs_google_scanned_objects(self):
         obj_names = self.cfg.ENV.obj_names
@@ -94,6 +101,7 @@ class ObjSim(gym.Env):
             )
         # compute observation
         obs = self._compute_obs()
+        # override
         # update time
         self._t += 1
         # check done
@@ -196,7 +204,7 @@ class ObjSim(gym.Env):
         obs = {}
 
         # record traj
-        obs["trajectory"] = deepcopy(self._super_voxel_traj)
+        obs["voxel_pose"] = self._compute_obj_track()
 
         # record geometry
         obs["geometry"] = [deepcopy(np.asarray(obj.geometry.vertices)) for obj in self.objs]
@@ -213,3 +221,10 @@ class ObjSim(gym.Env):
         # record image
         obs["image"], obs["depth"] = self.render(return_image=True)
         return obs
+
+    def _compute_obj_track(self):
+        """Compute object track."""
+        obj_pose = dict()
+        for obj_id, _traj in self._super_voxel_traj.items():
+            obj_pose[obj_id] = _traj[-1]  # (super_patch_size, 6)
+        return obj_pose

@@ -39,20 +39,22 @@ def create_sample_indices(
     return indices
 
 
-def sample_sequence_by_key(
-    train_data, key, sequence_length, buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx
+def sample_sequence(
+    train_data, sequence_length, buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx
 ):
-    input_arr = train_data[key]
-    sample = input_arr[buffer_start_idx:buffer_end_idx]
-    data = sample
-    if (sample_start_idx > 0) or (sample_end_idx < sequence_length):
-        data = np.zeros(shape=(sequence_length,) + input_arr.shape[1:], dtype=input_arr.dtype)
-        if sample_start_idx > 0:
-            data[:sample_start_idx] = sample[0]
-        if sample_end_idx < sequence_length:
-            data[sample_end_idx:] = sample[-1]
-        data[sample_start_idx:sample_end_idx] = sample
-    return data
+    result = dict()
+    for key, input_arr in train_data.items():
+        sample = input_arr[buffer_start_idx:buffer_end_idx]
+        data = sample
+        if (sample_start_idx > 0) or (sample_end_idx < sequence_length):
+            data = np.zeros(shape=(sequence_length,) + input_arr.shape[1:], dtype=input_arr.dtype)
+            if sample_start_idx > 0:
+                data[:sample_start_idx] = sample[0]
+            if sample_end_idx < sequence_length:
+                data[sample_end_idx:] = sample[-1]
+            data[sample_start_idx:sample_end_idx] = sample
+        result[key] = data
+    return result
 
 
 def get_data_stats(data):
@@ -101,12 +103,12 @@ def encode_geometry(geometry: np.ndarray, encoder: str, aggretator: str):
 # build dataset
 
 
-def parser_obs(obs: dict, predict_type: str, carrier_type: str, geometry_encoder: str, aggretator: str, horizon_length: int = 10):
+def parser_obs(obs: dict, carrier_type: str, geometry_encoder: str, aggretator: str):
     """Parse observation
     Return:
         img: (H, W, 3)
         depth: (H, W)
-        active_obj_super_voxel_traj: (horizon_length, 3/6)
+        active_obj_super_voxel_pose: (num_super_voxel/1, 3/6)
         active_obj_geometry_feat: (num_super_voxel/1, feat_dim)
         active_obj_voxel_center: (num_super_voxel/1, 3)
     """
@@ -140,34 +142,19 @@ def parser_obs(obs: dict, predict_type: str, carrier_type: str, geometry_encoder
     else:
         raise ValueError(f"Unknown carrier_type: {carrier_type}")
 
-    # Get active obj trajectory
-    active_obj_super_voxel_traj = np.vstack(obs["trajectory"][active_obj_id])
-    if predict_type == "horizon":
-        if active_obj_super_voxel_traj.shape[0] < horizon_length:
-            active_obj_super_voxel_traj = np.vstack(
-                [
-                    active_obj_super_voxel_traj,
-                    np.tile(
-                        active_obj_super_voxel_traj[-1][None, ...],
-                        (horizon_length - active_obj_super_voxel_traj.shape[0], 1, 1),
-                    ),
-                ]
-            )
-        else:
-            active_obj_super_voxel_traj = active_obj_super_voxel_traj[:horizon_length]
-    else:
-        raise ValueError(f"Unknown predict_type: {predict_type}")
+    # Get active obj voxel_pose
+    active_obj_super_voxel_pose = obs["voxel_pose"][active_obj_id]
 
-    return img, depth, active_obj_super_voxel_traj, active_obj_geometry_feat, active_obj_voxel_center
+    return img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center
 
 
-def build_objdp_dataset(data_path: str, export_path: str, predict_type: str, carrier_type: str, geometry_encoder: str, aggretator: str, horizon_length: int = 10):
+def build_objdp_dataset(data_path: str, export_path: str, carrier_type: str, geometry_encoder: str, aggretator: str, action_horizon: int = 2, obs_horizon: int = 8):
     """Build dataset for Objwise Diffusion Policy; Transfer raw data to a standard zarr dataset
     """
     # data buffer
     img_buffer = []
     depth_buffer = []
-    obj_super_voxel_traj_buffer = []
+    obj_super_voxel_pose_buffer = []
     obj_geometry_feat_buffer = []
     obj_voxel_center_buffer = []
     dones_buffer = []
@@ -175,18 +162,18 @@ def build_objdp_dataset(data_path: str, export_path: str, predict_type: str, car
         epoch_path = os.path.join(data_path, epoch_dir)
         if not os.path.isdir(epoch_path):
             continue
-        for file_name in os.listdir(epoch_path):
+        for file_name in sorted(os.listdir(epoch_path)):
             if file_name.endswith(".pkl"):
                 with open(os.path.join(epoch_path, file_name), "rb") as f:
                     obs = pickle.load(f)
                 # parse obs
-                img, depth, active_obj_super_voxel_traj, active_obj_geometry_feat, active_obj_voxel_center = parser_obs(
-                    obs, predict_type, carrier_type, geometry_encoder, aggretator, horizon_length
+                img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center = parser_obs(
+                    obs, carrier_type, geometry_encoder, aggretator
                 )
                 # append to buffer
                 img_buffer.append(img)
                 depth_buffer.append(depth)
-                obj_super_voxel_traj_buffer.append(active_obj_super_voxel_traj)
+                obj_super_voxel_pose_buffer.append(active_obj_super_voxel_pose)
                 obj_geometry_feat_buffer.append(active_obj_geometry_feat)
                 obj_voxel_center_buffer.append(active_obj_voxel_center)
                 dones_buffer.append(False)
@@ -195,7 +182,7 @@ def build_objdp_dataset(data_path: str, export_path: str, predict_type: str, car
     # convert to numpy & save to zarr
     img_buffer = np.stack(img_buffer)
     depth_buffer = np.stack(depth_buffer)
-    obj_super_voxel_traj_buffer = np.stack(obj_super_voxel_traj_buffer)
+    obj_super_voxel_pose_buffer = np.vstack(obj_super_voxel_pose_buffer)
     obj_geometry_feat_buffer = np.stack(obj_geometry_feat_buffer)
     obj_voxel_center_buffer = np.stack(obj_voxel_center_buffer)
     dones_buffer = np.array(dones_buffer)
@@ -203,21 +190,19 @@ def build_objdp_dataset(data_path: str, export_path: str, predict_type: str, car
     eposide_ends = np.where(dones_buffer)[0] + 1
     # save to zarr
     root = zarr.open(f"{export_path}/obj_dp_dataset.zarr", mode="w")
-    root.create_dataset("img", data=img_buffer)
-    root.create_dataset("depth", data=depth_buffer)
-    root.create_dataset("obj_voxel_traj", data=obj_super_voxel_traj_buffer)
-    root.create_dataset("obj_voxel_feat", data=obj_geometry_feat_buffer)
-    root.create_dataset("obj_voxel_center", data=obj_voxel_center_buffer)
-    root.create_dataset("eposide_ends", data=eposide_ends)
+    root.create_dataset("img", data=img_buffer)  # (N, H, W, 3)
+    root.create_dataset("depth", data=depth_buffer)  # (N, H, W)
+    root.create_dataset("obj_voxel_pose", data=obj_super_voxel_pose_buffer)  # (N, num_super_voxel, 3/6)
+    root.create_dataset("obj_voxel_feat", data=obj_geometry_feat_buffer)  # (N, num_super_voxel, feat_dim)
+    root.create_dataset("obj_voxel_center", data=obj_voxel_center_buffer)  # (N, num_super_voxel, 3)
+    root.create_dataset("eposide_ends", data=eposide_ends)  # (N,)
     # save meta data
     dim_geometry_feat = obj_geometry_feat_buffer.shape[-1]
     num_super_voxel = obj_geometry_feat_buffer.shape[1]
     meta_data = {
-        "predict_type": predict_type,
         "carrier_type": carrier_type,
         "geometry_encoder": geometry_encoder,
         "aggretator": aggretator,
-        "horizon_length": horizon_length,
         "dim_geometry_feat": dim_geometry_feat,
         "num_super_voxel": num_super_voxel,
     }
@@ -227,9 +212,18 @@ def build_objdp_dataset(data_path: str, export_path: str, predict_type: str, car
 class ObjDPDataset(torch.utils.data.Dataset):
     """Object DiffusionPolicy Dataset"""
 
-    def __init__(self, dataset_path: str, pred_horizon: int, obs_horizon: int, action_horizon: int):
+    def __init__(self, dataset_path: str, obs_horizon: int, action_horizon: int):
         # read from zarr dataset
         dataset_root = zarr.open(dataset_path, "r")
+
+        # read meta data from zarr
+        self.carrier_type = dataset_root.attrs["carrier_type"]
+        self.geometry_encoder = dataset_root.attrs["geometry_encoder"]
+        self.aggretator = dataset_root.attrs["aggretator"]
+        self.dim_geometry_feat = dataset_root.attrs["dim_geometry_feat"]
+        self.num_super_voxel = dataset_root.attrs["num_super_voxel"]
+        # compute parameters
+        pred_horizon = obs_horizon + action_horizon
 
         # float32, [0,1], (N, width, height, 3)
         train_image_data = dataset_root["img"][:]
@@ -243,7 +237,7 @@ class ObjDPDataset(torch.utils.data.Dataset):
 
         # (N, D)
         train_data = {
-            "obj_voxel_traj": dataset_root["obj_voxel_traj"][:],
+            "obj_voxel_pose": dataset_root["obj_voxel_pose"][:],
             "obj_voxel_feat": dataset_root["obj_voxel_feat"][:],
         }
         episode_ends = dataset_root["eposide_ends"][:]
@@ -283,25 +277,18 @@ class ObjDPDataset(torch.utils.data.Dataset):
         buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx = self.indices[idx]
 
         # get nomralized data using these indices
-        # images
-        nimage = sample_sequence_by_key(
-            self.normalized_train_data, "image", self.pred_horizon, buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx
+        nsample = sample_sequence(
+            train_data=self.normalized_train_data,
+            sequence_length=self.pred_horizon,
+            buffer_start_idx=buffer_start_idx,
+            buffer_end_idx=buffer_end_idx,
+            sample_start_idx=sample_start_idx,
+            sample_end_idx=sample_end_idx,
         )
-        ndepth = sample_sequence_by_key(
-            self.normalized_train_data, "depth", self.pred_horizon, buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx
-        )
-        # obj traj
-        nobj_voxel_traj = self.normalized_train_data["obj_voxel_traj"][sample_start_idx, :self.obs_horizon:, ...]  # (obs_horizon, num_voxel, 3/6)
-        nobj_voxel_feat = self.normalized_train_data["obj_voxel_feat"][sample_start_idx]  # (num_voxel, feat_dim)
-        # action
-        naction = self.normalized_train_data["obj_voxel_traj"][sample_start_idx, -self.action_horizon:, ...]  # (action_horizon, num_voxel, 3/6)
-        # assemble
-        nsample = dict()
-        nsample["image"] = nimage  # (obs_horizon, 3, H, W)
-        nsample["depth"] = ndepth  # (obs_horizon, 1, H, W)
-        nsample["obj_voxel_traj"] = nobj_voxel_traj  # (obs_horizon, num_voxel, 3/6)
-        nsample["obj_voxel_feat"] = nobj_voxel_feat  # (num_voxel, feat_dim)  # only have current feat
-        nsample["action"] = naction  # (action_horizon, num_voxel, 3/6)
+        # discard unused observations
+        nsample["image"] = nsample["image"][: self.obs_horizon, :]
+        nsample["depth"] = nsample["depth"][: self.obs_horizon, :]
+        nsample["obj_voxel_feat"] = nsample["obj_voxel_feat"][: self.obs_horizon, :]
         return nsample
 
 
@@ -309,18 +296,15 @@ if __name__ == "__main__":
     build_objdp_dataset(
         data_path="/home/robot-learning/Projects/VIL2/vil2/test_data/ObjSim/raw_data",
         export_path="/home/robot-learning/Projects/VIL2/vil2/test_data/ObjSim",
-        predict_type="horizon",
         carrier_type="super_voxel",
         geometry_encoder="fake",
-        aggretator="mean",
-        horizon_length=8)
+        aggretator="mean")
 
     # Build & test dataset
     dataset = ObjDPDataset(
         dataset_path="/home/robot-learning/Projects/VIL2/vil2/test_data/ObjSim/obj_dp_dataset.zarr",
-        pred_horizon=8,
-        obs_horizon=6,
-        action_horizon=2,
+        obs_horizon=2,
+        action_horizon=4,
     )
 
     data = dataset[0]

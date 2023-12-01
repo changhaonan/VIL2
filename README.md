@@ -23,6 +23,7 @@ export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libGLEW.so
 - [ ] Offline-RL
 - [ ] Diffusion-policies
 - [ ] Max-diff RL
+- [ ] Further check the detail of this module.
 
 ## Trouble-shooting
 
