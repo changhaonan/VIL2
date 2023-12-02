@@ -193,9 +193,9 @@ class ConditionalUnet1D(nn.Module):
 
     def forward(self, sample, timestep, global_cond=None):
         """"""
-        # (B,T,C)
+        # (B, T, C)
         sample = sample.moveaxis(-1, -2)
-        # (B,C,T)
+        # (B, C, T)
 
         # 1. time
         timesteps = timestep
@@ -231,7 +231,7 @@ class ConditionalUnet1D(nn.Module):
 
         x = self.final_conv(x)
 
-        # (B,C,T)
+        # (B, C, T)
         x = x.moveaxis(-1, -2)
-        # (B,T,C)
+        # (B, T, C)
         return x

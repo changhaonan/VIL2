@@ -22,7 +22,8 @@ class ObjSim(gym.Env):
         self.track_horizon = cfg.ENV.track_horizon
         self.action_horizon = cfg.ENV.action_horizon
         self.obs_horizon = self.track_horizon - self.action_horizon
-
+        self.img_height = cfg.ENV.img_height
+        self.img_width = cfg.ENV.img_width
         # load objs
         self.objs: list[ObjData] = []
         self._obj_names = dict()
@@ -89,6 +90,7 @@ class ObjSim(gym.Env):
             for obj_id, action in action.items():
                 self._step_single_obj(obj_id, action)
                 self._active_obj_id.append(obj_id)
+
         # record traj
         for obj in self.objs:
             if obj.id not in self._super_voxel_traj:
@@ -99,8 +101,10 @@ class ObjSim(gym.Env):
             self._super_voxel_traj[obj.id].append(
                 super_voxel_pose[None, ...]
             )
+
         # compute observation
         obs = self._compute_obs()
+
         # override
         # update time
         self._t += 1
@@ -176,12 +180,12 @@ class ObjSim(gym.Env):
         )
         vis_list.append(coord_frame)
         if not return_image:
-            o3d.visualization.draw_geometries(vis_list)
-            return None, None
+            # o3d.visualization.draw_geometries(vis_list)
+            return np.zeros([self.img_width, self.img_height, 3], dtype=np.float32), np.zeros([self.img_width, self.img_height], dtype=np.float32)
         else:
             # render image
             vis = o3d.visualization.Visualizer()
-            vis.create_window(width=640, height=480, visible=False)
+            vis.create_window(width=self.img_width, height=self.img_height, visible=False)
             vis.add_geometry(coord_frame)
             for obj in self.objs:
                 vis_obj = deepcopy(obj.geometry)
@@ -207,19 +211,21 @@ class ObjSim(gym.Env):
         obs["voxel_pose"] = self._compute_obj_track()
 
         # record geometry
-        obs["geometry"] = [deepcopy(np.asarray(obj.geometry.vertices)) for obj in self.objs]
+        obs["geometry"] = [np.asarray(obj.geometry.vertices) for obj in self.objs]
 
         # record super voxel
-        obs["super_voxel"] = [deepcopy(obj.super_voxel) for obj in self.objs]
+        obs["super_voxel"] = [obj.super_voxel for obj in self.objs]
 
         # record voxel center
-        obs["voxel_center"] = [deepcopy(obj.voxel_center) for obj in self.objs]
+        obs["voxel_center"] = [obj.voxel_center for obj in self.objs]
 
         # record active obj id
-        obs["active_obj_id"] = deepcopy(self._active_obj_id)
+        obs["active_obj_id"] = self._active_obj_id
 
         # record image
-        obs["image"], obs["depth"] = self.render(return_image=True)
+        # obs["image"], obs["depth"] = self.render(return_image=False)
+        obs["image"] = np.zeros([self.img_width, self.img_height, 3], dtype=np.float32)
+        obs["depth"] = np.zeros([self.img_width, self.img_height], dtype=np.float32)
         return obs
 
     def _compute_obj_track(self):

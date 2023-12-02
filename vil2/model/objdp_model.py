@@ -9,28 +9,27 @@ import torch.nn.functional as F
 from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.optimization import get_scheduler
-from vil2.data.dataset import normalize_data, unnormalize_data
+from vil2.data.obj_dp_dataset import normalize_data, unnormalize_data
 
 
-class DFModel:
-    """Diffusion policy Model"""
+class ObjDPModel:
+    """Object-wise Diffusion policy Model"""
 
     def __init__(self, cfg, vision_encoder, noise_pred_net):
         self.cfg = cfg
         # check cuda and mps
-        # if torch.cuda.is_available():
-        #     self.device = torch.device("cuda")
-        # elif torch.backends.mps.is_available():
-        #     self.device = torch.device("mps")
-        # else:
-        #     self.device = torch.device("cpu")
-        self.device = "cpu"
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
+        # self.device = "cpu"
+        # parameters
         self.obs_horizon = cfg.MODEL.OBS_HORIZON
         self.action_horizon = cfg.MODEL.ACTION_HORIZON
         self.pred_horizon = cfg.MODEL.PRED_HORIZON
         self.action_dim = cfg.MODEL.ACTION_DIM
         # vision encoder
-        self.vision_encoder = vision_encoder
+        # self.vision_encoder = vision_encoder
         # scheduler
         self.num_diffusion_iters = 100
         self.noise_scheduler = DDPMScheduler(
@@ -45,10 +44,9 @@ class DFModel:
         )
         # noise net
         self.noise_pred_net = noise_pred_net
-
         self.nets = nn.ModuleDict(
             {
-                "vision_encoder": self.vision_encoder,
+                # "vision_encoder": self.vision_encoder,
                 "noise_pred_net": self.noise_pred_net,
             }
         ).to(self.device)
@@ -80,24 +78,28 @@ class DFModel:
                     for nbatch in tepoch:
                         # data normalized in dataset
                         # device transfer
-                        nimage = nbatch["image"][:, : self.obs_horizon].to(self.device)
-                        nagent_pos = nbatch["state"][:, : self.obs_horizon].to(self.device)
-                        naction = nbatch["action"].to(self.device)
-                        B = nagent_pos.shape[0]
+                        # voxel_feature
+                        nobj_voxel_feat = nbatch["obj_voxel_feat"].to(self.device)  # (B, obs_horizon, num_voxel, dim_feat)
+                        nobj_voxel_center = nbatch["obj_voxel_center"].to(self.device)  # (B, obs_horizon, num_voxel, 3)
+                        nobj_voxel_obs = torch.cat([nobj_voxel_feat, nobj_voxel_center], dim=-1)  # (B, obs_horizon, num_voxel, D)
+                        # voxel_pose (to predict)
+                        nobj_voxel_pose = nbatch["obj_voxel_pose"].to(self.device)  # (B, pred_horizon, num_voxel, dim_pose)
 
-                        # encoder vision features
-                        image_features = self.nets["vision_encoder"](nimage.flatten(end_dim=1))
-                        image_features = image_features.reshape(*nimage.shape[:2], -1)
-                        # (B,obs_horizon,D)
-
-                        # concatenate vision feature and low-dim obs
-                        obs_features = torch.cat([image_features, nagent_pos], dim=-1)
+                        # ------------------- obs -------------------
+                        # (B, obs_horizon, num_voxel, D) -> (B * num_voxel, obs_horizon * D)
+                        obs_features = nobj_voxel_obs.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)
+                        # (B * num_voxel, obs_horizon, D)
                         obs_cond = obs_features.flatten(start_dim=1)
-                        # (B, obs_horizon * obs_dim)
+                        # (B * num_voxel, obs_horizon * D)
+
+                        # ------------------- action -------------------
+                        # (B, pred_horizon, num_voxel, D) -> (B * num_voxel, pred_horizon * D)
+                        naction = nobj_voxel_pose.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)
+                        # (B * num_voxel, pred_horizon, D)
 
                         # sample noise to add to actions
                         noise = torch.randn(naction.shape, device=self.device)
-
+                        B = naction.shape[0]
                         # sample a diffusion iteration for each data point
                         timesteps = torch.randint(
                             0,
@@ -136,40 +138,36 @@ class DFModel:
                 tglobal.set_postfix(loss=np.mean(epoch_loss))
         # copy ema back to model
         ema.copy_to(self.nets.parameters())
-        
 
     def inference(self, obs_deque: collections.deque, stats: dict):
         """Inference with the model"""
         B = 1  # inference batch size is 1
+        num_voxel = obs_deque[0]["obj_voxel_feat"].shape[0]
+
         # stack the last obs_horizon number of observations
-        images = np.stack([x["image"].transpose(2, 0, 1) for x in obs_deque])
-        agent_poses = np.stack([x["state"] for x in obs_deque])
+        obj_voxel_feat = np.stack([x["obj_voxel_feat"] for x in obs_deque])
+        obj_voxel_center = np.stack([x["obj_voxel_center"] for x in obs_deque])
 
         # normalize observation
-        nstates = normalize_data(agent_poses, stats=stats["state"])
-        # images are already normalized to [0,1]
-        nimages = images
+        nobj_voxel_feat = normalize_data(obj_voxel_feat, stats=stats["obj_voxel_feat"])
+        nobj_voxel_center = normalize_data(obj_voxel_center, stats=stats["obj_voxel_center"])
 
         # device transfer
-        nimages = torch.from_numpy(nimages).to(self.device, dtype=torch.float32)
-        # (2,3,96,96)
-        nstates = torch.from_numpy(nstates).to(self.device, dtype=torch.float32)
-        # (2,2)
+        nobj_voxel_feat = torch.from_numpy(nobj_voxel_feat).to(self.device).to(torch.float32)
+        nobj_voxel_center = torch.from_numpy(nobj_voxel_center).to(self.device).to(torch.float32)
 
         # infer action
         with torch.no_grad():
-            # get image features
-            image_features = self.nets["vision_encoder"](nimages)
-            # (2,512)
-
             # concat with low-dim observations
-            obs_features = torch.cat([image_features, nstates], dim=-1)
+            obs_features = torch.cat([nobj_voxel_feat, nobj_voxel_center], dim=-1).unsqueeze(0)  # (B, obs_horizon, num_voxel, D)
 
-            # reshape observation to (B,obs_horizon*obs_dim)
-            obs_cond = obs_features.unsqueeze(0).flatten(start_dim=1)
+            # reshape observation to (B * num_voxel, obs_horizon * D)
+            obs_features = obs_features.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)
+            obs_cond = obs_features.flatten(start_dim=1)
+            # (B * num_voxel, obs_horizon * D)
 
             # initialize action from Guassian noise
-            noisy_action = torch.randn((B, self.pred_horizon, self.action_dim), device=self.device)
+            noisy_action = torch.randn((B * num_voxel, self.pred_horizon, self.action_dim), device=self.device)
             naction = noisy_action
 
             # init scheduler
@@ -188,16 +186,16 @@ class DFModel:
 
         # unnormalize action
         naction = naction.detach().to("cpu").numpy()
-        # (B, pred_horizon, action_dim)
-        naction = naction[0]
-        action_pred = unnormalize_data(naction, stats=stats["action"])
+        # (B * num_voxel, pred_horizon, action_dim)
+        naction = naction.reshape(B, num_voxel, self.pred_horizon, self.action_dim)
+        action_pred = unnormalize_data(naction, stats=stats["obj_voxel_pose"])
 
         return action_pred
-    
+
     def save(self, export_path):
         """Save model weights"""
         torch.save(self.nets.state_dict(), export_path)
-    
+
     def load(self, export_path):
         """Load model weights"""
         state_dict = torch.load(export_path, map_location=self.device)

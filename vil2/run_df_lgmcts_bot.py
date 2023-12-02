@@ -5,7 +5,7 @@ import numpy as np
 import collections
 from tqdm.auto import tqdm
 from vil2.env import env_builder
-from vil2.model.df_model import DFModel
+from vil2.model.dp_model import DPModel
 from vil2.model.net_factory import build_vision_encoder, build_noise_pred_net
 from vil2.data.dataset import DPDataset, normalize_data, unnormalize_data
 import vil2.utils.misc_utils as utils
@@ -26,7 +26,7 @@ if __name__ == "__main__":
     vision_encoder = build_vision_encoder(cfg.MODEL.VISION_ENCODER.NAME)
     noise_pred_net = build_noise_pred_net(cfg.MODEL.NOISE_NET.NAME, **cfg.MODEL.NOISE_NET.INIT_ARGS)
 
-    df_model = DFModel(cfg, vision_encoder=vision_encoder, noise_pred_net=noise_pred_net)
+    df_model = DPModel(cfg, vision_encoder=vision_encoder, noise_pred_net=noise_pred_net)
 
     # load dataset
     # download demonstration data from Google Drive

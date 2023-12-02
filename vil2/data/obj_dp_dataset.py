@@ -212,7 +212,7 @@ def build_objdp_dataset(data_path: str, export_path: str, carrier_type: str, geo
 class ObjDPDataset(torch.utils.data.Dataset):
     """Object DiffusionPolicy Dataset"""
 
-    def __init__(self, dataset_path: str, obs_horizon: int, action_horizon: int):
+    def __init__(self, dataset_path: str, obs_horizon: int, action_horizon: int, pred_horizon: int):
         # read from zarr dataset
         dataset_root = zarr.open(dataset_path, "r")
 
@@ -222,8 +222,6 @@ class ObjDPDataset(torch.utils.data.Dataset):
         self.aggretator = dataset_root.attrs["aggretator"]
         self.dim_geometry_feat = dataset_root.attrs["dim_geometry_feat"]
         self.num_super_voxel = dataset_root.attrs["num_super_voxel"]
-        # compute parameters
-        pred_horizon = obs_horizon + action_horizon
 
         # float32, [0,1], (N, width, height, 3)
         train_image_data = dataset_root["img"][:]
@@ -239,6 +237,7 @@ class ObjDPDataset(torch.utils.data.Dataset):
         train_data = {
             "obj_voxel_pose": dataset_root["obj_voxel_pose"][:],
             "obj_voxel_feat": dataset_root["obj_voxel_feat"][:],
+            "obj_voxel_center": dataset_root["obj_voxel_center"][:],
         }
         episode_ends = dataset_root["eposide_ends"][:]
 
@@ -251,7 +250,7 @@ class ObjDPDataset(torch.utils.data.Dataset):
             pad_after=action_horizon - 1,
         )
 
-        # compute statistics and normalized data to [-1,1]
+        # compute statistics and normalized data to [-1, 1]
         stats = dict()
         normalized_train_data = dict()
         for key, data in train_data.items():
@@ -286,9 +285,11 @@ class ObjDPDataset(torch.utils.data.Dataset):
             sample_end_idx=sample_end_idx,
         )
         # discard unused observations
-        nsample["image"] = nsample["image"][: self.obs_horizon, :]
-        nsample["depth"] = nsample["depth"][: self.obs_horizon, :]
-        nsample["obj_voxel_feat"] = nsample["obj_voxel_feat"][: self.obs_horizon, :]
+        nsample["image"] = nsample["image"][: self.obs_horizon, :].astype(np.float32)
+        nsample["depth"] = nsample["depth"][: self.obs_horizon, :].astype(np.float32)
+        nsample["obj_voxel_feat"] = nsample["obj_voxel_feat"][: self.obs_horizon, :].astype(np.float32)
+        nsample["obj_voxel_center"] = nsample["obj_voxel_center"][: self.obs_horizon, :].astype(np.float32)
+        nsample["obj_voxel_pose"] = nsample["obj_voxel_pose"].astype(np.float32)
         return nsample
 
 

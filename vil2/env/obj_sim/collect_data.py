@@ -6,6 +6,7 @@ from vil2.env.obj_sim.obj_movement import ObjSim
 from detectron2.config import LazyConfig
 import pickle
 from tqdm.auto import tqdm
+import time
 
 
 def collect_data_sim_obj(
@@ -24,13 +25,14 @@ def collect_data_sim_obj(
         epoch_path = os.path.join(output_path, f"{i}")
         os.makedirs(epoch_path, exist_ok=True)
         while True:
+            time_start = time.time()
             action = action_trajecotry[env._t % len(action_trajecotry)]
             obs, reward, done, info = env.step(action)
             if done or count > max_steps:
                 break
             if epoch_path is not None:
-                image, depth_image = env.render(return_image=True)
-                cv2.imwrite(os.path.join(epoch_path, f"{env._t}.png"), image)
+                # image, depth_image = env.render(return_image=False)
+                # cv2.imwrite(os.path.join(epoch_path, f"{env._t}.png"), image)
                 with open(os.path.join(epoch_path, f"{env._t}.pkl"), "wb") as f:
                     pickle.dump(obs, f)
             count += 1
@@ -64,8 +66,12 @@ if __name__ == "__main__":
         env_name=env_name,
         env=env,
         num_eposides=10,
-        max_steps=20,
+        max_steps=100,
         obs_noise_level=0.0,
         action_trajecotry=action_trajecotry,
         output_path=export_path,
     )
+
+    # save action trajectory
+    with open(os.path.join(export_path, "action_trajectory.pkl"), "wb") as f:
+        pickle.dump(action_trajecotry, f)

@@ -49,3 +49,5 @@ if __name__ == "__main__":
                num_epochs=config['num_epochs'],)
 
     oqdp.save(os.path.join(check_point_path, 'model.pt'))
+
+    # do eval
