@@ -34,7 +34,7 @@ MODEL = dict(
     OBS_HORIZON=2,
     ACTION_HORIZON=8,
     PRED_HORIZON=16,  # 16
-    ACTION_DIM=6,  # 6d pose
+    ACTION_DIM=3,  # 6d pose/ 3d translation
     VISION_ENCODER=dict(
         NAME="resnet18",
         PRETRAINED=True,
@@ -42,7 +42,7 @@ MODEL = dict(
     NOISE_NET=dict(
         NAME="UNET1D",
         INIT_ARGS=dict(
-            input_dim=6,
+            input_dim=3,
             global_cond_dim=262,  # (128 (dim_feat) + 3 (pos)) * 2 (obs_horizon)
             diffusion_step_embed_dim=256,
             down_dims=[256, 512, 1024],
@@ -50,6 +50,7 @@ MODEL = dict(
             n_groups=8,
         ),
     ),
+    RECON_VOXEL_CENTER=True,
 )
 
 TRAIN = dict(

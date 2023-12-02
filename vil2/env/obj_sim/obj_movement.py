@@ -148,7 +148,7 @@ class ObjSim(gym.Env):
                 distances[i, j] = np.linalg.norm(voxel_center1 - voxel_center2)
         return distances
 
-    def render(self, show_super_patch=False, return_image=False):
+    def render(self, show_super_patch=False, return_image=False, show=False, pred_voxel_poses=None):
         """Render object in open3d."""
         # render in open3d
         vis_list = []
@@ -178,9 +178,22 @@ class ObjSim(gym.Env):
         coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
             size=0.1, origin=[0, 0, 0]
         )
+        # add predict voxel pose
+        if pred_voxel_poses is not None:
+            # pred_voxel_pose: (num_voxel, pred_horizon, 6)
+            for i in range(pred_voxel_poses.shape[0]):
+                for j in range(pred_voxel_poses.shape[1]):
+                    pred_voxel_pose = pred_voxel_poses[i, j]
+                    color = np.random.rand(3)
+                    # voxel center
+                    pred_voxel_center = pred_voxel_pose[:3]
+                    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
+                    sphere.translate(pred_voxel_center)
+                    sphere.paint_uniform_color(color)
+                    vis_list.append(sphere)
         vis_list.append(coord_frame)
         if not return_image:
-            # o3d.visualization.draw_geometries(vis_list)
+            o3d.visualization.draw_geometries(vis_list)
             return np.zeros([self.img_width, self.img_height, 3], dtype=np.float32), np.zeros([self.img_width, self.img_height], dtype=np.float32)
         else:
             # render image
@@ -217,7 +230,7 @@ class ObjSim(gym.Env):
         obs["super_voxel"] = [obj.super_voxel for obj in self.objs]
 
         # record voxel center
-        obs["voxel_center"] = [obj.voxel_center for obj in self.objs]
+        obs["voxel_center"] = self._compute_obj_voxel_center()
 
         # record active obj id
         obs["active_obj_id"] = self._active_obj_id
@@ -234,3 +247,10 @@ class ObjSim(gym.Env):
         for obj_id, _traj in self._super_voxel_traj.items():
             obj_pose[obj_id] = _traj[-1]  # (super_patch_size, 6)
         return obj_pose
+
+    def _compute_obj_voxel_center(self):
+        """Update object voxel center."""
+        obj_voxel_center = dict()
+        for obj_id, obj in enumerate(self.objs):
+            obj_voxel_center[obj_id] = obj.voxel_center + obj.pose[:3, 3]
+        return obj_voxel_center

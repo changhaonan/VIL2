@@ -21,7 +21,7 @@ if __name__ == "__main__":
     cfg_file = os.path.join(root_path, "config", "obj_sim.py")
     cfg = LazyConfig.load(cfg_file)
 
-    retrain = False
+    retrain = True
     # load dataset & data loader
     dataset = ObjDPDataset(
         dataset_path=f"{root_path}/test_data/ObjSim/obj_dp_dataset.zarr",
@@ -94,3 +94,6 @@ if __name__ == "__main__":
             obs_deque.append(obs)
             if len(obs_deque) == cfg.MODEL.OBS_HORIZON:
                 pred = objdp_model.inference(obs_deque, stats=stats)
+                # visualize prediction
+                check_horizon = 1
+                env.render(return_image=False, pred_voxel_poses=pred[0, :, :check_horizon, :])

@@ -233,6 +233,14 @@ def mat_to_rotvec(mat_pose):
         raise NotImplementedError
 
 
+def rotvec_to_mat(rotvec_pose):
+    if rotvec_pose.shape == (3,):
+        mat_pose = R.from_rotvec(rotvec_pose).as_matrix()
+        return mat_pose
+    else:
+        raise NotImplementedError
+
+
 def quat_to_rotvec(quat_pose):
     if quat_pose.shape == (7,):
         quat = quat_pose[3:]

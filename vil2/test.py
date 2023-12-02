@@ -2,7 +2,7 @@ from vil2.env import env_builder
 
 
 if __name__ == "__main__":
-    env_name = "GYM-PointMaze_UMaze-v3"
+    env_name = "GYM-FetchPush-v2"
     env = env_builder(env_name, render_mode="human", cfg={})
     env.reset()
     for i in range(1000):

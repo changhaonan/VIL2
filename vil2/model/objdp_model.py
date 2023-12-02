@@ -50,6 +50,8 @@ class ObjDPModel:
                 "noise_pred_net": self.noise_pred_net,
             }
         ).to(self.device)
+        # ablation module
+        self.recon_voxel_center = cfg.MODEL.RECON_VOXEL_CENTER
 
     def train(self, num_epochs: int, data_loader):
         # Exponential Moving Average
@@ -84,7 +86,7 @@ class ObjDPModel:
                         nobj_voxel_obs = torch.cat([nobj_voxel_feat, nobj_voxel_center], dim=-1)  # (B, obs_horizon, num_voxel, D)
                         # voxel_pose (to predict)
                         nobj_voxel_pose = nbatch["obj_voxel_pose"].to(self.device)  # (B, pred_horizon, num_voxel, dim_pose)
-
+                        nobj_voxel_pose = nobj_voxel_pose[:, : self.pred_horizon, :, :self.action_dim]  # (B, pred_horizon, num_voxel, dim_pose)
                         # ------------------- obs -------------------
                         # (B, obs_horizon, num_voxel, D) -> (B * num_voxel, obs_horizon * D)
                         obs_features = nobj_voxel_obs.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)
@@ -95,6 +97,10 @@ class ObjDPModel:
                         # ------------------- action -------------------
                         # (B, pred_horizon, num_voxel, D) -> (B * num_voxel, pred_horizon * D)
                         naction = nobj_voxel_pose.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)
+                        # if self.recon_voxel_center:
+                        #     nobj_voxel_center = nobj_voxel_center.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)
+                        #     # append voxel center to action
+                        #     naction = torch.cat([naction, nobj_voxel_center], dim=-1)
                         # (B * num_voxel, pred_horizon, D)
 
                         # sample noise to add to actions
@@ -188,7 +194,10 @@ class ObjDPModel:
         naction = naction.detach().to("cpu").numpy()
         # (B * num_voxel, pred_horizon, action_dim)
         naction = naction.reshape(B, num_voxel, self.pred_horizon, self.action_dim)
-        action_pred = unnormalize_data(naction, stats=stats["obj_voxel_pose"])
+        stats_action = stats["obj_voxel_pose"]
+        stats_action["min"] = stats_action["min"][:self.action_dim]
+        stats_action["max"] = stats_action["max"][:self.action_dim]
+        action_pred = unnormalize_data(naction, stats=stats_action)
 
         return action_pred
 

@@ -22,6 +22,7 @@ def noise_scheduler(num_timesteps=1000, beta_start=0.0001, beta_end=0.02, beta_s
 # Networks
 class QNetwork(nn.Module):
     """Q network; mapping from state-action to value"""
+
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super(QNetwork, self).__init__()
         self.input_dim = input_dim
@@ -48,6 +49,7 @@ class QNetwork(nn.Module):
 
 class VNetwork(nn.Module):
     """V network; mapping from state to value"""
+
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
         super(VNetwork, self).__init__()
 
@@ -62,7 +64,7 @@ class VNetwork(nn.Module):
 
         # activation
         self.activation = nn.ReLU()
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.fc1(x)
         x = self.activation(x)
@@ -75,6 +77,7 @@ class VNetwork(nn.Module):
 
 class PolicyNetwork(nn.Module):
     """Policy network; mapping from state to action"""
+
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, is_gaussian: bool = True):
         super(PolicyNetwork, self).__init__()
         self.input_dim = input_dim
@@ -89,7 +92,7 @@ class PolicyNetwork(nn.Module):
 
         # activation
         self.activation = nn.ReLU()
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.fc1(x)
         x = self.activation(x)
@@ -113,7 +116,8 @@ class Block(nn.Module):
 
 class NoiseNetwork(nn.Module):
     """Diffusion noise network; naive version"""
-    def __init__(self, input_size: int, condition_size: int,  hidden_size: int = 128, hidden_layers: int = 3, emb_size: int = 128, time_emb: str = "learnable", input_emb: str = "learnable"):
+
+    def __init__(self, input_size: int, condition_size: int, hidden_size: int = 128, hidden_layers: int = 3, emb_size: int = 128, time_emb: str = "learnable", input_emb: str = "learnable"):
         super(NoiseNetwork, self).__init__()
         self.time_mlp = PositionalEmbedding(1, emb_size, time_emb)
         self.input_mlp = PositionalEmbedding(input_size, emb_size, input_emb)
@@ -139,6 +143,7 @@ class NoiseNetwork(nn.Module):
 
 class NoiseScheduler(nn.Module):
     """Diffusion model"""
+
     def __init__(self, num_timesteps: int, beta_start: float, beta_end: float):
         super(NoiseScheduler, self).__init__()
         # constants
@@ -168,7 +173,6 @@ class NoiseScheduler(nn.Module):
         self.register_buffer("sqrt_inv_alphas_cumprod_minus_one", sqrt_inv_alphas_cumprod_minus_one)
         self.register_buffer("posterior_mean_coef1", posterior_mean_coef1)
         self.register_buffer("posterior_mean_coef2", posterior_mean_coef2)
-        
 
     def reconstruct_x0(self, x_t, t, noise):
         s1 = self.sqrt_inv_alphas_cumprod[t]
