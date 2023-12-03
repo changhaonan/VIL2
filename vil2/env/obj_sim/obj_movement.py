@@ -239,6 +239,9 @@ class ObjSim(gym.Env):
         # obs["image"], obs["depth"] = self.render(return_image=False)
         obs["image"] = np.zeros([self.img_width, self.img_height, 3], dtype=np.float32)
         obs["depth"] = np.zeros([self.img_width, self.img_height], dtype=np.float32)
+
+        # record time stamp
+        obs["t"] = self._t
         return obs
 
     def _compute_obj_track(self):

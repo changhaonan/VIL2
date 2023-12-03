@@ -50,7 +50,8 @@ MODEL = dict(
             n_groups=8,
         ),
     ),
-    RECON_VOXEL_CENTER=True,
+    RECON_VOXEL_CENTER=True,  # reconstruct voxel center
+    RECON_TIME_STAMP=True,  # reconstruct time stamp
 )
 
 TRAIN = dict(

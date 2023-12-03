@@ -113,10 +113,9 @@ def parser_obs(obs: dict, carrier_type: str, geometry_encoder: str, aggretator: 
         active_obj_voxel_center: (num_super_voxel/1, 3)
     """
     active_obj_id = obs["active_obj_id"][0]  # only one object
-
-    # Get image
     img = obs["image"]
     depth = obs["depth"]
+    t = obs["t"]
 
     # Get active obj geometry
     if carrier_type == "super_voxel":
@@ -145,13 +144,14 @@ def parser_obs(obs: dict, carrier_type: str, geometry_encoder: str, aggretator: 
     # Get active obj voxel_pose
     active_obj_super_voxel_pose = obs["voxel_pose"][active_obj_id]
 
-    return img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center
+    return t, img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center
 
 
 def build_objdp_dataset(data_path: str, export_path: str, carrier_type: str, geometry_encoder: str, aggretator: str, action_horizon: int = 2, obs_horizon: int = 8):
     """Build dataset for Objwise Diffusion Policy; Transfer raw data to a standard zarr dataset
     """
     # data buffer
+    t_buffer = []
     img_buffer = []
     depth_buffer = []
     obj_super_voxel_pose_buffer = []
@@ -167,10 +167,11 @@ def build_objdp_dataset(data_path: str, export_path: str, carrier_type: str, geo
                 with open(os.path.join(epoch_path, file_name), "rb") as f:
                     obs = pickle.load(f)
                 # parse obs
-                img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center = parser_obs(
+                t, img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center = parser_obs(
                     obs, carrier_type, geometry_encoder, aggretator
                 )
                 # append to buffer
+                t_buffer.append(t)
                 img_buffer.append(img)
                 depth_buffer.append(depth)
                 obj_super_voxel_pose_buffer.append(active_obj_super_voxel_pose)
@@ -180,6 +181,7 @@ def build_objdp_dataset(data_path: str, export_path: str, carrier_type: str, geo
         # append done
         dones_buffer[-1] = True
     # convert to numpy & save to zarr
+    t_buffer = np.array(t_buffer)
     img_buffer = np.stack(img_buffer)
     depth_buffer = np.stack(depth_buffer)
     obj_super_voxel_pose_buffer = np.vstack(obj_super_voxel_pose_buffer)
@@ -190,6 +192,7 @@ def build_objdp_dataset(data_path: str, export_path: str, carrier_type: str, geo
     eposide_ends = np.where(dones_buffer)[0] + 1
     # save to zarr
     root = zarr.open(f"{export_path}/obj_dp_dataset.zarr", mode="w")
+    root.create_dataset("t", data=t_buffer.reshape(-1, 1))  # (N, 1)
     root.create_dataset("img", data=img_buffer)  # (N, H, W, 3)
     root.create_dataset("depth", data=depth_buffer)  # (N, H, W)
     root.create_dataset("obj_voxel_pose", data=obj_super_voxel_pose_buffer)  # (N, num_super_voxel, 3/6)
@@ -238,6 +241,7 @@ class ObjDPDataset(torch.utils.data.Dataset):
             "obj_voxel_pose": dataset_root["obj_voxel_pose"][:],
             "obj_voxel_feat": dataset_root["obj_voxel_feat"][:],
             "obj_voxel_center": dataset_root["obj_voxel_center"][:],
+            "t": dataset_root["t"][:],
         }
         episode_ends = dataset_root["eposide_ends"][:]
 
@@ -304,6 +308,7 @@ if __name__ == "__main__":
     # Build & test dataset
     dataset = ObjDPDataset(
         dataset_path="/home/robot-learning/Projects/VIL2/vil2/test_data/ObjSim/obj_dp_dataset.zarr",
+        pred_horizon=8,
         obs_horizon=2,
         action_horizon=4,
     )

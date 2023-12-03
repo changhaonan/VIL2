@@ -25,7 +25,6 @@ def collect_data_sim_obj(
         epoch_path = os.path.join(output_path, f"{i}")
         os.makedirs(epoch_path, exist_ok=True)
         while True:
-            time_start = time.time()
             action = action_trajecotry[env._t % len(action_trajecotry)]
             obs, reward, done, info = env.step(action)
             if done or count > max_steps:
