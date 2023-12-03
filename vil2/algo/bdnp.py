@@ -15,6 +15,7 @@ import random
 from tqdm.auto import tqdm
 from collections import deque
 from vil2.algo.replay_buffer import ReplayBuffer, HERSampler
+from vil2.utils.normalizer import normalizer
 
 
 Transition = namedtuple(
@@ -35,6 +36,7 @@ class BDNPolicy:
         self.goal_dim = obs["desired_goal"].shape[0]
         self.state_dim = obs["observation"].shape[0]
         self.action_dim = env.action_space.shape[0]
+        self.action_range = np.array([env.action_space.low, env.action_space.high])  # (2, action_dim)
         buffer_size = config.get('buffer_size', 100000)
 
         # memory structure
@@ -113,7 +115,11 @@ class BDNPolicy:
             prediction_type="epsilon",
         )
 
-        # optimizer
+        # Normalizer
+        self.o_norm = normalizer(size=self.state_dim)
+        self.g_norm = normalizer(size=self.goal_dim)
+
+        # Optimizer
         som_lr = config['som_lr']
         som_weight_decay = config['som_weight_decay']
         self.som_noise.optimizer = torch.optim.Adam(
@@ -149,13 +155,16 @@ class BDNPolicy:
                     observation = obs["observation"]
                     step_remain = self.finite_horizon - step_epoch
                     # step the environment
-                    action = self.predict(observation, desired_goal, step_remain, is_deterministic=False)
+                    action = self.predict(observation, desired_goal, step_remain, is_deterministic=True)
                     action = action.detach().cpu().numpy().squeeze()
+                    # unnormalize
+                    action = np.clip(action, -1.0, 1.0)
+                    action = (action + 1.0) / 2.0 * (self.action_range[1] - self.action_range[0]) + self.action_range[0]
                     obs, reward, terminated, truncated, _ = self.env.step(action)
 
                     if reward > 0:
                         terminated = True  # force early termination
-                    if step_epoch >= self.finite_horizon:
+                    if step_epoch >= self.finite_horizon - 1:
                         terminated = True  # force early termination
 
                     # save transition
@@ -181,8 +190,12 @@ class BDNPolicy:
 
             # ----------------- store data -----------------
             # finished an episode
-            self.replay_buffer.store_episode(
-                (np.stack(mb_obs), np.stack(mb_ag), np.stack(mb_g), np.stack(mb_actions)))
+            mb_obs = np.stack(mb_obs)
+            mb_ag = np.stack(mb_ag)
+            mb_g = np.stack(mb_g)
+            mb_actions = np.stack(mb_actions)
+            self.replay_buffer.store_episode((mb_obs, mb_ag, mb_g, mb_actions))
+            self._update_normalizer([mb_obs, mb_ag, mb_g, mb_actions])
 
             # ----------------- optimize model -----------------
             # optimize som
@@ -205,6 +218,9 @@ class BDNPolicy:
 
     def predict(self, obs, goal, t_remaining, is_deterministic=False):
         """Predict action given observation & goal"""
+        # normalize
+        obs = self.o_norm.normalize(obs)
+        goal = self.g_norm.normalize(goal)
         # move to gpu
         obs = torch.from_numpy(obs[None, :]).float().to(self.device)
         goal = torch.from_numpy(goal[None, :]).float().to(self.device)
@@ -229,6 +245,7 @@ class BDNPolicy:
         """Optimize SOM (State Occupancy Measure) Model"""
         # ---------------- sample transitions ----------------
         transitions = self.replay_buffer.sample(batch_size)
+        transitions = self._normalize_transition(transitions)
         obs = torch.from_numpy(transitions['obs']).float().to(self.device)
         obs_next = torch.from_numpy(transitions['obs_next']).float().to(self.device)
         ag_next = torch.from_numpy(transitions['ag_next']).float().to(self.device)
@@ -267,6 +284,7 @@ class BDNPolicy:
         """Optimize Policy"""
         # ---------------- sample transitions ----------------
         transitions = self.replay_buffer.sample(batch_size)
+        transitions = self._normalize_transition(transitions)
         obs = torch.from_numpy(transitions['obs']).float().to(self.device)
         policy_g = torch.from_numpy(transitions['policy_g']).float().to(self.device)
         t_remaining = torch.from_numpy(transitions['t_remaining']).float().to(self.device)
@@ -303,3 +321,59 @@ class BDNPolicy:
         self.som_noise_target.load_state_dict(checkpoint['som_noise_target'])
         self.update_som_target_network(alpha=1.0)
         print(f"Model loaded from {path}")
+
+     # update the normalizer
+    def _update_normalizer(self, episode_batch):
+        mb_obs, mb_ag, mb_g, mb_actions = episode_batch
+        mb_obs_next = mb_obs[:, 1:, :]
+        mb_ag_next = mb_ag[:, 1:, :]
+        # get the number of normalization transitions
+        num_transitions = mb_actions.shape[1]
+        # create the new buffer to store them
+        buffer_temp = {'obs': mb_obs,
+                       'ag': mb_ag,
+                       'g': mb_g,
+                       'actions': mb_actions,
+                       'obs_next': mb_obs_next,
+                       'ag_next': mb_ag_next,
+                       }
+        transitions = self.her_sampler.sample_her_transitions(buffer_temp, num_transitions)
+        obs, g = transitions['obs'], transitions['g']
+        # pre process the obs and g
+        transitions['obs'], transitions['g'] = self._preproc_og(obs, g)
+        # update
+        self.o_norm.update(transitions['obs'])
+        self.g_norm.update(transitions['g'])
+        # recompute the stats
+        self.o_norm.recompute_stats()
+        self.g_norm.recompute_stats()
+
+    def _preproc_og(self, o, g):
+        o = np.clip(o, -np.inf, np.inf)
+        g = np.clip(g, -np.inf, np.inf)
+        return o, g
+
+    def _normalize_transition(self, transitions: dict):
+        """Normalize the observation and goal"""
+        o, o_next = transitions['obs'], transitions['obs_next']
+        g, future_g, policy_g, ag_next = transitions['g'], transitions['future_g'], transitions['policy_g'], transitions['ag_next']
+        transitions['obs'], transitions['g'] = self._preproc_og(o, g)
+        _, transitions['future_g'] = self._preproc_og(o, future_g)
+        _, transitions['policy_g'] = self._preproc_og(o, policy_g)
+        transitions['obs_next'], transitions['ag_next'] = self._preproc_og(o_next, ag_next)
+        # start to do the update
+        obs_norm = self.o_norm.normalize(transitions['obs'])
+        obs_next_norm = self.o_norm.normalize(transitions['obs_next'])
+        g_norm = self.g_norm.normalize(transitions['g'])
+        future_g_norm = self.g_norm.normalize(transitions['future_g'])
+        policy_g_norm = self.g_norm.normalize(transitions['policy_g'])
+        ag_next_norm = self.g_norm.normalize(transitions['ag_next'])
+        # update the transition
+        transitions['obs'] = obs_norm
+        transitions['g'] = g_norm
+        transitions['future_g'] = future_g_norm
+        transitions['policy_g'] = policy_g_norm
+        transitions['obs_next'] = obs_next_norm
+        transitions['ag_next'] = ag_next_norm
+
+        return transitions

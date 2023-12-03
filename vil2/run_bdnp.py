@@ -1,6 +1,7 @@
 """Run Bellman Diffusion Network Policy"""
 import os
 import cv2
+import pickle
 import numpy as np
 from vil2.env import env_builder
 from vil2.algo.bdnp import BDNPolicy
@@ -23,12 +24,12 @@ if __name__ == "__main__":
 
     config = {
         # ----- som related -----
-        'som_hidden_dim': 256,
+        'som_hidden_dim': 32,
         'som_hidden_layer': 3,
         'som_time_emb': 'learnable',
         'som_input_emb': 'learnable',
         'beta_schedule': 'squaredcos_cap_v2',
-        'num_diffusion_iters': 100,
+        'num_diffusion_iters': 20,
         'som_gamma': 0.3,  # balancing loss; to distinguish from the gamma for discount factor
         'som_lr': 1e-4,
         'som_weight_decay': 1e-6,
@@ -37,7 +38,7 @@ if __name__ == "__main__":
         'pi_hidden_layer': 3,
         'policy_std': 0.1,
         'batch_size': 512,
-        'finite_horizon': 50,
+        'finite_horizon': 20,
         'policy_lr': 1e-4,
         'policy_weight_decay': 1e-6,
         # ----- training related -----
@@ -64,3 +65,8 @@ if __name__ == "__main__":
                num_episode=config['num_epochs'])
 
     bdnp.save(os.path.join(check_point_path, 'model.pt'))
+
+    # save the stats for replay buffer
+    # stats = bdnp.replay_buffer.compute_stats()
+    # with open(os.path.join(export_path, 'bdnp', 'stats.pkl'), 'wb') as f:
+    #     pickle.dump(stats, f)

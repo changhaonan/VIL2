@@ -67,6 +67,17 @@ class ReplayBuffer:
             idx = idx[0]
         return idx
 
+    def compute_stats(self):
+        # compute the stats for the current replay buffer
+        stats = {}
+        for key, value in self.buffers.items():
+            # value is (self.size, self.T + 1, D)
+            # compute the min, max for last dimension
+            stats[key] = {}
+            stats[key]['min'] = np.min(value.reshape(-1, value.shape[-1]), axis=0)
+            stats[key]['max'] = np.max(value.reshape(-1, value.shape[-1]), axis=0)
+        return stats
+
 
 class HERSampler:
     """HER replay buffer sampler"""
@@ -105,8 +116,6 @@ class HERSampler:
         transitions['g'] = future_ag
         transitions['policy_g'] = transitions['g'].copy()
         transitions['future_g'] = future_sampled_ag
-        # to get the params to re-compute reward
-        transitions['r'] = np.expand_dims(self.reward_func(transitions['ag_next'], transitions['g'], None), 1)
         transitions['exact_goal'] = np.expand_dims(transitions['exact_goal'], 1)
         transitions['t_remaining'] = np.expand_dims(transitions['t_remaining'], 1)
         transitions = {k: transitions[k].reshape(batch_size, *transitions[k].shape[1:]) for k in transitions.keys()}
