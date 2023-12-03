@@ -27,11 +27,18 @@ class ObjDPModel:
         self.obs_horizon = cfg.MODEL.OBS_HORIZON
         self.action_horizon = cfg.MODEL.ACTION_HORIZON
         self.pred_horizon = cfg.MODEL.PRED_HORIZON
-        self.action_dim = cfg.MODEL.ACTION_DIM
+        self.action_dim = cfg.MODEL.NOISE_NET.INIT_ARGS["input_dim"]
+        self.pose_dim = cfg.MODEL.POSE_DIM
+        self.geometry_feat_dim = cfg.MODEL.GEOMETRY_FEAT_DIM
+        self.recon_voxel_center = cfg.MODEL.RECON_VOXEL_CENTER
+        self.recon_time_stamp = cfg.MODEL.RECON_TIME_STAMP
+        self.cond_geometry_feature = cfg.MODEL.COND_GEOMETRY_FEATURE
+        self.cond_voxel_center = cfg.MODEL.COND_VOXEL_CENTER
+        self.guid_time_consistency = cfg.MODEL.GUID_TIME_CONSISTENCY
         # vision encoder
         # self.vision_encoder = vision_encoder
         # scheduler
-        self.num_diffusion_iters = 100
+        self.num_diffusion_iters = cfg.MODEL.NUM_DIFFUSION_ITERS
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=self.num_diffusion_iters,
             # the choise of beta schedule has big impact on performance
@@ -78,39 +85,17 @@ class ObjDPModel:
                 # batch loop
                 with tqdm(data_loader, desc="Batch", leave=False) as tepoch:
                     for nbatch in tepoch:
-                        # data normalized in dataset
-                        # device transfer
-                        # voxel_feature
-                        nobj_voxel_feat = nbatch["obj_voxel_feat"].to(self.device)  # (B, obs_horizon, num_voxel, dim_feat)
-                        nobj_voxel_center = nbatch["obj_voxel_center"].to(self.device)  # (B, obs_horizon, num_voxel, 3)
-                        nobj_voxel_obs = torch.cat([nobj_voxel_feat, nobj_voxel_center], dim=-1)  # (B, obs_horizon, num_voxel, D)
-                        # voxel_pose (to predict)
-                        nobj_voxel_pose = nbatch["obj_voxel_pose"].to(self.device)  # (B, pred_horizon, num_voxel, dim_pose)
-                        nobj_voxel_pose = nobj_voxel_pose[:, : self.pred_horizon, :, :self.action_dim]  # (B, pred_horizon, num_voxel, dim_pose)
-                        # ------------------- obs -------------------
-                        # (B, obs_horizon, num_voxel, D) -> (B * num_voxel, obs_horizon * D)
-                        obs_features = nobj_voxel_obs.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)
-                        # (B * num_voxel, obs_horizon, D)
-                        obs_cond = obs_features.flatten(start_dim=1)
-                        # (B * num_voxel, obs_horizon * D)
-
-                        # ------------------- action -------------------
-                        # (B, pred_horizon, num_voxel, D) -> (B * num_voxel, pred_horizon * D)
-                        naction = nobj_voxel_pose.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)
-                        # if self.recon_voxel_center:
-                        #     nobj_voxel_center = nobj_voxel_center.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)
-                        #     # append voxel center to action
-                        #     naction = torch.cat([naction, nobj_voxel_center], dim=-1)
-                        # (B * num_voxel, pred_horizon, D)
-
+                        B = nbatch["obj_voxel_feat"].shape[0]
+                        V = nbatch["obj_voxel_feat"].shape[2]
+                        ncond = self.assemble_cond(nbatch, B, V)  # (B*V, pred_horizon, cond_dim)
+                        naction = self.assemble_action(nbatch, B, V).to(self.device)  # (B*V, pred_horizon, action_dim)
                         # sample noise to add to actions
                         noise = torch.randn(naction.shape, device=self.device)
-                        B = naction.shape[0]
                         # sample a diffusion iteration for each data point
                         timesteps = torch.randint(
                             0,
                             self.noise_scheduler.config.num_train_timesteps,
-                            (B,),
+                            (B * V,),
                             device=self.device,
                         ).long()
 
@@ -120,7 +105,7 @@ class ObjDPModel:
 
                         # predict the noise residual
                         noise_pred = self.noise_pred_net(
-                            noisy_actions, timesteps, global_cond=obs_cond
+                            noisy_actions, timesteps, global_cond=ncond
                         )
 
                         # L2 loss
@@ -148,7 +133,7 @@ class ObjDPModel:
     def inference(self, obs_deque: collections.deque, stats: dict):
         """Inference with the model"""
         B = 1  # inference batch size is 1
-        num_voxel = obs_deque[0]["obj_voxel_feat"].shape[0]
+        V = obs_deque[0]["obj_voxel_feat"].shape[0]
 
         # stack the last obs_horizon number of observations
         obj_voxel_feat = np.stack([x["obj_voxel_feat"] for x in obs_deque])
@@ -161,19 +146,17 @@ class ObjDPModel:
         # device transfer
         nobj_voxel_feat = torch.from_numpy(nobj_voxel_feat).to(self.device).to(torch.float32)
         nobj_voxel_center = torch.from_numpy(nobj_voxel_center).to(self.device).to(torch.float32)
+        nbatch = {
+            "obj_voxel_feat": nobj_voxel_feat,
+            "obj_voxel_center": nobj_voxel_center,
+        }
 
         # infer action
         with torch.no_grad():
-            # concat with low-dim observations
-            obs_features = torch.cat([nobj_voxel_feat, nobj_voxel_center], dim=-1).unsqueeze(0)  # (B, obs_horizon, num_voxel, D)
-
-            # reshape observation to (B * num_voxel, obs_horizon * D)
-            obs_features = obs_features.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)
-            obs_cond = obs_features.flatten(start_dim=1)
-            # (B * num_voxel, obs_horizon * D)
+            ncond = self.assemble_cond(nbatch, B, V)  # (B*V, pred_horizon, cond_dim)
 
             # initialize action from Guassian noise
-            noisy_action = torch.randn((B * num_voxel, self.pred_horizon, self.action_dim), device=self.device)
+            noisy_action = torch.randn((B * V, self.pred_horizon, self.action_dim), device=self.device)
             naction = noisy_action
 
             # init scheduler
@@ -182,24 +165,25 @@ class ObjDPModel:
             for k in self.noise_scheduler.timesteps:
                 # predict noise
                 noise_pred = self.nets["noise_pred_net"](
-                    sample=naction, timestep=k, global_cond=obs_cond
+                    sample=naction, timestep=k, global_cond=ncond
                 )
-
                 # inverse diffusion step (remove noise)
                 naction = self.noise_scheduler.step(
                     model_output=noise_pred, timestep=k, sample=naction
                 ).prev_sample
+                # guided time consistency
+                if self.guid_time_consistency and self.recon_time_stamp:
+                    # guide the time to be the same
+                    gamma = 0.1
+                    ntime_stamp_mean = naction[..., 0:1].mean(dim=0, keepdim=True)
+                    naction[..., 0:1] = gamma * ntime_stamp_mean + (1 - gamma) * naction[..., 0:1]
+                    pass
 
         # unnormalize action
         naction = naction.detach().to("cpu").numpy()
-        # (B * num_voxel, pred_horizon, action_dim)
-        naction = naction.reshape(B, num_voxel, self.pred_horizon, self.action_dim)
-        stats_action = stats["obj_voxel_pose"]
-        stats_action["min"] = stats_action["min"][:self.action_dim]
-        stats_action["max"] = stats_action["max"][:self.action_dim]
-        action_pred = unnormalize_data(naction, stats=stats_action)
-
-        return action_pred
+        # (B * V, pred_horizon, action_dim)
+        pred_t = unnormalize_data(naction[..., 0:1], stats=stats["t"])
+        return pred_t
 
     def save(self, export_path):
         """Save model weights"""
@@ -210,3 +194,41 @@ class ObjDPModel:
         state_dict = torch.load(export_path, map_location=self.device)
         self.nets.load_state_dict(state_dict)
         print("Pretrained weights loaded.")
+
+    def assemble_action(self, nbatch, B, V):
+        """Dynamically assemble action"""
+        action_list = []
+        if self.recon_voxel_center:
+            nobj_voxel_center = nbatch["obj_voxel_center"].to(self.device)  # (B, pred_horizon, V, 3)
+            nobj_voxel_center = nobj_voxel_center[:, : self.pred_horizon, :, :3]  # (B, pred_horizon, V, 3)
+            nobj_voxel_center = nobj_voxel_center.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)  # (B * V, pred_horizon, 3)
+            # append voxel center to action
+            action_list.append(nobj_voxel_center)
+        if self.recon_time_stamp:
+            nobj_timestamp = nbatch["t"].to(self.device)
+            nobj_timestamp = nobj_timestamp.repeat(V, 1, 1)  # (B * V, pred_horizon, 1)
+            action_list.append(nobj_timestamp)
+        if len(action_list) == 0:
+            naction = None
+        else:
+            naction = torch.cat(action_list, dim=-1)  # (B * V, pred_horizon, action_dim)
+        return naction
+
+    def assemble_cond(self, nbatch, B, V):
+        """Dynamically assemble condition"""
+        cond_list = []
+        if self.cond_geometry_feature:
+            nobj_voxel_feat = nbatch["obj_voxel_feat"].to(self.device)  # (B, pred_horizon, V, D)
+            nobj_voxel_feat = nobj_voxel_feat[:, : self.pred_horizon, :, :]
+            nobj_voxel_feat = nobj_voxel_feat.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)  # (B * V, pred_horizon, D)
+            cond_list.append(nobj_voxel_feat)
+        if self.cond_voxel_center:
+            nobj_voxel_center = nbatch["obj_voxel_center"].to(self.device)
+            nobj_voxel_center = nobj_voxel_center[:, : self.pred_horizon, :, :3]
+            nobj_voxel_center = nobj_voxel_center.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)
+            cond_list.append(nobj_voxel_center)
+        if len(cond_list) == 0:
+            ncond = None
+        else:
+            ncond = torch.cat(cond_list, dim=-1)  # (B * V, pred_horizon, cond_dim)
+        return ncond

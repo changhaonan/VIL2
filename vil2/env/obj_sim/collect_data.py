@@ -52,9 +52,10 @@ if __name__ == "__main__":
 
     # generate a random trajectory
     action_trajecotry = dict()
-    for i in range(10):
-        random_action = np.random.uniform(-1.0, 1.0, size=7) * 0.1
-        random_action[3:] = random_action[3:] / np.linalg.norm(random_action[3:])  # normalize quaternion
+    for i in range(12):
+        random_action = np.zeros((7,), dtype=np.float32)
+        random_action[:3] = np.array([0.1, 0.1, 0.0], dtype=np.float32)
+        random_action[3:] = np.array([0.0, 0.0, 0.0, 1.0])  # no rotation
         action = {
             0: random_action,
         }

@@ -18,10 +18,10 @@ if __name__ == "__main__":
     # load env
     task_name = "objdp"
     root_path = os.path.dirname((os.path.abspath(__file__)))
-    cfg_file = os.path.join(root_path, "config", "obj_sim.py")
+    cfg_file = os.path.join(root_path, "config", "obj_sim_simplify.py")
     cfg = LazyConfig.load(cfg_file)
 
-    retrain = True
+    retrain = False
     # load dataset & data loader
     dataset = ObjDPDataset(
         dataset_path=f"{root_path}/test_data/ObjSim/obj_dp_dataset.zarr",
@@ -40,11 +40,34 @@ if __name__ == "__main__":
     )
 
     # start training
+    # compute network input/output dimension
+    noise_net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS
+    input_dim = 0
+    global_cond_dim = 0
+    # condition related
+    cond_geometry_feature = cfg.MODEL.COND_GEOMETRY_FEATURE
+    cond_voxel_center = cfg.MODEL.COND_VOXEL_CENTER
+    # horizon related
+    obs_horizon = cfg.MODEL.OBS_HORIZON
+    # i/o related
+    recon_voxel_center = cfg.MODEL.RECON_VOXEL_CENTER
+    recon_time_stamp = cfg.MODEL.RECON_TIME_STAMP
+    if recon_voxel_center:
+        input_dim += 3
+    if recon_time_stamp:
+        input_dim += 1
+    if cond_geometry_feature:
+        global_cond_dim += cfg.MODEL.GEOMETRY_FEAT_DIM
+    if cond_voxel_center:
+        global_cond_dim += 3
+    global_cond_dim = global_cond_dim * obs_horizon
+    noise_net_init_args["input_dim"] = input_dim
+    noise_net_init_args["global_cond_dim"] = global_cond_dim
     objdp_model = ObjDPModel(
         cfg,
         vision_encoder=None,
         noise_pred_net=build_noise_pred_net(
-            cfg.MODEL.NOISE_NET.NAME, **cfg.MODEL.NOISE_NET.INIT_ARGS
+            cfg.MODEL.NOISE_NET.NAME, **noise_net_init_args
         ),
     )
 
@@ -81,10 +104,11 @@ if __name__ == "__main__":
             if done:
                 break
             # parse obs
-            img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center = parser_obs(
+            t, img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center = parser_obs(
                 obs, dataset.carrier_type, dataset.geometry_encoder, dataset.aggretator
             )
             obs = {
+                "t": t,
                 "img": img,
                 "depth": depth,
                 "obj_super_voxel_pose": active_obj_super_voxel_pose,
@@ -95,5 +119,9 @@ if __name__ == "__main__":
             if len(obs_deque) == cfg.MODEL.OBS_HORIZON:
                 pred = objdp_model.inference(obs_deque, stats=stats)
                 # visualize prediction
-                check_horizon = 1
-                env.render(return_image=False, pred_voxel_poses=pred[0, :, :check_horizon, :])
+                check_horizon = 4
+                # pred_voxel_poses = pred[0, :, :check_horizon, 1:4]
+                pred_voxel_time_stamps = pred[:, :check_horizon, 0]
+                print(pred_voxel_time_stamps)
+                # env.render(return_image=False, pred_voxel_poses=pred_voxel_poses)
+                pass

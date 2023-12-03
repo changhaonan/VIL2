@@ -206,7 +206,7 @@ if __name__ == "__main__":
     root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     groundingdino_path = os.path.join(root_dir, "external", "GroundingDINO")
     cotracker_path = os.path.join(root_dir, "external", "co-tracker")
-    object_tracker = TextBasedObjectTracker(tracker_path=os.path.join(cotracker_path, '/checkpoints/cotracker_stride_4_wind_8.pth'),
+    object_tracker = TextBasedObjectTracker(tracker_path=os.path.join(cotracker_path, "/checkpoints/cotracker_stride_4_wind_8.pth"),
                                             detector_path=os.path.join(groundingdino_path, "weights/groundingdino_swint_ogc.pth"),
                                             detector_config_path=os.path.join(groundingdino_path, "groundingdino/config/GroundingDINO_SwinT_OGC.py"),
                                             device=device)

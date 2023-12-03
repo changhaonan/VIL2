@@ -289,6 +289,7 @@ class ObjDPDataset(torch.utils.data.Dataset):
             sample_end_idx=sample_end_idx,
         )
         # discard unused observations
+        nsample["t"] = nsample["t"].astype(np.float32)
         nsample["image"] = nsample["image"][: self.obs_horizon, :].astype(np.float32)
         nsample["depth"] = nsample["depth"][: self.obs_horizon, :].astype(np.float32)
         nsample["obj_voxel_feat"] = nsample["obj_voxel_feat"][: self.obs_horizon, :].astype(np.float32)

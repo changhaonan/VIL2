@@ -1,3 +1,4 @@
+# Most simplified version of obj_dp experiment
 ENV = dict(
     obj_names=["bowl", "plate"],
     obj_mesh_dir="google_scanned_objects",
@@ -36,9 +37,8 @@ MODEL = dict(
     PRED_HORIZON=16,  # 16
     ACTION_DIM=3 + 1,  # 6d pose/ 3d translation + time stamp
     POSE_DIM=3,  # 6d pose/ 3d translation
+    GEOMETRY_FEAT_DIM=128,
     NUM_DIFFUSION_ITERS=200,
-    RECON_VOXEL_CENTER=True,  # reconstruct voxel center
-    RECON_TIME_STAMP=True,  # reconstruct time stamp
     VISION_ENCODER=dict(
         NAME="resnet18",
         PRETRAINED=True,
@@ -54,6 +54,11 @@ MODEL = dict(
             n_groups=8,
         ),
     ),
+    RECON_VOXEL_CENTER=True,  # reconstruct voxel center
+    RECON_TIME_STAMP=True,  # reconstruct time stamp
+    COND_GEOMETRY_FEATURE=False,
+    COND_VOXEL_CENTER=False,
+    GUID_TIME_CONSISTENCY=True,
 )
 
 TRAIN = dict(
