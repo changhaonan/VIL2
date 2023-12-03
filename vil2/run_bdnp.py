@@ -39,7 +39,7 @@ if __name__ == "__main__":
         # ----- training related -----
         'num_epochs': 600,
         'eval_period': 1000,
-        'max_step_per_epoch': 1000,
+        'max_epoch_per_episode': 32,
         'log_period': 100,
         'her_tolerance': 0.2,  # HER tolerance
         'alpha': 0.1,
@@ -52,12 +52,12 @@ if __name__ == "__main__":
         'sample_size': 32,
         'a_lazy_init': True,  # use last a_0 to init current a_T
     }
-    env = DictConcatWrapper(env)
+    # env = DictConcatWrapper(env)
     bdnp = BDNPolicy(env=env, config=config)
     # do train
     goal_pi = np.zeros((31,), dtype=np.float32)
     bdnp.train(batch_size=config['batch_size'],
-               num_epochs=config['num_epochs'], goal_pi=goal_pi,)
+               num_episode=config['num_epochs'])
 
     bdnp.save(os.path.join(check_point_path, 'model.pt'))
 
