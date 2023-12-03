@@ -25,6 +25,9 @@ export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libGLEW.so
 - [ ] Max-diff RL
 - [ ] Further check the detail of this module.
 
+#### BDNP
+- [ ] Normalize data & action.
+
 ## Trouble-shooting
 
 There is `cypython` problem can be found [here](https://github.com/openai/mujoco-py/issues/773).

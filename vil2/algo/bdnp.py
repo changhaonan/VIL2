@@ -18,17 +18,7 @@ from vil2.algo.replay_buffer import ReplayBuffer, HERSampler
 
 
 Transition = namedtuple(
-    'Transition', ('desired_goal', 'achieved_goal', 'state', 'action', 'next_state', 'reward', 'terminated', 'steps_remain'))
-
-
-class DictConcatWrapper(gym.ObservationWrapper):
-    """Concatenate all observations into one vector"""
-
-    def observation(self, obs):
-        """override"""
-        if isinstance(obs, dict):
-            return np.concatenate([obs[obs_name] for obs_name in obs.keys()])
-        return obs
+    'Transition', ('desired_goal', 'achieved_goal', 'state', 'action', 'next_state', 'reward', 'terminated', 't_remaining'))
 
 
 class BDNPolicy:
@@ -86,7 +76,7 @@ class BDNPolicy:
         # a' = pi(s') is the action taken by the policy
         # t is the time step
         # n is the step remain
-        som_input_dim = self.state_dim
+        som_input_dim = self.goal_dim
         som_cond_dim = self.state_dim + self.action_dim + 1
         som_hidden_dim = config['som_hidden_dim']
         som_hidden_layers = config['som_hidden_layer']
@@ -107,7 +97,7 @@ class BDNPolicy:
             hidden_layers=som_hidden_layers,
             time_emb=som_time_emb,
             input_emb=som_input_emb,
-        ).to(self.device)
+        ).to(self.device).requires_grad_(False)  # no gradient
         self.som_gamma = config['som_gamma']
         # noise scheduler
         self.num_diffusion_iters = config['num_diffusion_iters']
@@ -123,6 +113,16 @@ class BDNPolicy:
             prediction_type="epsilon",
         )
 
+        # optimizer
+        som_lr = config['som_lr']
+        som_weight_decay = config['som_weight_decay']
+        self.som_noise.optimizer = torch.optim.Adam(
+            self.som_noise.parameters(), lr=som_lr, weight_decay=som_weight_decay)
+        policy_lr = config['policy_lr']
+        policy_weight_decay = config['policy_weight_decay']
+        self.policy.optimizer = torch.optim.Adam(
+            self.policy.parameters(), lr=policy_lr, weight_decay=policy_weight_decay)
+
     def update_som_target_network(self, alpha: float = 0.1):
         """Update som target network with Polyak averaging"""
         for param, target_param in zip(self.som_noise.parameters(), self.som_noise_target.parameters()):
@@ -132,6 +132,8 @@ class BDNPolicy:
     def train(self, batch_size: int, num_episode: int):
         """Train BDN with goal_pi as the goal"""
         enable_render = True
+        self.som_noise.train()
+        self.policy.train()
         t_episode = tqdm(range(num_episode))
         for idx_episode in t_episode:
             # ----------------- collect data -----------------
@@ -148,6 +150,7 @@ class BDNPolicy:
                     step_remain = self.finite_horizon - step_epoch
                     # step the environment
                     action = self.predict(observation, desired_goal, step_remain, is_deterministic=False)
+                    action = action.detach().cpu().numpy().squeeze()
                     obs, reward, terminated, truncated, _ = self.env.step(action)
 
                     if reward > 0:
@@ -181,42 +184,41 @@ class BDNPolicy:
             self.replay_buffer.store_episode(
                 (np.stack(mb_obs), np.stack(mb_ag), np.stack(mb_g), np.stack(mb_actions)))
 
-            # log
-            t_episode.set_description(f"Episode: {idx_episode}, Reward: {reward_episode}")
-            if idx_episode % self.log_period == 0:
-                if self.log_path is not None:
-                    with open(os.path.join(self.log_path, "eval.txt"), "a") as f:
-                        f.write(
-                            f"Episode: {idx_episode}| reward: {reward_episode}\n")
-
             # ----------------- optimize model -----------------
             # optimize som
-            self.optimize_som(idx_episode, batch_size=batch_size)
+            som_loss = self.optimize_som(idx_episode, batch_size=batch_size)
 
             # optimize policy
-            self.optimize_policy(idx_episode, batch_size=batch_size)
+            pi_loss = self.optimize_policy(idx_episode, batch_size=batch_size)
 
             # update som target network
             if idx_episode % self.target_update_period == 0:
                 self.update_som_target_network(alpha=self.alpha)
 
-    def predict(self, obs, goal, step_remain, is_deterministic=False):
+            # ----------------- logging -----------------
+            t_episode.set_description(f"Episode: {idx_episode}, reward: {reward_episode}; som_loss: {som_loss}; pi_loss: {pi_loss}")
+            # if idx_episode % self.log_period == 0:
+            #     if self.log_path is not None:
+            #         with open(os.path.join(self.log_path, "eval.txt"), "a") as f:
+            #             f.write(
+            #                 f"Episode: {idx_episode}| reward: {reward_episode}; som_loss: {som_loss}; pi_loss: {pi_loss}\n")
+
+    def predict(self, obs, goal, t_remaining, is_deterministic=False):
         """Predict action given observation & goal"""
-        self.policy.eval()
         # move to gpu
         obs = torch.from_numpy(obs[None, :]).float().to(self.device)
         goal = torch.from_numpy(goal[None, :]).float().to(self.device)
-        step_remain = torch.tensor([[step_remain]]).float().to(self.device)
+        t_remaining = torch.tensor([[t_remaining]]).float().to(self.device)
         # predict action
-        mean = self.policy(torch.cat([goal, obs, step_remain], dim=1))
+        mean = self.policy(torch.cat([goal, obs, t_remaining], dim=1))
         if not is_deterministic:
             # build distribution
             dist = torch.distributions.Normal(mean, self.policy_std)
             # sample action
             action = dist.sample()
-            return action.detach().cpu().numpy().squeeze()
+            return action
         else:
-            return mean.detach().cpu().numpy().squeeze()
+            return mean
 
     def her_reward_func(self, achieved_goal, desired_goal, info):
         """HER reward function"""
@@ -225,13 +227,64 @@ class BDNPolicy:
 
     def optimize_som(self, epoch: int, batch_size: int):
         """Optimize SOM (State Occupancy Measure) Model"""
-        # sample transitions
+        # ---------------- sample transitions ----------------
         transitions = self.replay_buffer.sample(batch_size)
-        pass
+        obs = torch.from_numpy(transitions['obs']).float().to(self.device)
+        obs_next = torch.from_numpy(transitions['obs_next']).float().to(self.device)
+        ag_next = torch.from_numpy(transitions['ag_next']).float().to(self.device)
+        g = torch.from_numpy(transitions['g']).float().to(self.device)
+        t_remaining = torch.from_numpy(transitions['t_remaining']).float().to(self.device)
+        future_g = torch.from_numpy(transitions['future_g']).float().to(self.device)
+
+        # ---------------- sample steps & noise ----------------
+        timesteps = torch.randint(0, self.num_diffusion_iters, (batch_size, 1)).long().to(self.device)
+        noise = torch.randn(batch_size, self.goal_dim, device=self.device)
+        noisy_ag_next = self.noise_scheduler.add_noise(ag_next, noise, timesteps)  # apply noise to g_next
+        noisy_future_g = self.noise_scheduler.add_noise(future_g, noise, timesteps)  # apply noise to future_g
+
+        # ---------------- Diffusion loss ----------------
+        pi_obs = self.policy(torch.cat([g, obs, t_remaining], dim=1)).detach()  # pi(obs)
+        som_cond = torch.cat([obs, pi_obs, t_remaining], dim=1)
+        noise_g_g_next = self.som_noise(noisy_ag_next, som_cond, timesteps)  # SOM from g to g'
+        loss_diffusion = nn.functional.mse_loss(noise_g_g_next, noise)
+
+        # ---------------- Bellman loss ----------------
+        pi_obs_next = self.policy(torch.cat([g, obs_next, t_remaining - 1], dim=1)).detach()  # pi(obs_next)
+        som_cond_next = torch.cat([obs_next, pi_obs_next, t_remaining - 1], dim=1)
+        noise_g_next_g_f = self.som_noise_target(noisy_future_g, som_cond_next, timesteps)  # SOM from g' to g_f
+        noise_g_g_f = self.som_noise(noisy_future_g, som_cond, timesteps)  # SOM from g to g_f
+        loss_bellman = nn.functional.mse_loss(noise_g_next_g_f, noise_g_g_f)
+
+        # ---------------- loss ----------------
+        gamma = 1.0 / (t_remaining + 1)
+        loss = (loss_diffusion * gamma + (1 - gamma) * loss_bellman).sum()
+        loss.backward()
+        self.som_noise.optimizer.step()
+        self.som_noise.optimizer.zero_grad()
+        return loss.item()
 
     def optimize_policy(self, epoch: int, batch_size: int):
         """Optimize Policy"""
-        pass
+        # ---------------- sample transitions ----------------
+        transitions = self.replay_buffer.sample(batch_size)
+        obs = torch.from_numpy(transitions['obs']).float().to(self.device)
+        policy_g = torch.from_numpy(transitions['policy_g']).float().to(self.device)
+        t_remaining = torch.from_numpy(transitions['t_remaining']).float().to(self.device)
+
+        # ---------------- sample steps & noise ----------------
+        timesteps = torch.randint(0, self.num_diffusion_iters, (batch_size, 1)).long().to(self.device)
+        noise = torch.randn(batch_size, self.goal_dim, device=self.device)
+        noisy_policy_g = self.noise_scheduler.add_noise(policy_g, noise, timesteps)  # apply noise to policy_g
+        pi_obs = self.policy(torch.cat([policy_g, obs, t_remaining], dim=1))  # pi(obs)
+        som_cond = torch.cat([obs, pi_obs, t_remaining], dim=1)
+        noise_g_goal = self.som_noise_target(noisy_policy_g, som_cond, timesteps)  # SOM from g to goal
+
+        # ---------------- loss ----------------
+        loss = nn.functional.mse_loss(noise_g_goal, noise)
+        loss.backward()
+        self.policy.optimizer.step()
+        self.policy.optimizer.zero_grad()
+        return loss.item()
 
     def save(self, path):
         """Save model to path"""

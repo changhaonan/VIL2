@@ -3,14 +3,14 @@ import os
 import cv2
 import numpy as np
 from vil2.env import env_builder
-from vil2.algo.bdnp import BDNPolicy, DictConcatWrapper
+from vil2.algo.bdnp import BDNPolicy
 from detectron2.config import LazyConfig
 
 
 if __name__ == "__main__":
     # prepare path
     root_path = os.path.dirname((os.path.abspath(__file__)))
-    env_name = "GYM-FetchPush-v2"
+    env_name = "GYM-FetchReach-v2"
     export_path = os.path.join(root_path, "test_data", env_name)
     check_point_path = os.path.join(export_path, 'bdnp', 'checkpoint')
     log_path = os.path.join(export_path, 'bdnp', 'log')
@@ -30,16 +30,20 @@ if __name__ == "__main__":
         'beta_schedule': 'squaredcos_cap_v2',
         'num_diffusion_iters': 100,
         'som_gamma': 0.3,  # balancing loss; to distinguish from the gamma for discount factor
+        'som_lr': 1e-4,
+        'som_weight_decay': 1e-6,
         # ----- policy related -----
         'pi_hidden_dim': 256,
         'pi_hidden_layer': 3,
         'policy_std': 0.1,
         'batch_size': 512,
         'finite_horizon': 50,
+        'policy_lr': 1e-4,
+        'policy_weight_decay': 1e-6,
         # ----- training related -----
-        'num_epochs': 600,
+        'num_epochs': 500,
         'eval_period': 1000,
-        'max_epoch_per_episode': 32,
+        'max_epoch_per_episode': 8,
         'log_period': 100,
         'her_tolerance': 0.2,  # HER tolerance
         'alpha': 0.1,
@@ -60,5 +64,3 @@ if __name__ == "__main__":
                num_episode=config['num_epochs'])
 
     bdnp.save(os.path.join(check_point_path, 'model.pt'))
-
-    # do eval

@@ -88,25 +88,21 @@ class HERSampler:
         episode_idxs = np.random.randint(0, rollout_batch_size, batch_size)
         t_samples = np.random.randint(T, size=batch_size)
         transitions = {key: episode_batch[key][episode_idxs, t_samples].copy() for key in episode_batch.keys()}
-        # her idx
-        her_indexes = np.where(np.random.uniform(size=batch_size) < self.future_p)
+
+        # compute the future time-steps
         future_offset = np.random.uniform(size=batch_size) * (T - t_samples)
         future_offset = future_offset.astype(int)
-        future_t = (t_samples + 1 + future_offset)[her_indexes]
+        future_t = (t_samples + 1 + future_offset)
 
-        future_ag = episode_batch['ag'][episode_idxs[her_indexes], future_t]
+        future_ag = episode_batch['ag'][episode_idxs, future_t]
         future_sampled_ag = episode_batch['ag'][episode_idxs,
                                                 (t_samples + future_offset % (T - t_samples))]
 
-        her_used = np.zeros_like(future_offset)
-        her_used[her_indexes] = 1
-        mask = np.zeros_like(future_offset)
-        mask[her_indexes] = 1
+        # output dictionary
         transitions['exact_goal'] = np.zeros_like(future_offset)
-        transitions['exact_goal'][np.where(future_offset[her_indexes] == 0)] = 1
-        transitions['exact_goal'] *= mask
+        transitions['exact_goal'][np.where(future_offset == 0)] = 1
         transitions['t_remaining'] = T - t_samples
-        transitions['g'][her_indexes] = future_ag
+        transitions['g'] = future_ag
         transitions['policy_g'] = transitions['g'].copy()
         transitions['future_g'] = future_sampled_ag
         # to get the params to re-compute reward
