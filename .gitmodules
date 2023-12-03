@@ -4,9 +4,9 @@
 [submodule "external/IsaacGymEnvs"]
 	path = external/IsaacGymEnvs
 	url = https://github.com/NVIDIA-Omniverse/IsaacGymEnvs.git
-[submodule "GroundingDINO"]
-	path = GroundingDINO
+[submodule "external/GroundingDINO"]
+	path = external/GroundingDINO
 	url = https://github.com/IDEA-Research/GroundingDINO.git
-[submodule "co-tracker"]
-	path = co-tracker
-	url = https://github.com/facebookresearch/co-tracker
+[submodule "external/co-tracker"]
+	path = external/co-tracker
+	url = https://github.com/facebookresearch/co-tracker.git
