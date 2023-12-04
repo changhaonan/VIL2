@@ -129,17 +129,19 @@ if __name__ == "__main__":
                 check_horizon = 1
                 # pred_voxel_poses = pred[0, :, :check_horizon, 1:4]
                 pred_voxel_time_stamps = pred["t"]
-                print(pred_voxel_time_stamps[:, :check_horizon, :])
                 pred_voxel_poses = pred["obj_voxel_center"]
                 pred_voxel_data_stamps = pred["data_stamp"]
                 # env.render(return_image=False, pred_voxel_poses=pred_voxel_poses[0, :, :check_horizon, :])
                 eval_utils.draw_pose_distribution(
                     poses=pred_voxel_poses.reshape(-1, 3),
                     color=pred_voxel_time_stamps[..., 0].reshape(-1),
+                    scale=1.0,
+                    xyz_range=np.array([0.0, 10.0, 0.0, 10.0, -5, 5]),
                 )
                 eval_utils.draw_pose_distribution(
                     poses=pred_voxel_poses.reshape(-1, 3),
                     color=pred_voxel_data_stamps[..., 0].reshape(-1),
                     scale=1.0,
+                    xyz_range=np.array([0.0, 10.0, 0.0, 10.0, -5, 5]),
                 )
                 pass

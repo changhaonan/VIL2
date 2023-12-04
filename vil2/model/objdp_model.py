@@ -66,6 +66,8 @@ class ObjDPModel:
         ).to(self.device)
         # ablation module
         self.recon_voxel_center = cfg.MODEL.RECON_VOXEL_CENTER
+        # build embedding key
+        self.build_embedding_key()
 
     def train(self, num_epochs: int, data_loader):
         # Exponential Moving Average
@@ -275,7 +277,7 @@ class ObjDPModel:
                 # unnormalize
                 time_stamp = unnormalize_data(ntime_stamp, stats=stats["t"])
             else:
-                time_stamp = ntime_stamp
+                time_stamp = self.parse_embedding(ntime_stamp)
             actions["t"] = time_stamp
             offset += self.time_emb_dim
         if self.recon_data_stamp:
@@ -284,7 +286,7 @@ class ObjDPModel:
                 # unnormalize
                 data_stamp = unnormalize_data(ndata_stamp, stats=stats["data_stamp"])
             else:
-                data_stamp = ndata_stamp
+                data_stamp = self.parse_embedding(ndata_stamp)
             actions["data_stamp"] = data_stamp
             offset += self.time_emb_dim
         if self.recon_voxel_center:
@@ -294,3 +296,20 @@ class ObjDPModel:
             actions["obj_voxel_center"] = pose
             offset += 3
         return actions
+
+    def build_embedding_key(self, max_len=100):
+        """Build embedding key"""
+        self.embedding_key = torch.arange(max_len, device=self.device).reshape((-1))
+        self.embedding_key = self.nets["positional_embedding"](self.embedding_key).detach().to("cpu").numpy()
+        self.embedding_key = self.embedding_key / np.linalg.norm(self.embedding_key, axis=-1, keepdims=True)
+
+    def parse_embedding(self, embedding_query):
+        """Parse embedding query into timestamp and pose"""
+        B, V, L, D = embedding_query.shape
+        embedding_query = embedding_query.reshape((-1, self.time_emb_dim))
+        # normalize
+        embedding_query = embedding_query / np.linalg.norm(embedding_query, axis=-1, keepdims=True)
+        embedding_attention = np.dot(embedding_query, self.embedding_key.T)
+        # argmax along the last dimension
+        embedding_attention = np.argmax(embedding_attention, axis=-1)
+        return embedding_attention.reshape((B, V, L, 1))
