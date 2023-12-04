@@ -27,4 +27,18 @@ def draw_pose_distribution(
         plt.title(title)
     cbar = plt.colorbar(sc, ax=ax)
     cbar.set_label('Intensity')  # You can change 'Intensity' to whatever label is appropriate for your data
+    # axis equal
+    max_range = np.array(
+        [
+            poses[:, 0].max() - poses[:, 0].min(),
+            poses[:, 1].max() - poses[:, 1].min(),
+            poses[:, 2].max() - poses[:, 2].min(),
+        ]
+    ).max()
+    mean_x = poses[:, 0].mean()
+    mean_y = poses[:, 1].mean()
+    mean_z = poses[:, 2].mean()
+    ax.set_xlim(mean_x - max_range / 2, mean_x + max_range / 2)
+    ax.set_ylim(mean_y - max_range / 2, mean_y + max_range / 2)
+    ax.set_zlim(mean_z - max_range / 2, mean_z + max_range / 2)
     plt.show()

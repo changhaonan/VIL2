@@ -49,7 +49,7 @@ if __name__ == "__main__":
     if os.path.exists(export_path):
         os.system(f"rm -r {export_path}")
     os.makedirs(export_path, exist_ok=True)
-    cfg = LazyConfig.load(os.path.join(root_path, "config", "obj_sim.py"))
+    cfg = LazyConfig.load(os.path.join(root_path, "config", "obj_sim_simplify.py"))
     env = ObjSim(cfg=cfg)
 
     # generate a random trajectory

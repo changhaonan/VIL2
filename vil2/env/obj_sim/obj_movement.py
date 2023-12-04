@@ -6,7 +6,7 @@ from vil2.utils import load_utils
 from vil2.utils import misc_utils
 import open3d as o3d
 from copy import deepcopy
-from vil2.algo.super_voxel import generate_random_voxel
+from vil2.algo.super_voxel import generate_random_voxel, generate_circle_yz_voxel
 from collections import deque
 
 
@@ -28,11 +28,13 @@ class ObjSim(gym.Env):
         self.objs: list[ObjData] = []
         self._obj_names = dict()
         self._obj_init_poses = dict()
-        obj_source = cfg.ENV.obj_source
-        if obj_source == "google_scanned_objects":
+        self.obj_source = cfg.ENV.obj_source
+        if self.obj_source == "google_scanned_objects":
             self._load_objs_google_scanned_objects()
+        elif self.obj_source == "virtual":
+            self._load_obj_virtual()
         else:
-            raise ValueError(f"Unknown obj_source: {obj_source}")
+            raise ValueError(f"Unknown obj_source: {self.obj_source}")
         self._super_voxel_traj = dict()
         self._t = 0
         self._active_obj_id = []
@@ -70,7 +72,30 @@ class ObjSim(gym.Env):
                 pcd=geometry.vertices,
                 geometry=geometry,
             )
+            self.objs.append(obj_data)
 
+    def _load_obj_virtual(self):
+        obj_names = self.cfg.ENV.obj_names
+        for i, obj_name in enumerate(obj_names):
+            # semantic id
+            if obj_name in self._obj_names:
+                semantic_id = self._obj_names[obj_name]
+            else:
+                semantic_id = len(self._obj_names)
+                self._obj_names[obj_name] = semantic_id
+            # pose
+            pose = misc_utils.quat_to_mat(
+                np.array(self.cfg.ENV.obj_init_poses[i])
+            )
+            self._obj_init_poses[obj_name] = pose
+            obj_data = ObjData(
+                pose=pose,
+                semantic_str=obj_name,
+                id=semantic_id,
+                semantic_feature=None,
+                pcd=None,
+                geometry=None,
+            )
             self.objs.append(obj_data)
 
     def reset(self):
@@ -143,7 +168,10 @@ class ObjSim(gym.Env):
     def generate_obj_super_voxel(self, obj_id, patch_size):
         """Generate super-voxel for a given object."""
         obj = self.objs[obj_id]
-        super_voxel, voxel_centers = generate_random_voxel(obj.geometry, num_points=patch_size)
+        if self.obj_source == "google_scanned_objects":
+            super_voxel, voxel_centers = generate_random_voxel(obj.geometry, num_points=patch_size)
+        elif self.obj_source == "virtual":
+            super_voxel, voxel_centers = generate_circle_yz_voxel(radius=0.5, num_points=patch_size)
         return super_voxel, voxel_centers
 
     def compute_pairwise_patch_distance(self, obj_id1, obj_id2):
@@ -162,6 +190,8 @@ class ObjSim(gym.Env):
         vis_list = []
         for obj in self.objs:
             if not show_super_patch:
+                if obj.geometry is None:
+                    continue
                 vis_obj = deepcopy(obj.geometry)
                 vis_obj.transform(obj.pose)
                 vis_list.append(vis_obj)
@@ -232,7 +262,11 @@ class ObjSim(gym.Env):
         obs["voxel_pose"] = self._compute_obj_track()
 
         # record geometry
-        obs["geometry"] = [np.asarray(obj.geometry.vertices) for obj in self.objs]
+        obs["geometry"] = []
+        for obj in self.objs:
+            if obj.geometry is None:
+                continue
+            obs["geometry"].append(np.asarray(obj.geometry.vertices))
 
         # record super voxel
         obs["super_voxel"] = [obj.super_voxel for obj in self.objs]

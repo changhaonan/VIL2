@@ -73,3 +73,16 @@ def generate_random_voxel(geometry: o3d.geometry.TriangleMesh, num_points: int, 
         patch_pcd = deepcopy(np.asarray(patch.vertices))
         super_voxel.append(patch_pcd)
     return super_voxel, np.asarray(sampled_points.points)
+
+
+def generate_circle_yz_voxel(radius: float, num_points, seed: int = 0):
+    """Generate `num_points` points on a circle with radius `radius`. on y-z plane"""
+    np.random.seed(seed)
+    points = []
+    for i in range(num_points):
+        theta = i * 2 * np.pi / num_points
+        x = 0
+        y = radius * np.cos(theta)
+        z = radius * np.sin(theta)
+        points.append(np.array([x, y, z]))
+    return points, np.stack(points, axis=0)

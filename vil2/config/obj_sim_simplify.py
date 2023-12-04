@@ -1,11 +1,10 @@
 # Most simplified version of obj_dp experiment
 ENV = dict(
-    obj_names=["bowl", "plate"],
+    obj_names=["sphere"],
     obj_mesh_dir="google_scanned_objects",
-    obj_source="google_scanned_objects",
+    obj_source="virtual",
     obj_init_poses=[
         [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-        [0.0, -0.3, 0.0, 1.0, 0.0, 0.0, 0.0],
     ],
     super_patch_size=5,
     super_patch_radius=0.05,

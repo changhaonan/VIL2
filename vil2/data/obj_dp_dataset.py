@@ -352,3 +352,4 @@ if __name__ == "__main__":
             color=nobj_voxel_data_stamps.reshape(-1),
             scale=1.0,
         )
+        break
