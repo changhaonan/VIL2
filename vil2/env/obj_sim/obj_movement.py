@@ -82,7 +82,7 @@ class ObjSim(gym.Env):
         self._t = 0
         self._active_obj_id = []
 
-    def step(self, action, mode="position"):
+    def step(self, action, mode="position", noise=0.0):
         """Step the environment."""
         # step each object
         self._active_obj_id = []
@@ -103,7 +103,7 @@ class ObjSim(gym.Env):
             )
 
         # compute observation
-        obs = self._compute_obs()
+        obs = self._compute_obs(noise=noise)
 
         # override
         # update time
@@ -224,7 +224,7 @@ class ObjSim(gym.Env):
             vis.destroy_window()
             return np.asarray(image).copy(), np.asarray(depth_image).copy()
 
-    def _compute_obs(self):
+    def _compute_obs(self, noise=0.0):
         # compute observation
         obs = {}
 
@@ -238,7 +238,7 @@ class ObjSim(gym.Env):
         obs["super_voxel"] = [obj.super_voxel for obj in self.objs]
 
         # record voxel center
-        obs["voxel_center"] = self._compute_obj_voxel_center()
+        obs["voxel_center"] = self._compute_obj_voxel_center(noise=noise)
 
         # record active obj id
         obs["active_obj_id"] = self._active_obj_id
@@ -259,9 +259,9 @@ class ObjSim(gym.Env):
             obj_pose[obj_id] = _traj[-1]  # (super_patch_size, 6)
         return obj_pose
 
-    def _compute_obj_voxel_center(self):
+    def _compute_obj_voxel_center(self, noise=0.0):
         """Update object voxel center."""
         obj_voxel_center = dict()
         for obj_id, obj in enumerate(self.objs):
-            obj_voxel_center[obj_id] = obj.voxel_center + obj.pose[:3, 3]
+            obj_voxel_center[obj_id] = obj.voxel_center + obj.pose[:3, 3] + np.random.randn(*obj.voxel_center.shape) * noise
         return obj_voxel_center

@@ -6,6 +6,7 @@ import zarr
 import pickle
 from tqdm.auto import tqdm
 import os
+import vil2.utils.eval_utils as eval_utils
 
 # ------------  utils ------------
 
@@ -323,6 +324,31 @@ if __name__ == "__main__":
         obs_horizon=2,
         action_horizon=4,
     )
-
-    data = dataset[0]
-    pass
+    stats = dataset.stats
+    data_loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=64,
+        shuffle=True,
+        num_workers=8,
+        pin_memory=True,
+        persistent_workers=True,
+    )
+    # Check data first
+    for nbatch in data_loader:
+        nobj_voxel_center = nbatch["obj_voxel_center"]
+        nobj_voxel_time_stamps = nbatch["t"]
+        nobj_voxel_data_stamps = nbatch["data_stamp"]
+        V = nobj_voxel_center.shape[2]
+        nobj_voxel_data_stamps = nobj_voxel_data_stamps.repeat(1, 1, V)
+        nobj_voxel_time_stamps = nobj_voxel_time_stamps.repeat(1, 1, V)
+        # unnormalize
+        nobj_voxel_center = unnormalize_data(nobj_voxel_center, stats["obj_voxel_center"])
+        eval_utils.draw_pose_distribution(
+            poses=nobj_voxel_center.reshape(-1, 3),
+            color=nobj_voxel_time_stamps.reshape(-1),
+        )
+        eval_utils.draw_pose_distribution(
+            poses=nobj_voxel_center.reshape(-1, 3),
+            color=nobj_voxel_data_stamps.reshape(-1),
+            scale=1.0,
+        )

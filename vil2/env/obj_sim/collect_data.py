@@ -27,7 +27,7 @@ def collect_data_sim_obj(
         os.makedirs(epoch_path, exist_ok=True)
         while True:
             action = action_trajecotry[env._t % len(action_trajecotry)]
-            obs, reward, done, info = env.step(action)
+            obs, reward, done, info = env.step(action, noise=obs_noise_level)
             if done or count > max_steps:
                 break
             if epoch_path is not None:
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     # trajectory 1
     for i in range(100):
         random_action = np.zeros((6,), dtype=np.float32)
-        random_action[:3] = np.array([0.1*i, 0.2*i, 0.0], dtype=np.float32)
+        random_action[:3] = np.array([1*np.log(i + 10), 2*np.log(i + 1), 0.0], dtype=np.float32)
         random_action[3:] = np.array([0.0, 0.0, 0.0])  # no rotation
         action = {
             0: random_action,
@@ -66,7 +66,7 @@ if __name__ == "__main__":
     # trajectory 2
     for i in range(100):
         random_action = np.zeros((6,), dtype=np.float32)
-        random_action[:3] = np.array([0.2*i, 0.1*i, 0.0], dtype=np.float32)
+        random_action[:3] = np.array([2*np.log(i + 10), 1*np.log(i + 1), 0.0], dtype=np.float32)
         random_action[3:] = np.array([0.0, 0.0, 0.0])  # no rotation
         action = {
             0: random_action,
@@ -79,7 +79,7 @@ if __name__ == "__main__":
         env=env,
         num_eposides=10,
         max_steps=100,
-        obs_noise_level=0.0,
+        obs_noise_level=0.03,
         action_trajecotry_list=action_trajecotry_list,
         output_path=export_path,
     )
