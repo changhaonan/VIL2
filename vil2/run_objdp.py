@@ -51,12 +51,15 @@ if __name__ == "__main__":
     # horizon related
     obs_horizon = cfg.MODEL.OBS_HORIZON
     # i/o related
-    recon_voxel_center = cfg.MODEL.RECON_VOXEL_CENTER
     recon_time_stamp = cfg.MODEL.RECON_TIME_STAMP
-    if recon_voxel_center:
-        input_dim += 3
+    recon_data_stamp = cfg.MODEL.RECON_DATA_STAMP
+    recon_voxel_center = cfg.MODEL.RECON_VOXEL_CENTER
     if recon_time_stamp:
         input_dim += 1
+    if recon_data_stamp:
+        input_dim += 1
+    if recon_voxel_center:
+        input_dim += 3
     if cond_geometry_feature:
         global_cond_dim += cfg.MODEL.GEOMETRY_FEAT_DIM
     if cond_voxel_center:
@@ -105,7 +108,7 @@ if __name__ == "__main__":
             if done:
                 break
             # parse obs
-            t, img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center = parser_obs(
+            t, img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center, data_stamp = parser_obs(
                 obs, dataset.carrier_type, dataset.geometry_encoder, dataset.aggretator
             )
             obs = {
@@ -115,6 +118,7 @@ if __name__ == "__main__":
                 "obj_super_voxel_pose": active_obj_super_voxel_pose,
                 "obj_voxel_feat": active_obj_geometry_feat,
                 "obj_voxel_center": active_obj_voxel_center,
+                "data_stamp": data_stamp,
             }
             obs_deque.append(obs)
             batch_size = 1
@@ -126,9 +130,15 @@ if __name__ == "__main__":
                 pred_voxel_time_stamps = pred["t"]
                 print(pred_voxel_time_stamps[:, :check_horizon, :])
                 pred_voxel_poses = pred["obj_voxel_center"]
-                env.render(return_image=False, pred_voxel_poses=pred_voxel_poses[0, :, :check_horizon, :])
+                pred_voxel_data_stamps = pred["data_stamp"]
+                # env.render(return_image=False, pred_voxel_poses=pred_voxel_poses[0, :, :check_horizon, :])
                 # eval_utils.draw_pose_distribution(
                 #     poses=pred_voxel_poses.reshape(-1, 3),
                 #     color=pred_voxel_time_stamps.reshape(-1),
                 # )
+                eval_utils.draw_pose_distribution(
+                    poses=pred_voxel_poses.reshape(-1, 3),
+                    color=pred_voxel_data_stamps.reshape(-1),
+                    scale=1.0,
+                )
                 pass

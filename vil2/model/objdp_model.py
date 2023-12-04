@@ -32,9 +32,11 @@ class ObjDPModel:
         self.geometry_feat_dim = cfg.MODEL.GEOMETRY_FEAT_DIM
         self.recon_voxel_center = cfg.MODEL.RECON_VOXEL_CENTER
         self.recon_time_stamp = cfg.MODEL.RECON_TIME_STAMP
+        self.recon_data_stamp = cfg.MODEL.RECON_DATA_STAMP
         self.cond_geometry_feature = cfg.MODEL.COND_GEOMETRY_FEATURE
         self.cond_voxel_center = cfg.MODEL.COND_VOXEL_CENTER
-        self.guid_time_consistency = cfg.MODEL.GUID_TIME_CONSISTENCY
+        self.guide_time_consistency = cfg.MODEL.GUIDE_TIME_CONSISTENCY
+        self.guide_data_consistency = cfg.MODEL.GUIDE_DATA_CONSISTENCY
         # vision encoder
         # self.vision_encoder = vision_encoder
         # scheduler
@@ -167,23 +169,34 @@ class ObjDPModel:
                 noise_pred = self.nets["noise_pred_net"](
                     sample=naction, timestep=k, global_cond=ncond
                 )
-                # guided time consistency
-                # if self.guid_time_consistency and self.recon_time_stamp:
-                #     # guide the time to be the same
-                #     gamma = 1.0
-                #     ntime_stamp_mean = naction[..., 0:1].mean(dim=0, keepdim=True)
-                #     ntime_stamp_gradient = gamma * (naction[..., 0:1] - ntime_stamp_mean)
-                #     noise_pred[..., 0:1] -= ntime_stamp_gradient * torch.sqrt(1 - self.noise_scheduler.alphas[k])
                 # inverse diffusion step (remove noise)
                 naction = self.noise_scheduler.step(
                     model_output=noise_pred, timestep=k, sample=naction
                 ).prev_sample
-                # post-average
-                if self.guid_time_consistency and self.recon_time_stamp:
+                # gradient guided time consistency
+                naction_grad = torch.zeros_like(naction)
+                offset = 0
+                gamma = 0.5
+                if self.guide_time_consistency and self.recon_time_stamp:
                     # guide the time to be the same
-                    gamma = 1.0 * torch.sqrt(1 - self.noise_scheduler.alphas[k])
-                    ntime_stamp_mean = naction[..., 0:1].mean(dim=0, keepdim=True)
-                    naction = (1 - gamma) * naction + gamma * ntime_stamp_mean
+                    # gamma = 1.0 * torch.sqrt(1 - self.noise_scheduler.alphas[k])
+                    # gamma = 0.5
+                    # FIXME: old-version: but seems working better???
+                    # ntime_stamp_mean = naction[..., 0:1].mean(dim=0, keepdim=True)
+                    # naction = (1 - gamma) * naction + gamma * ntime_stamp_mean
+                    ntime_stamp_mean = naction[..., offset:offset+1].reshape((B, V, self.pred_horizon, 1)).mean(
+                        dim=1, keepdim=True).repeat(1, V, 1, 1).flatten(start_dim=0, end_dim=1)  # (B*V, pred_horizon, 1)
+                    ntime_stamp_grad = naction[..., offset:offset+1] - ntime_stamp_mean
+                    naction_grad[..., offset:offset+1] = gamma * ntime_stamp_grad
+                    offset += 1
+                if self.guide_data_consistency and self.recon_data_stamp:
+                    ndata_stamp_mean = naction[..., offset:offset+1].reshape((B, V, self.pred_horizon, 1)).mean(
+                        dim=1, keepdim=True).repeat(1, V, 1, 1).flatten(start_dim=0, end_dim=1)
+                    ndata_stamp_grad = naction[..., offset:offset+1] - ndata_stamp_mean
+                    naction_grad[..., offset:offset+1] = gamma * ndata_stamp_grad
+                    offset += 1
+                # apply gradient
+                naction = naction - naction_grad
 
         # unnormalize action
         naction = naction.detach().to("cpu").numpy().reshape((B, V, self.pred_horizon, self.action_dim))
@@ -207,6 +220,11 @@ class ObjDPModel:
             nobj_timestamp = nobj_timestamp[:, None, ...].repeat(1, V, 1, 1)  # (B, V, pred_horizon, 1)
             nobj_timestamp = nobj_timestamp.flatten(start_dim=0, end_dim=1)  # (B * V, pred_horizon, 1)
             action_list.append(nobj_timestamp)
+        if self.recon_data_stamp:
+            nobj_data_stamp = nbatch["data_stamp"].to(self.device)
+            nobj_data_stamp = nobj_data_stamp[:, None, ...].repeat(1, V, 1, 1)  # (B, V, pred_horizon, 1)
+            nobj_data_stamp = nobj_data_stamp.flatten(start_dim=0, end_dim=1)  # (B * V, pred_horizon, 1)
+            action_list.append(nobj_data_stamp)
         if self.recon_voxel_center:
             nobj_voxel_center = nbatch["obj_voxel_center"].to(self.device)  # (B, pred_horizon, V, 3)
             nobj_voxel_center = nobj_voxel_center[:, : self.pred_horizon, :, :3]  # (B, pred_horizon, V, 3)
@@ -247,6 +265,12 @@ class ObjDPModel:
             # unnormalize
             time_stamp = unnormalize_data(ntime_stamp, stats=stats["t"])
             actions["t"] = time_stamp
+            offset += 1
+        if self.recon_data_stamp:
+            ndata_stamp = naction[..., offset:offset + 1]
+            # unnormalize
+            data_stamp = unnormalize_data(ndata_stamp, stats=stats["data_stamp"])
+            actions["data_stamp"] = data_stamp
             offset += 1
         if self.recon_voxel_center:
             npose = naction[..., offset:offset + 3]

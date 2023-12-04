@@ -15,11 +15,12 @@ def collect_data_sim_obj(
     num_eposides: int | list[int],
     max_steps: int,
     obs_noise_level: float,
-    action_trajecotry: dict[int, np.ndarray],
+    action_trajecotry_list: dict[int, np.ndarray],
     output_path=None,
 ):
     """Collect offline data for SimObj"""
     for i in tqdm(range(num_eposides), "Collecting Sim Obj data"):
+        action_trajecotry = action_trajecotry_list[i // (num_eposides // 2)]  # first half of the data is trajectory 1, second half is trajectory 2
         env.reset()
         count = 0
         epoch_path = os.path.join(output_path, f"{i}")
@@ -33,6 +34,7 @@ def collect_data_sim_obj(
                 # image, depth_image = env.render(return_image=False)
                 # cv2.imwrite(os.path.join(epoch_path, f"{env._t}.png"), image)
                 with open(os.path.join(epoch_path, f"{env._t}.pkl"), "wb") as f:
+                    obs["data_stamp"] = i
                     pickle.dump(obs, f)
             count += 1
 
@@ -51,7 +53,8 @@ if __name__ == "__main__":
     env = ObjSim(cfg=cfg)
 
     # generate a random trajectory
-    action_trajecotry = dict()
+    action_trajecotry_list = [{}, {}]
+    # trajectory 1
     for i in range(100):
         random_action = np.zeros((6,), dtype=np.float32)
         random_action[:3] = np.array([0.1*i, 0.2*i, 0.0], dtype=np.float32)
@@ -59,7 +62,16 @@ if __name__ == "__main__":
         action = {
             0: random_action,
         }
-        action_trajecotry[i] = action
+        action_trajecotry_list[0][i] = action
+    # trajectory 2
+    for i in range(100):
+        random_action = np.zeros((6,), dtype=np.float32)
+        random_action[:3] = np.array([0.2*i, 0.1*i, 0.0], dtype=np.float32)
+        random_action[3:] = np.array([0.0, 0.0, 0.0])  # no rotation
+        action = {
+            0: random_action,
+        }
+        action_trajecotry_list[1][i] = action
 
     # collect data
     collect_data_sim_obj(
@@ -68,10 +80,10 @@ if __name__ == "__main__":
         num_eposides=10,
         max_steps=100,
         obs_noise_level=0.0,
-        action_trajecotry=action_trajecotry,
+        action_trajecotry_list=action_trajecotry_list,
         output_path=export_path,
     )
 
     # save action trajectory
     with open(os.path.join(export_path, "action_trajectory.pkl"), "wb") as f:
-        pickle.dump(action_trajecotry, f)
+        pickle.dump(action_trajecotry_list[0], f)

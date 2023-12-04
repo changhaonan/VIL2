@@ -56,9 +56,11 @@ MODEL = dict(
     ),
     RECON_VOXEL_CENTER=True,  # reconstruct voxel center
     RECON_TIME_STAMP=True,  # reconstruct time stamp
+    RECON_DATA_STAMP=True,  # reconstruct data stamp
     COND_GEOMETRY_FEATURE=False,
     COND_VOXEL_CENTER=False,
-    GUID_TIME_CONSISTENCY=True,
+    GUIDE_TIME_CONSISTENCY=True,
+    GUIDE_DATA_CONSISTENCY=True,
 )
 
 TRAIN = dict(

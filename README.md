@@ -28,6 +28,9 @@ export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libGLEW.so
 #### BDNP
 - [ ] Normalize data & action.
 
+## OBJDP
+There seems to have encoding problem.
+
 ## Trouble-shooting
 
 There is `cypython` problem can be found [here](https://github.com/openai/mujoco-py/issues/773).

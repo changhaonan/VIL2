@@ -7,6 +7,7 @@ def draw_pose_distribution(
     poses: np.ndarray,
     color: np.ndarray,
     title: str = None,
+    scale: float = 1.0,
 ):
     """Draw poses using scatter plot"""
     fig = plt.figure(figsize=(8, 8))
@@ -17,7 +18,7 @@ def draw_pose_distribution(
         poses[:, 2],
         c=color,
         cmap="jet",
-        s=0.1,
+        s=scale,
     )
     ax.set_xlabel("x")
     ax.set_ylabel("y")

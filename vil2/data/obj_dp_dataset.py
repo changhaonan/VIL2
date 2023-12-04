@@ -116,6 +116,7 @@ def parser_obs(obs: dict, carrier_type: str, geometry_encoder: str, aggretator: 
     img = obs["image"]
     depth = obs["depth"]
     t = obs["t"]
+    data_stamp = obs.get("data_stamp", 0)
 
     # Get active obj geometry
     if carrier_type == "super_voxel":
@@ -144,7 +145,7 @@ def parser_obs(obs: dict, carrier_type: str, geometry_encoder: str, aggretator: 
     # Get active obj voxel_pose
     active_obj_super_voxel_pose = obs["voxel_pose"][active_obj_id]
 
-    return t, img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center
+    return t, img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center, data_stamp
 
 
 def build_objdp_dataset(data_path: str, export_path: str, carrier_type: str, geometry_encoder: str, aggretator: str, action_horizon: int = 2, obs_horizon: int = 8):
@@ -158,16 +159,17 @@ def build_objdp_dataset(data_path: str, export_path: str, carrier_type: str, geo
     obj_geometry_feat_buffer = []
     obj_voxel_center_buffer = []
     dones_buffer = []
+    data_stamp_buffer = []
     for epoch_dir in tqdm(os.listdir(data_path), desc="Building OBJDP dataset..."):
         epoch_path = os.path.join(data_path, epoch_dir)
         if not os.path.isdir(epoch_path):
             continue
-        for file_name in sorted(os.listdir(epoch_path)):
+        for file_name in sorted(os.listdir(epoch_path), key=lambda x: int(x.split(".")[0])):
             if file_name.endswith(".pkl"):
                 with open(os.path.join(epoch_path, file_name), "rb") as f:
                     obs = pickle.load(f)
                 # parse obs
-                t, img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center = parser_obs(
+                t, img, depth, active_obj_super_voxel_pose, active_obj_geometry_feat, active_obj_voxel_center, data_stamp = parser_obs(
                     obs, carrier_type, geometry_encoder, aggretator
                 )
                 # append to buffer
@@ -178,6 +180,7 @@ def build_objdp_dataset(data_path: str, export_path: str, carrier_type: str, geo
                 obj_geometry_feat_buffer.append(active_obj_geometry_feat)
                 obj_voxel_center_buffer.append(active_obj_voxel_center)
                 dones_buffer.append(False)
+                data_stamp_buffer.append(data_stamp)
         # append done
         dones_buffer[-1] = True
     # convert to numpy & save to zarr
@@ -188,6 +191,7 @@ def build_objdp_dataset(data_path: str, export_path: str, carrier_type: str, geo
     obj_geometry_feat_buffer = np.stack(obj_geometry_feat_buffer)
     obj_voxel_center_buffer = np.stack(obj_voxel_center_buffer)
     dones_buffer = np.array(dones_buffer)
+    data_stamp_buffer = np.array(data_stamp_buffer)
     # compute episode ends: index of the last element of each episode
     eposide_ends = np.where(dones_buffer)[0] + 1
     # save to zarr
@@ -199,6 +203,7 @@ def build_objdp_dataset(data_path: str, export_path: str, carrier_type: str, geo
     root.create_dataset("obj_voxel_feat", data=obj_geometry_feat_buffer)  # (N, num_super_voxel, feat_dim)
     root.create_dataset("obj_voxel_center", data=obj_voxel_center_buffer)  # (N, num_super_voxel, 3)
     root.create_dataset("eposide_ends", data=eposide_ends)  # (N,)
+    root.create_dataset("data_stamp", data=data_stamp_buffer.reshape(-1, 1))  # (N, 1)
     # save meta data
     dim_geometry_feat = obj_geometry_feat_buffer.shape[-1]
     num_super_voxel = obj_geometry_feat_buffer.shape[1]
@@ -242,6 +247,7 @@ class ObjDPDataset(torch.utils.data.Dataset):
             "obj_voxel_feat": dataset_root["obj_voxel_feat"][:],
             "obj_voxel_center": dataset_root["obj_voxel_center"][:],
             "t": dataset_root["t"][:],
+            "data_stamp": dataset_root["data_stamp"][:],
         }
         episode_ends = dataset_root["eposide_ends"][:]
 
@@ -295,6 +301,7 @@ class ObjDPDataset(torch.utils.data.Dataset):
         nsample["obj_voxel_feat"] = nsample["obj_voxel_feat"].astype(np.float32)
         nsample["obj_voxel_center"] = nsample["obj_voxel_center"].astype(np.float32)
         nsample["obj_voxel_pose"] = nsample["obj_voxel_pose"].astype(np.float32)
+        nsample["data_stamp"] = nsample["data_stamp"].astype(np.float32)
         return nsample
 
 
