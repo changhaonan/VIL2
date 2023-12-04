@@ -29,7 +29,7 @@ export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libGLEW.so
 - [ ] Normalize data & action.
 
 ## OBJDP
-There seems to have encoding problem.
+There seems to have encoding problem. The most important now is to do encoding.
 
 ## Trouble-shooting
 

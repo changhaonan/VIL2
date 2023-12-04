@@ -264,8 +264,11 @@ class ObjDPDataset(torch.utils.data.Dataset):
         stats = dict()
         normalized_train_data = dict()
         for key, data in train_data.items():
-            stats[key] = get_data_stats(data)
-            normalized_train_data[key] = normalize_data(data, stats[key])
+            if key == "t" or key == "data_stamp":
+                normalized_train_data[key] = data
+            else:
+                stats[key] = get_data_stats(data)
+                normalized_train_data[key] = normalize_data(data, stats[key])
 
         # images are already normalized
         normalized_train_data["image"] = train_image_data
@@ -295,13 +298,13 @@ class ObjDPDataset(torch.utils.data.Dataset):
             sample_end_idx=sample_end_idx,
         )
         # discard unused observations
-        nsample["t"] = nsample["t"].astype(np.float32)
+        nsample["t"] = nsample["t"].astype(np.int32)
         nsample["image"] = nsample["image"][: self.obs_horizon, :].astype(np.float32)
         nsample["depth"] = nsample["depth"][: self.obs_horizon, :].astype(np.float32)
         nsample["obj_voxel_feat"] = nsample["obj_voxel_feat"].astype(np.float32)
         nsample["obj_voxel_center"] = nsample["obj_voxel_center"].astype(np.float32)
         nsample["obj_voxel_pose"] = nsample["obj_voxel_pose"].astype(np.float32)
-        nsample["data_stamp"] = nsample["data_stamp"].astype(np.float32)
+        nsample["data_stamp"] = nsample["data_stamp"].astype(np.int32)
         return nsample
 
 

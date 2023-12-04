@@ -54,10 +54,11 @@ if __name__ == "__main__":
     recon_time_stamp = cfg.MODEL.RECON_TIME_STAMP
     recon_data_stamp = cfg.MODEL.RECON_DATA_STAMP
     recon_voxel_center = cfg.MODEL.RECON_VOXEL_CENTER
+    embedding_dim = cfg.MODEL.TIME_EMB_DIM if cfg.MODEL.USE_POSITIONAL_EMBEDDING else 1
     if recon_time_stamp:
-        input_dim += 1
+        input_dim += embedding_dim
     if recon_data_stamp:
-        input_dim += 1
+        input_dim += embedding_dim
     if recon_voxel_center:
         input_dim += 3
     if cond_geometry_feature:
@@ -132,13 +133,13 @@ if __name__ == "__main__":
                 pred_voxel_poses = pred["obj_voxel_center"]
                 pred_voxel_data_stamps = pred["data_stamp"]
                 # env.render(return_image=False, pred_voxel_poses=pred_voxel_poses[0, :, :check_horizon, :])
-                # eval_utils.draw_pose_distribution(
-                #     poses=pred_voxel_poses.reshape(-1, 3),
-                #     color=pred_voxel_time_stamps.reshape(-1),
-                # )
                 eval_utils.draw_pose_distribution(
                     poses=pred_voxel_poses.reshape(-1, 3),
-                    color=pred_voxel_data_stamps.reshape(-1),
+                    color=pred_voxel_time_stamps[..., 0].reshape(-1),
+                )
+                eval_utils.draw_pose_distribution(
+                    poses=pred_voxel_poses.reshape(-1, 3),
+                    color=pred_voxel_data_stamps[..., 0].reshape(-1),
                     scale=1.0,
                 )
                 pass

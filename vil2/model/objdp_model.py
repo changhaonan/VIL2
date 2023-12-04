@@ -10,6 +10,7 @@ from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.optimization import get_scheduler
 from vil2.data.obj_dp_dataset import normalize_data, unnormalize_data
+import vil2.utils.torch_utils as torch_utils
 
 
 class ObjDPModel:
@@ -29,7 +30,10 @@ class ObjDPModel:
         self.pred_horizon = cfg.MODEL.PRED_HORIZON
         self.action_dim = cfg.MODEL.NOISE_NET.INIT_ARGS["input_dim"]
         self.pose_dim = cfg.MODEL.POSE_DIM
+        self.time_emb_dim = cfg.MODEL.TIME_EMB_DIM if cfg.MODEL.USE_POSITIONAL_EMBEDDING else 1
         self.geometry_feat_dim = cfg.MODEL.GEOMETRY_FEAT_DIM
+        self.use_positional_embedding = cfg.MODEL.USE_POSITIONAL_EMBEDDING
+
         self.recon_voxel_center = cfg.MODEL.RECON_VOXEL_CENTER
         self.recon_time_stamp = cfg.MODEL.RECON_TIME_STAMP
         self.recon_data_stamp = cfg.MODEL.RECON_DATA_STAMP
@@ -57,6 +61,7 @@ class ObjDPModel:
             {
                 # "vision_encoder": self.vision_encoder,
                 "noise_pred_net": self.noise_pred_net,
+                "positional_embedding": torch_utils.SinusoidalEmbedding(size=self.time_emb_dim),
             }
         ).to(self.device)
         # ablation module
@@ -184,17 +189,17 @@ class ObjDPModel:
                     # FIXME: old-version: but seems working better???
                     # ntime_stamp_mean = naction[..., 0:1].mean(dim=0, keepdim=True)
                     # naction = (1 - gamma) * naction + gamma * ntime_stamp_mean
-                    ntime_stamp_mean = naction[..., offset:offset+1].reshape((B, V, self.pred_horizon, 1)).mean(
-                        dim=1, keepdim=True).repeat(1, V, 1, 1).flatten(start_dim=0, end_dim=1)  # (B*V, pred_horizon, 1)
-                    ntime_stamp_grad = naction[..., offset:offset+1] - ntime_stamp_mean
-                    naction_grad[..., offset:offset+1] = gamma * ntime_stamp_grad
-                    offset += 1
+                    ntime_stamp_mean = naction[..., offset:offset+self.time_emb_dim].reshape((B, V, self.pred_horizon, self.time_emb_dim)).mean(
+                        dim=1, keepdim=True).repeat(1, V, 1, 1).flatten(start_dim=0, end_dim=1)  # (B*V, pred_horizon, time_emb_dim)
+                    ntime_stamp_grad = naction[..., offset:offset+self.time_emb_dim] - ntime_stamp_mean
+                    naction_grad[..., offset:offset+self.time_emb_dim] = gamma * ntime_stamp_grad
+                    offset += self.time_emb_dim
                 if self.guide_data_consistency and self.recon_data_stamp:
-                    ndata_stamp_mean = naction[..., offset:offset+1].reshape((B, V, self.pred_horizon, 1)).mean(
+                    ndata_stamp_mean = naction[..., offset:offset+self.time_emb_dim].reshape((B, V, self.pred_horizon, self.time_emb_dim)).mean(
                         dim=1, keepdim=True).repeat(1, V, 1, 1).flatten(start_dim=0, end_dim=1)
-                    ndata_stamp_grad = naction[..., offset:offset+1] - ndata_stamp_mean
-                    naction_grad[..., offset:offset+1] = gamma * ndata_stamp_grad
-                    offset += 1
+                    ndata_stamp_grad = naction[..., offset:offset+self.time_emb_dim] - ndata_stamp_mean
+                    naction_grad[..., offset:offset+self.time_emb_dim] = gamma * ndata_stamp_grad
+                    offset += self.time_emb_dim
                 # apply gradient
                 naction = naction - naction_grad
 
@@ -218,12 +223,16 @@ class ObjDPModel:
         if self.recon_time_stamp:
             nobj_timestamp = nbatch["t"].to(self.device)
             nobj_timestamp = nobj_timestamp[:, None, ...].repeat(1, V, 1, 1)  # (B, V, pred_horizon, 1)
-            nobj_timestamp = nobj_timestamp.flatten(start_dim=0, end_dim=1)  # (B * V, pred_horizon, 1)
+            nobj_timestamp = nobj_timestamp.flatten(start_dim=0, end_dim=2)  # (B * V, pred_horizon, 1)
+            if self.use_positional_embedding:
+                nobj_timestamp = self.nets["positional_embedding"](nobj_timestamp).reshape((B * V, self.pred_horizon, self.time_emb_dim))
             action_list.append(nobj_timestamp)
         if self.recon_data_stamp:
             nobj_data_stamp = nbatch["data_stamp"].to(self.device)
             nobj_data_stamp = nobj_data_stamp[:, None, ...].repeat(1, V, 1, 1)  # (B, V, pred_horizon, 1)
-            nobj_data_stamp = nobj_data_stamp.flatten(start_dim=0, end_dim=1)  # (B * V, pred_horizon, 1)
+            nobj_data_stamp = nobj_data_stamp.flatten(start_dim=0, end_dim=2)  # (B * V, pred_horizon, 1)
+            if self.use_positional_embedding:
+                nobj_data_stamp = self.nets["positional_embedding"](nobj_data_stamp).reshape((B * V, self.pred_horizon, self.time_emb_dim))
             action_list.append(nobj_data_stamp)
         if self.recon_voxel_center:
             nobj_voxel_center = nbatch["obj_voxel_center"].to(self.device)  # (B, pred_horizon, V, 3)
@@ -261,17 +270,23 @@ class ObjDPModel:
         offset = 0
         actions = {}
         if self.recon_time_stamp:
-            ntime_stamp = naction[..., 0:1]
-            # unnormalize
-            time_stamp = unnormalize_data(ntime_stamp, stats=stats["t"])
+            ntime_stamp = naction[..., offset:self.time_emb_dim]
+            if not self.use_positional_embedding:
+                # unnormalize
+                time_stamp = unnormalize_data(ntime_stamp, stats=stats["t"])
+            else:
+                time_stamp = ntime_stamp
             actions["t"] = time_stamp
-            offset += 1
+            offset += self.time_emb_dim
         if self.recon_data_stamp:
-            ndata_stamp = naction[..., offset:offset + 1]
-            # unnormalize
-            data_stamp = unnormalize_data(ndata_stamp, stats=stats["data_stamp"])
+            ndata_stamp = naction[..., offset:offset + self.time_emb_dim]
+            if not self.use_positional_embedding:
+                # unnormalize
+                data_stamp = unnormalize_data(ndata_stamp, stats=stats["data_stamp"])
+            else:
+                data_stamp = ndata_stamp
             actions["data_stamp"] = data_stamp
-            offset += 1
+            offset += self.time_emb_dim
         if self.recon_voxel_center:
             npose = naction[..., offset:offset + 3]
             # unnormalize
