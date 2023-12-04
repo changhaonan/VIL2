@@ -12,6 +12,7 @@ from vil2.data.obj_dp_dataset import ObjDPDataset, normalize_data, unnormalize_d
 import vil2.utils.misc_utils as utils
 from vil2.env.obj_sim.obj_movement import ObjSim
 from detectron2.config import LazyConfig, instantiate
+import vil2.utils.eval_utils as eval_utils
 
 
 if __name__ == "__main__":
@@ -116,12 +117,18 @@ if __name__ == "__main__":
                 "obj_voxel_center": active_obj_voxel_center,
             }
             obs_deque.append(obs)
+            batch_size = 1
             if len(obs_deque) == cfg.MODEL.OBS_HORIZON:
-                pred = objdp_model.inference(obs_deque, stats=stats)
+                pred = objdp_model.inference(obs_deque, stats=stats, batch_size=batch_size)
                 # visualize prediction
-                check_horizon = 4
+                check_horizon = 1
                 # pred_voxel_poses = pred[0, :, :check_horizon, 1:4]
-                pred_voxel_time_stamps = pred[:, :check_horizon, 0]
-                print(pred_voxel_time_stamps)
-                # env.render(return_image=False, pred_voxel_poses=pred_voxel_poses)
+                pred_voxel_time_stamps = pred["t"]
+                print(pred_voxel_time_stamps[:, :check_horizon, :])
+                pred_voxel_poses = pred["obj_voxel_center"]
+                env.render(return_image=False, pred_voxel_poses=pred_voxel_poses[0, :, :check_horizon, :])
+                # eval_utils.draw_pose_distribution(
+                #     poses=pred_voxel_poses.reshape(-1, 3),
+                #     color=pred_voxel_time_stamps.reshape(-1),
+                # )
                 pass

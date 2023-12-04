@@ -130,22 +130,22 @@ class ObjDPModel:
         # copy ema back to model
         ema.copy_to(self.nets.parameters())
 
-    def inference(self, obs_deque: collections.deque, stats: dict):
+    def inference(self, obs_deque: collections.deque, stats: dict, batch_size: int):
         """Inference with the model"""
-        B = 1  # inference batch size is 1
+        B = batch_size  # inference batch size is 1
         V = obs_deque[0]["obj_voxel_feat"].shape[0]
 
         # stack the last obs_horizon number of observations
-        obj_voxel_feat = np.stack([x["obj_voxel_feat"] for x in obs_deque])
-        obj_voxel_center = np.stack([x["obj_voxel_center"] for x in obs_deque])
+        obj_voxel_feat = np.stack([x["obj_voxel_feat"] for x in obs_deque])[None, ...]
+        obj_voxel_center = np.stack([x["obj_voxel_center"] for x in obs_deque])[None, ...]
 
         # normalize observation
         nobj_voxel_feat = normalize_data(obj_voxel_feat, stats=stats["obj_voxel_feat"])
         nobj_voxel_center = normalize_data(obj_voxel_center, stats=stats["obj_voxel_center"])
 
         # device transfer
-        nobj_voxel_feat = torch.from_numpy(nobj_voxel_feat).to(self.device).to(torch.float32)
-        nobj_voxel_center = torch.from_numpy(nobj_voxel_center).to(self.device).to(torch.float32)
+        nobj_voxel_feat = torch.from_numpy(nobj_voxel_feat).to(self.device).to(torch.float32).tile((B, 1, 1, 1))
+        nobj_voxel_center = torch.from_numpy(nobj_voxel_center).to(self.device).to(torch.float32).tile((B, 1, 1, 1))
         nbatch = {
             "obj_voxel_feat": nobj_voxel_feat,
             "obj_voxel_center": nobj_voxel_center,
@@ -167,23 +167,27 @@ class ObjDPModel:
                 noise_pred = self.nets["noise_pred_net"](
                     sample=naction, timestep=k, global_cond=ncond
                 )
+                # guided time consistency
+                # if self.guid_time_consistency and self.recon_time_stamp:
+                #     # guide the time to be the same
+                #     gamma = 1.0
+                #     ntime_stamp_mean = naction[..., 0:1].mean(dim=0, keepdim=True)
+                #     ntime_stamp_gradient = gamma * (naction[..., 0:1] - ntime_stamp_mean)
+                #     noise_pred[..., 0:1] -= ntime_stamp_gradient * torch.sqrt(1 - self.noise_scheduler.alphas[k])
                 # inverse diffusion step (remove noise)
                 naction = self.noise_scheduler.step(
                     model_output=noise_pred, timestep=k, sample=naction
                 ).prev_sample
-                # guided time consistency
+                # post-average
                 if self.guid_time_consistency and self.recon_time_stamp:
                     # guide the time to be the same
-                    gamma = 0.1
+                    gamma = 1.0 * torch.sqrt(1 - self.noise_scheduler.alphas[k])
                     ntime_stamp_mean = naction[..., 0:1].mean(dim=0, keepdim=True)
-                    naction[..., 0:1] = gamma * ntime_stamp_mean + (1 - gamma) * naction[..., 0:1]
-                    pass
+                    naction = (1 - gamma) * naction + gamma * ntime_stamp_mean
 
         # unnormalize action
-        naction = naction.detach().to("cpu").numpy()
-        # (B * V, pred_horizon, action_dim)
-        pred_t = unnormalize_data(naction[..., 0:1], stats=stats["t"])
-        return pred_t
+        naction = naction.detach().to("cpu").numpy().reshape((B, V, self.pred_horizon, self.action_dim))
+        return self.parse_action(naction, stats)
 
     def save(self, export_path):
         """Save model weights"""
@@ -198,16 +202,17 @@ class ObjDPModel:
     def assemble_action(self, nbatch, B, V):
         """Dynamically assemble action"""
         action_list = []
+        if self.recon_time_stamp:
+            nobj_timestamp = nbatch["t"].to(self.device)
+            nobj_timestamp = nobj_timestamp[:, None, ...].repeat(1, V, 1, 1)  # (B, V, pred_horizon, 1)
+            nobj_timestamp = nobj_timestamp.flatten(start_dim=0, end_dim=1)  # (B * V, pred_horizon, 1)
+            action_list.append(nobj_timestamp)
         if self.recon_voxel_center:
             nobj_voxel_center = nbatch["obj_voxel_center"].to(self.device)  # (B, pred_horizon, V, 3)
             nobj_voxel_center = nobj_voxel_center[:, : self.pred_horizon, :, :3]  # (B, pred_horizon, V, 3)
             nobj_voxel_center = nobj_voxel_center.permute(0, 2, 1, 3).flatten(start_dim=0, end_dim=1)  # (B * V, pred_horizon, 3)
             # append voxel center to action
             action_list.append(nobj_voxel_center)
-        if self.recon_time_stamp:
-            nobj_timestamp = nbatch["t"].to(self.device)
-            nobj_timestamp = nobj_timestamp.repeat(V, 1, 1)  # (B * V, pred_horizon, 1)
-            action_list.append(nobj_timestamp)
         if len(action_list) == 0:
             naction = None
         else:
@@ -232,3 +237,21 @@ class ObjDPModel:
         else:
             ncond = torch.cat(cond_list, dim=-1)  # (B * V, pred_horizon, cond_dim)
         return ncond
+
+    def parse_action(self, naction, stats):
+        """Parse action into timestamp and pose"""
+        offset = 0
+        actions = {}
+        if self.recon_time_stamp:
+            ntime_stamp = naction[..., 0:1]
+            # unnormalize
+            time_stamp = unnormalize_data(ntime_stamp, stats=stats["t"])
+            actions["t"] = time_stamp
+            offset += 1
+        if self.recon_voxel_center:
+            npose = naction[..., offset:offset + 3]
+            # unnormalize
+            pose = unnormalize_data(npose, stats=stats["obj_voxel_center"])
+            actions["obj_voxel_center"] = pose
+            offset += 3
+        return actions

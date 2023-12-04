@@ -82,13 +82,13 @@ class ObjSim(gym.Env):
         self._t = 0
         self._active_obj_id = []
 
-    def step(self, action):
+    def step(self, action, mode="position"):
         """Step the environment."""
         # step each object
         self._active_obj_id = []
         if isinstance(action, dict):
             for obj_id, action in action.items():
-                self._step_single_obj(obj_id, action)
+                self._step_single_obj(obj_id, action, mode=mode)
                 self._active_obj_id.append(obj_id)
 
         # record traj
@@ -124,12 +124,20 @@ class ObjSim(gym.Env):
         """Compute info for each object."""
         return {}
 
-    def _step_single_obj(self, obj_id, action):
-        delta_pos = action[:3]
-        delta_quat = action[3:]
-        pose = self.objs[obj_id].pose.copy()
-        pose[:3, 3] += delta_pos
-        pose[:3, :3] = misc_utils.quat_to_mat(delta_quat) @ pose[:3, :3]
+    def _step_single_obj(self, obj_id, action, mode="position"):
+        if mode == "velocity":
+            delta_pos = action[:3]
+            delta_quat = action[3:]
+            pose = self.objs[obj_id].pose.copy()
+            pose[:3, 3] += delta_pos
+            pose[:3, :3] = misc_utils.quat_to_mat(delta_quat) @ pose[:3, :3]
+        else:
+            # position
+            pose = np.eye(4)
+            pose[:3, 3] = action[:3]
+            # rotation
+            rot_vec = action[3:]
+            pose[:3, :3] = misc_utils.rotvec_to_mat(rot_vec)
         self.objs[obj_id].pose = pose
 
     def generate_obj_super_voxel(self, obj_id, patch_size):
@@ -187,7 +195,7 @@ class ObjSim(gym.Env):
                     color = np.random.rand(3)
                     # voxel center
                     pred_voxel_center = pred_voxel_pose[:3]
-                    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
+                    sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.1)
                     sphere.translate(pred_voxel_center)
                     sphere.paint_uniform_color(color)
                     vis_list.append(sphere)
