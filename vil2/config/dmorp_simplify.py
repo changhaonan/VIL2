@@ -6,15 +6,6 @@ ENV = dict(
     SEMANTIC_FEAT_TYPE="clip",  # random, clip, one_hot
 )
 
-POLICY = dict(
-    movement_type="horizon",  # horizon, waypoint
-    carrier_type="rigid_body",  # rigid_body, super_voxel, keypoint
-    waypoint_num=4,
-    horizon_num=4,
-    action_horizon=6,
-    obs_horizon=8,
-)
-
 DATALOADER = dict(
     BATCH_SIZE=64,
     NUM_WORKERS=4,
@@ -22,9 +13,6 @@ DATALOADER = dict(
 
 MODEL = dict(
     MAX_SCENE_SIZE=4,
-    OBS_HORIZON=2,
-    ACTION_HORIZON=8,
-    PRED_HORIZON=16,  # 16
     ACTION_DIM=3 + 1,  # 6d pose/ 3d translation + time stamp
     POSE_DIM=3,  # 6d pose/ 3d translation
     GEOMETRY_FEAT_DIM=128,

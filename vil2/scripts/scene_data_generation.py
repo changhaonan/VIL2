@@ -30,7 +30,7 @@ d_num_obj = 8  # number of objects
 d_num_structure = 4  # total number of structures
 d_knn = 5
 d_noise_level = 0.02
-d_semantic_feat_noise_level = 0.02
+d_semantic_feat_noise_level = 0.0
 d_fix_z = True
 
 # Objects define
