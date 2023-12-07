@@ -1,5 +1,6 @@
 from .backbones.resetnet import *
 from .noise_nets.cond_unet_1d import ConditionalUnet1D
+from .mlp.mlp import ConditionalUnetMLP
 
 
 def build_vision_encoder(name: str, **kwargs):
@@ -15,5 +16,7 @@ def build_vision_encoder(name: str, **kwargs):
 def build_noise_pred_net(name: str, **kwargs):
     if name.startswith("UNET1D"):
         return ConditionalUnet1D(**kwargs)
+    elif name.startswith("MLP"):
+        return ConditionalUnetMLP(**kwargs)
     else:
         raise NotImplementedError(f"Unknown noise net: {name}")

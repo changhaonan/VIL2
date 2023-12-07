@@ -49,3 +49,16 @@ def draw_pose_distribution(
         ax.set_ylim(xyz_range[2], xyz_range[3])
         ax.set_zlim(xyz_range[4], xyz_range[5])
     plt.show()
+
+
+def compare_distribution(data_0, data_1, num_dim: int):
+    """Compare two distribution: data_0 and data_1; Compare the first num_dim dimensions
+    We draw them using histogram
+    """
+    fig, axs = plt.subplots(1, num_dim, figsize=(20, 5))
+    for i in range(num_dim):
+        # draw histogram for each dimension in ratio
+        axs[i].hist(data_0[:, i], bins=100, alpha=0.5, label="data_0")
+        axs[i].hist(data_1[:, i], bins=100, alpha=0.5, label="data_1")
+        axs[i].legend(loc="upper right")
+    plt.show()
