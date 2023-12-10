@@ -6,6 +6,7 @@ import numpy as np
 from vil2.env import env_builder
 from vil2.algo.bdnp import BDNPolicy
 from detectron2.config import LazyConfig
+from vil2.utils.som_utils import sample_som
 
 
 if __name__ == "__main__":
@@ -58,15 +59,18 @@ if __name__ == "__main__":
         'a_lazy_init': True,  # use last a_0 to init current a_T
     }
     # env = DictConcatWrapper(env)
-    bdnp = BDNPolicy(env=env, config=config)
-    # do train
-    goal_pi = np.zeros((31,), dtype=np.float32)
-    bdnp.train(batch_size=config['batch_size'],
-               num_episode=config['num_epochs'])
+    # bdnp = BDNPolicy(env=env, config=config)
+    # # do train
+    # goal_pi = np.zeros((31,), dtype=np.float32)
+    # bdnp.train(batch_size=config['batch_size'],
+    #            num_episode=config['num_epochs'])
 
-    bdnp.save(os.path.join(check_point_path, 'model.pt'))
+    # bdnp.save(os.path.join(check_point_path, 'model.pt'))
 
     # save the stats for replay buffer
     # stats = bdnp.replay_buffer.compute_stats()
     # with open(os.path.join(export_path, 'bdnp', 'stats.pkl'), 'wb') as f:
     #     pickle.dump(stats, f)
+
+    #################### Compute SOM ########################
+    # sampled_som = sample_som(env=env, policy_fn=)
