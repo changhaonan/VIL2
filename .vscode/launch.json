@@ -11,6 +11,15 @@
             "program": "${workspaceFolder}/vil2/run.py",
             "console": "integratedTerminal",
             "justMyCode": false
+        },
+        {
+            "name": "TestBlender",       
+            "type": "python",       
+            "request": "attach",   
+            "connect": {    
+                "host": "localhost",      
+                "port": 5678 
+            }   
         }
     ]
 }
