@@ -5,9 +5,9 @@ import bpy
 import os
 from blenderproc.python.writer.BopWriterUtility import _BopWriterUtility
 import json
-# import debugpy
-# debugpy.listen(5678)
-# debugpy.wait_for_client()
+import debugpy
+debugpy.listen(5678)
+debugpy.wait_for_client()
 
 # -------------------------- Main -------------------------- #
 argparser = argparse.ArgumentParser()
@@ -35,6 +35,7 @@ cam_radius_max = args.cam_radius_max
 # -------------------------- Init & Load -------------------------- #
 bproc.init()
 cam_poses = []
+obj_poses = {}
 # Create a simple object:
 objs = []
 for id, data_file in enumerate(data_files):
@@ -134,9 +135,23 @@ data = bproc.renderer.render(load_keys={'segmap'})
 # Render color and depth under Eevee engine
 bpy.context.scene.render.engine = 'BLENDER_EEVEE'
 data.update(bproc.renderer.render(load_keys={'colors', 'depth'}))
+bpy.context.scene.render.engine = 'CYCLES'
 
-# # Write the rendering into an hdf5 file
-bproc.writer.write_hdf5(export_dir, data)
+# # # Write the rendering into an hdf5 file
+# bproc.writer.write_hdf5(export_dir, data)
+# Write data in bop format
+# bproc.writer.write_bop(export_dir,
+#                        target_objects=objs,
+#                        dataset=object_pair,
+#                        depths=data["depth"],
+#                        colors=data["colors"],
+#                        color_file_format="JPEG",
+#                        ignore_dist_thres=10)
+# Read object poses
+for obj in objs:
+    obj_poses[obj.get_cp("category_id")] = {}
+    obj_poses[obj.get_cp("category_id")]["location"] = obj.get_location().tolist()
+    obj_poses[obj.get_cp("category_id")]["rotation"] = obj.get_rotation_euler().tolist()
 
 # Write in coco format
 bproc.writer.write_coco_annotations(os.path.join(export_dir, 'coco_data'),
@@ -146,5 +161,5 @@ bproc.writer.write_coco_annotations(os.path.join(export_dir, 'coco_data'),
                                     color_file_format="JPEG")
 # Write camera info
 _BopWriterUtility.write_camera(os.path.join(export_dir, 'coco_data', 'camera.json'))
-with open(os.path.join(export_dir, 'coco_data', 'cam_poses.json'), 'w') as f:
-    json.dump({"cam_poses": cam_poses}, f)
+with open(os.path.join(export_dir, 'coco_data', 'poses.json'), 'w') as f:
+    json.dump({"cam_poses": cam_poses, "obj_poses": obj_poses}, f)
