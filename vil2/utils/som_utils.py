@@ -1,8 +1,9 @@
 """Utility functions for State Occupancy Measures (SOM)"""
 import gymnasium as gym
+import numpy as np
+from tqdm import tqdm
 
-
-def sample_som(env: gym.Env, policy_fn, num_steps: int, num_samples: int, seed: int = 0):
+def sample_som(env: gym.Env, policy_fn, num_steps: int, num_samples: int, seed: int = 0, **kwargs):
     """Sample a set of states from the environment.
 
     Args:
@@ -14,14 +15,28 @@ def sample_som(env: gym.Env, policy_fn, num_steps: int, num_samples: int, seed: 
     Returns:
         A list of states.
     """
-    env.seed(seed)
-    obses = []
-    for _ in range(num_samples):
+    env.reset(seed=seed)
+    observation_list = []
+    achieved_goal_list = []
+    desired_goal_list = []
+    for _ in tqdm(range(num_samples)):
         obs, info = env.reset()
         for i in range(num_steps):
             action = policy_fn(obs)
-            obs, _, done, info = env.step(action)
-            if done:
+            obs, _, done, truncated, info = env.step(action)
+            observation_list.append(obs['observation'])
+            achieved_goal_list.append(obs['achieved_goal'])
+            desired_goal_list.append(obs['desired_goal'])
+            if done or truncated:
                 break
-        obses.append(obs)
+            # env.render()
+    # Merged list of observations
+    observation_list = np.vstack(observation_list)
+    achieved_goal_list = np.vstack(achieved_goal_list)
+    desired_goal_list = np.vstack(desired_goal_list)
+    obses = {
+        'observation': observation_list,
+        'achieved_goal': achieved_goal_list,
+        'desired_goal': desired_goal_list,
+    }
     return obses

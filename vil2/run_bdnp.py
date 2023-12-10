@@ -7,6 +7,41 @@ from vil2.env import env_builder
 from vil2.algo.bdnp import BDNPolicy
 from detectron2.config import LazyConfig
 from vil2.utils.som_utils import sample_som
+from vil2.utils.eval_utils import compare_distribution
+import gymnasium as gym
+import gymnasium_robotics as gym_robotics
+
+
+class CustomFetchWrapper(gym.Wrapper):
+    def __init__(self, env, new_goal=None, initial_joint_values=None):
+        super(CustomFetchWrapper, self).__init__(env)
+        self.new_goal = new_goal
+        self.initial_joint_values = initial_joint_values
+
+    def reset(self, **kwargs):
+        # Reset the environment
+        obs, info = self.env.reset(**kwargs)
+
+        # Set a new desired goal if specified
+        if self.new_goal is not None:
+            self.env.unwrapped.goal = self.new_goal
+        observation = obs['observation']
+        achieved_goal = obs['achieved_goal']
+        desired_goal = obs['desired_goal']
+        override_obs = {
+            'observation': np.concatenate([observation, achieved_goal, desired_goal]),
+            'achieved_goal': achieved_goal,
+            'desired_goal': self.new_goal,
+        }
+
+        # # Set initial joint values if specified
+        # if self.initial_joint_values is not None:
+        #     # Ensure the length matches the robot's joints
+        #     assert len(self.initial_joint_values) == len(self.env.sim.data.qpos)
+        #     self.env.sim.data.qpos[:] = self.initial_joint_values
+        #     self.env.sim.forward()
+
+        return override_obs, info
 
 
 if __name__ == "__main__":
@@ -22,7 +57,6 @@ if __name__ == "__main__":
 
     # prepare data
     env = env_builder(env_name, render_mode="rgb_array")
-
     config = {
         # ----- som related -----
         'som_hidden_dim': 32,
@@ -67,14 +101,16 @@ if __name__ == "__main__":
 
     # Build a heuristic policy
     if env_name == "GYM-FetchReach-v2":
-        def heuristic_policy(obs, step_remain=0):
+        def heuristic_policy(obs, step_remain=0, action_noise=0.0):
             gripper_pos = obs['observation'][:3]
             goal_pos = obs['desired_goal']
             gripper_movement = goal_pos - gripper_pos
             cur_diff = np.linalg.norm(gripper_movement)
             # print(f"cur_diff: {cur_diff}")
             gripper_action = np.zeros(4)
-            gripper_action[:3] = gripper_movement * 10.0
+            gripper_action[:3] = gripper_movement * 3.0
+            # apply noise
+            gripper_action[:3] += np.random.normal(size=3) * action_noise
             # clip by (-1, 1)
             gripper_action = np.clip(gripper_action, -1, 1)
             return gripper_action
@@ -96,5 +132,11 @@ if __name__ == "__main__":
     #     pickle.dump(stats, f)
 
     #################### Compute SOM ########################
-    sampled_som = sample_som(env=env, policy_fn=heuristic_policy, num_steps=10, num_samples=1000)
+    # apply a wrapper
+    desired_goal = np.array([1.3, 0.8, 0.8])
+    env = CustomFetchWrapper(env, new_goal=desired_goal)
+    num_steps = 30
+    num_samples = 1000
+    sampled_som = sample_som(env=env, policy_fn=lambda obs: heuristic_policy(obs, 0, action_noise=0.01), num_steps=num_steps, num_samples=num_samples)
+    compare_distribution(sampled_som['desired_goal'], sampled_som['observation'], dim_end=3, plot_type="scatter")
     pass
