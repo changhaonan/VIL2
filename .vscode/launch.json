@@ -5,10 +5,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "PPO",
+            "name": "BDNP",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/vil2/run.py",
+            "program": "${workspaceFolder}/vil2/run_bdnp.py",
             "console": "integratedTerminal",
             "justMyCode": false
         },
