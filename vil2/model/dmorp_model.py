@@ -2,6 +2,7 @@
 from __future__ import annotations
 import diffusers
 import collections
+import matplotlib.pyplot as plt
 import numpy as np
 from tqdm.auto import tqdm
 import torch
@@ -13,6 +14,7 @@ from diffusers.optimization import get_scheduler
 from vil2.data.obj_dp_dataset import normalize_data, unnormalize_data
 import vil2.utils.torch_utils as torch_utils
 import clip
+from vil2.utils.eval_utils import compare_distribution
 
 
 class DmorpModel:
@@ -34,10 +36,21 @@ class DmorpModel:
         self.geometry_feat_dim = cfg.MODEL.GEOMETRY_FEAT_DIM
         self.semantic_feat_dim = cfg.MODEL.SEMANTIC_FEAT_DIM
         self.use_positional_embedding = cfg.MODEL.USE_POSITIONAL_EMBEDDING
+        self.aggregate_type = cfg.MODEL.AGGREGATE_TYPE
+        self.aggregate_list = cfg.MODEL.AGGREGATE_LIST
+        self.data_stamp_dim = 0  # Data stamp is an aggregation of multiple features
+        for agg_type in self.aggregate_list:
+            if agg_type == "SEMANTIC":
+                self.data_stamp_dim += self.semantic_feat_dim
+            elif agg_type == "POSE":
+                self.data_stamp_dim += self.pose_dim
+            else:
+                raise NotImplementedError
 
         # ablation module
-        self.recon_semantic_feature = cfg.MODEL.RECON_SEMANTIC_FEATURE
         self.recon_data_stamp = cfg.MODEL.RECON_DATA_STAMP
+        self.recon_semantic_feature = cfg.MODEL.RECON_SEMANTIC_FEATURE
+        self.recon_pose = cfg.MODEL.RECON_POSE
         self.cond_geometry_feature = cfg.MODEL.COND_GEOMETRY_FEATURE
         self.cond_semantic_feature = cfg.MODEL.COND_SEMANTIC_FEATURE
         self.guide_data_consistency = cfg.MODEL.GUIDE_DATA_CONSISTENCY
@@ -52,7 +65,7 @@ class DmorpModel:
             # we found squared cosine works the best
             beta_schedule="squaredcos_cap_v2",
             # clip output to [-1,1] to improve stability
-            clip_sample=True,
+            clip_sample=False,
             # our network predicts noise (instead of denoised action)
             prediction_type="epsilon",
         )
@@ -66,7 +79,7 @@ class DmorpModel:
             }
         ).to(self.device)
         # build embedding key
-        self.build_embedding_key()
+        # self.build_embedding_key()
         # semantic feature related
         self.semantic_feat_type = cfg.MODEL.SEMANTIC_FEAT_TYPE
         if self.semantic_feat_type == "clip":
@@ -144,7 +157,7 @@ class DmorpModel:
         # copy ema back to model
         ema.copy_to(self.nets.parameters())
 
-    def inference(self, obs, stats: dict, batch_size: int):
+    def inference(self, obs, stats: dict, batch_size: int, init_noise: np.ndarray = None, draw_sample: bool = False):
         """Inference with the model"""
         B = batch_size  # inference batch size is 1
         M = obs["sem_feat"].shape[0]  # (M, D)
@@ -170,9 +183,13 @@ class DmorpModel:
         with torch.no_grad():
             ncond = self.assemble_cond(nbatch, B, M)  # (B*V, pred_horizon, cond_dim)
 
-            # initialize action from Guassian noise
-            noisy_action = torch.randn((B * M, self.action_dim), device=self.device)
-            naction = noisy_action
+            if init_noise is None:
+                # initialize action from Guassian noise
+                noisy_action = torch.randn((B * M, self.action_dim), device=self.device)
+                naction = noisy_action
+            else:
+                # initialize action from given noise
+                naction = torch.from_numpy(init_noise).to(self.device).to(torch.float32)
 
             # init scheduler
             self.noise_scheduler.set_timesteps(self.num_diffusion_iters)
@@ -198,10 +215,52 @@ class DmorpModel:
                     offset += self.time_emb_dim
                 # apply gradient
                 naction = naction - naction_grad
+                if draw_sample:
+                    # DEBUG
+                    if k % 10 == 0:
+                        naction_cpu = naction.detach().to("cpu").numpy().reshape((B * M, self.action_dim))
+                        compare_distribution(naction_cpu, init_noise, dim_end=4, title=f"Time step {k}")
 
         # unnormalize action
         naction = naction.detach().to("cpu").numpy().reshape((B, M, self.action_dim))
         return self.parse_action(naction, stats)
+
+    def debug_train(self, data_loader):
+        """Debug training process"""
+        # batch loop
+        with tqdm(data_loader, desc="Batch", leave=False) as tepoch:
+            for nbatch in tepoch:
+                loss_wrt_timestep = list()
+                for idx_time_step in range(self.num_diffusion_iters):
+                    B = nbatch["sem_feat"].shape[0]  # (B, M, D)
+                    M = nbatch["sem_feat"].shape[1]
+                    ncond = self.assemble_cond(nbatch, B, M)  # (B*M, cond_dim)
+                    naction = self.assemble_action(nbatch, B, M).to(self.device)  # (B*V, pred_horizon, action_dim)
+                    # sample noise to add to actions
+                    noise = torch.randn(naction.shape, device=self.device)
+                    # sample a diffusion iteration for each data point
+                    timesteps = torch.tensor([idx_time_step], device=self.device).tile((B*M,)).long()
+                    # add noise to the clean images according to the noise magnitude at each diffusion iteration
+                    # (this is the forward diffusion process)
+                    noisy_actions = self.noise_scheduler.add_noise(naction, noise, timesteps)
+
+                    # predict the noise residual
+                    noise_pred = self.noise_pred_net(
+                        noisy_actions, timesteps, global_cond=ncond
+                    )
+
+                    # L2 loss
+                    loss = nn.functional.mse_loss(noise_pred, noise)
+
+                    # logging
+                    loss_cpu = loss.item()
+                    loss_wrt_timestep.append(loss_cpu)
+                    #
+                    noisy_norm = torch.norm(noisy_actions - naction, dim=-1).mean().item()
+                    print(f"Time step {idx_time_step}, loss {loss_cpu}, noisy norm {noisy_norm}")
+                # Draw loss wrt time step
+                plt.plot(loss_wrt_timestep)
+                plt.show()
 
     def save(self, export_path):
         """Save model weights"""
@@ -217,15 +276,34 @@ class DmorpModel:
         """Dynamically assemble action"""
         action_list = []
         if self.recon_data_stamp:
-            nobj_data_stamp = nbatch["data_stamp"].to(self.device)  # (B, M, D)
-            nobj_data_stamp = nobj_data_stamp.flatten(start_dim=0, end_dim=1)  # (B * M, D)
-            if self.use_positional_embedding:
-                nobj_data_stamp = self.nets["positional_embedding"](nobj_data_stamp).reshape((-1, self.time_emb_dim))
-            action_list.append(nobj_data_stamp)
+            data_stamp_list = []
+            for aggregate_type in self.aggregate_list:
+                if aggregate_type == "SEMANTIC":
+                    nsem_feat = nbatch["sem_feat"].to(self.device)
+                    data_stamp_list.append(nsem_feat)
+                elif aggregate_type == "POSE":
+                    npose = nbatch["pose"].to(self.device)
+                    data_stamp_list.append(npose)
+                else:
+                    raise NotImplementedError
+            ndata_stamp = torch.cat(data_stamp_list, dim=-1)  # (B, M, D)
+            if self.aggregate_type == "mean":
+                ndata_stamp = ndata_stamp.mean(dim=1, keepdim=True).repeat(1, M, 1).flatten(start_dim=0, end_dim=1)
+            elif self.aggregate_type == "sum":
+                ndata_stamp = ndata_stamp.sum(dim=1, keepdim=True).repeat(1, M, 1).flatten(start_dim=0, end_dim=1)
+            elif self.aggregate_type == "max":
+                ndata_stamp = ndata_stamp.max(dim=1, keepdim=True).repeat(1, M, 1).flatten(start_dim=0, end_dim=1)
+            else:
+                raise NotImplementedError
+            action_list.append(ndata_stamp)
         if self.recon_semantic_feature:
             nsem_feat = nbatch["sem_feat"].to(self.device)  # (B, M, D)
             nsem_feat = nsem_feat.flatten(start_dim=0, end_dim=1)  # (B * M, D)
             action_list.append(nsem_feat)
+        if self.recon_pose:
+            npose = nbatch["pose"].to(self.device)
+            npose = npose.flatten(start_dim=0, end_dim=1)  # (B * M, D)
+            action_list.append(npose)
         if len(action_list) == 0:
             naction = None
         else:
@@ -254,25 +332,25 @@ class DmorpModel:
         offset = 0
         actions = {}
         if self.recon_data_stamp:
-            ndata_stamp = naction[..., offset:offset + self.time_emb_dim]
-            if not self.use_positional_embedding:
-                # unnormalize
-                data_stamp = unnormalize_data(ndata_stamp, stats=stats["data_stamp"])
-            else:
-                data_stamp = self.parse_embedding(ndata_stamp)
-            actions["data_stamp"] = data_stamp
-            offset += self.time_emb_dim
+            ndata_stamp = naction[..., offset:offset + self.data_stamp_dim]
+            actions["data_stamp"] = ndata_stamp
+            offset += self.data_stamp_dim
         if self.recon_semantic_feature:
             nsem_feat = naction[..., offset:offset + self.semantic_feat_dim]
             actions["sem_feat"] = unnormalize_data(nsem_feat, stats=stats["sem_feat"])
             offset += self.semantic_feat_dim
+        if self.recon_pose:
+            npose = naction[..., offset:offset + self.pose_dim]
+            actions["pose"] = unnormalize_data(npose, stats=stats["pose"])
+            offset += self.pose_dim
         return actions
 
     def build_embedding_key(self, max_len=1000):
         """Build embedding key"""
         self.embedding_key = torch.arange(max_len, device=self.device).reshape((-1))
         self.embedding_key = self.nets["positional_embedding"](self.embedding_key).detach().to("cpu").numpy()
-        self.embedding_key = self.embedding_key / np.linalg.norm(self.embedding_key, axis=-1, keepdims=True)
+        self.embedding_key = self.embedding_key / np.linalg.norm(self.embedding_key, axis=-1, keepdims=True)  # (max_len, time_emb_dim)
+        compare_distribution(self.embedding_key, None, dim_end=8)
 
     def parse_embedding(self, embedding_query):
         """Parse embedding query into timestamp and pose"""
@@ -285,13 +363,19 @@ class DmorpModel:
         embedding_attention = np.argmax(embedding_attention, axis=-1)
         return embedding_attention.reshape((B, M, 1))
 
-    def encode_text(self, text: str):
+    def encode_text(self, text: str, idx: int):
         """Encode text into semantic feature"""
         if self.semantic_feat_type == "clip":
             with torch.no_grad():
                 text_inputs = torch.cat([clip.tokenize(text)]).to(self.device)
                 semantic_feature = self.clip_model.encode_text(text_inputs).detach().cpu().numpy()[0]
             return semantic_feature
+        elif self.semantic_feat_type == "one_hot":
+            semantic_feature = np.zeros((self.semantic_feat_dim,), dtype=np.float32)
+            semantic_feature[idx] = 1.0
+            return semantic_feature
+        else:
+            raise NotImplementedError
 
     def parse_vocab(self, sem_feats: np.ndarray, vocab: list[str]):
         """Parse semantic feature to vocabulary"""
@@ -300,8 +384,7 @@ class DmorpModel:
         sem_feats = sem_feats.reshape((-1, D))
         vocab_dict = {}
         for i, obj_name in enumerate(vocab):
-            vocab_dict[obj_name] = self.encode_text(obj_name)
-            # vocab_dict[obj_name] = vocab_dict[obj_name] / np.linalg.norm(vocab_dict[obj_name])  # normalize
+            vocab_dict[obj_name] = self.encode_text(obj_name, i)
         vocab_feats = np.stack(list(vocab_dict.values()))
         # Match semantic feature to vocabulary; by nearest neighbor
         vocab_names = [[]]
