@@ -18,11 +18,11 @@ import clip
 class DmorpModel:
     """Diffusion Model for multi-object relative Pose Generation"""
 
-    def __init__(self, cfg, vision_encoder, noise_pred_net):
+    def __init__(self, cfg, vision_encoder, noise_pred_net, device):
         self.cfg = cfg
         # check cuda and mps
         if torch.cuda.is_available():
-            self.device = torch.device("cuda")
+            self.device = torch.device(device)
         else:
             self.device = torch.device("cpu")
         # self.device = "cpu"

@@ -1,3 +1,9 @@
 gdown
 zarr
 pyrealsense2
+gymnasium
+diffusers
+minigrid
+pymunk
+shapely
+scikit-image

@@ -2,11 +2,14 @@
 import os
 import torch
 import pickle
+import argparse
 import json
+import random
 import numpy as np
 import collections
 from tqdm.auto import tqdm
 from vil2.env import env_builder
+from torch import nn
 from vil2.model.dmorp_model import DmorpModel
 from vil2.model.net_factory import build_vision_encoder, build_noise_pred_net
 from vil2.data.obj_dp_dataset import normalize_data, unnormalize_data
@@ -17,16 +20,10 @@ from detectron2.config import LazyConfig, instantiate
 import vil2.utils.eval_utils as eval_utils
 
 
-if __name__ == "__main__":
-    # Load config
-    task_name = "Dmorp"
-    root_path = os.path.dirname((os.path.abspath(__file__)))
-    cfg_file = os.path.join(root_path, "config", "dmorp_simplify.py")
-    cfg = LazyConfig.load(cfg_file)
-    retrain = True
+def run_dmorp(root_path: str, cfg: dict, retrain: bool = True, task_name: str = "Dmorp", save_subdir: str = None, subdir_child: str = None, save_str: str = None):
     # Load dataset & data loader
     dataset = DmorpDataset(
-        dataset_path=f"{root_path}/test_data/Dmorp/raw_data/dmorp_data.zarr",
+        dataset_path=f"{root_path}/test_data/{task_name}/raw_data/dmorp_data.zarr",
         max_scene_size=cfg.MODEL.MAX_SCENE_SIZE,
     )
     stats = dataset.stats
@@ -66,30 +63,34 @@ if __name__ == "__main__":
         noise_pred_net=build_noise_pred_net(
             cfg.MODEL.NOISE_NET.NAME, **noise_net_init_args
         ),
+        device=cfg.CUDA_DEVICE
     )
+    # if torch.cuda.device_count() > 1:
+    #     print("Using", torch.cuda.device_count(), "GPUs!")
+    #     dmorp_model = nn.DataParallel(dmorp_model)
 
+    save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints", save_subdir, subdir_child)
+    os.makedirs(save_dir, exist_ok=True)
     if retrain:
+        # dmorp_model.module.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
         dmorp_model.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
         # save the data
-        save_dir = os.path.join(root_path, "test_data", "Dmorp", "checkpoints")
-        os.makedirs(save_dir, exist_ok=True)
-        save_path = os.path.join(save_dir, "dmorp_model.pt")
+        save_path = os.path.join(save_dir, f"dmorp_model_{save_str}.pt")
         torch.save(dmorp_model.nets.state_dict(), save_path)
         print(f"Model saved to {save_path}")
     else:
         # load the model
-        save_dir = os.path.join(root_path, "test_data", "Dmorp", "checkpoints")
-        save_path = os.path.join(save_dir, "dmorp_model.pt")
+        save_path = os.path.join(save_dir, f"dmorp_model_{save_str}.pt")
         dmorp_model.nets.load_state_dict(torch.load(save_path))
         print(f"Model loaded from {save_path}")
 
     # Test inference
     # Load vocabulary
-    vocab_path = os.path.join(root_path, "test_data", "Dmorp", "raw_data", "vocab.json")
+    vocab_path = os.path.join(root_path, "test_data", task_name, "raw_data", "vocab.json")
     with open(vocab_path, "r") as f:
         vocab = json.load(f)
     vocab_names = list(vocab.keys())
-    for i in range(10):
+    for i in range(2):
         # Sample a scene query
         batch_size = 1000
         num_query_obj = 4
@@ -112,5 +113,5 @@ if __name__ == "__main__":
         gt_sem_feat = unnormalize_data(dataset.normalized_train_data["sem_feat"], stats=stats["sem_feat"])
         gt_sem_feat = gt_sem_feat.reshape(-1, cfg.MODEL.SEMANTIC_FEAT_DIM)
 
-        eval_utils.compare_distribution(pred_sem_feat, gt_sem_feat, num_dim=8)
+        eval_utils.compare_distribution(pred_sem_feat, gt_sem_feat, num_dim=8, save_path=os.path.join(save_dir, f"dis_{i}_{save_str}.png"))
         pass
