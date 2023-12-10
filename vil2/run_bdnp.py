@@ -38,7 +38,7 @@ if __name__ == "__main__":
         'pi_hidden_layer': 3,
         'policy_std': 0.1,
         'batch_size': 512,
-        'finite_horizon': 20,
+        'finite_horizon': 50,
         'policy_lr': 1e-4,
         'policy_weight_decay': 1e-6,
         # ----- training related -----
@@ -59,10 +59,29 @@ if __name__ == "__main__":
     }
     # env = DictConcatWrapper(env)
     bdnp = BDNPolicy(env=env, config=config)
+
+    # Build a heuristic policy
+    if env_name == "GYM-FetchReach-v2":
+        def heuristic(obs, step_remain=0):
+            gripper_pos = obs['observation'][:3]
+            goal_pos = obs['desired_goal']
+            gripper_movement = goal_pos - gripper_pos
+            cur_diff = np.linalg.norm(gripper_movement)
+            # print(f"cur_diff: {cur_diff}")
+            gripper_action = np.zeros(4)
+            gripper_action[:3] = gripper_movement * 10.0
+            # clip by (-1, 1)
+            gripper_action = np.clip(gripper_action, -1, 1)
+            return gripper_action
+    else:
+        raise NotImplementedError
+        
     # do train
     goal_pi = np.zeros((31,), dtype=np.float32)
     bdnp.train(batch_size=config['batch_size'],
-               num_episode=config['num_epochs'])
+               num_episode=config['num_epochs'],
+               train_policy=False,
+               heuristic_policy=heuristic,)
 
     bdnp.save(os.path.join(check_point_path, 'model.pt'))
 

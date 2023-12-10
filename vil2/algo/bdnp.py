@@ -16,6 +16,7 @@ from tqdm.auto import tqdm
 from collections import deque
 from vil2.algo.replay_buffer import ReplayBuffer, HERSampler
 from vil2.utils.normalizer import normalizer
+from diffusers.training_utils import EMAModel
 
 
 Transition = namedtuple(
@@ -135,11 +136,11 @@ class BDNPolicy:
             target_param.data.copy_(alpha * param.data +
                                     (1 - alpha) * target_param.data)
 
-    def train(self, batch_size: int, num_episode: int):
+    def train(self, batch_size: int, num_episode: int, train_policy: bool = False, heuristic_policy = None):
         """Train BDN with goal_pi as the goal"""
         enable_render = True
         self.som_noise.train()
-        self.policy.train()
+        # self.policy.train()
         t_episode = tqdm(range(num_episode))
         for idx_episode in t_episode:
             # ----------------- collect data -----------------
@@ -155,11 +156,14 @@ class BDNPolicy:
                     observation = obs["observation"]
                     step_remain = self.finite_horizon - step_epoch
                     # step the environment
-                    action = self.predict(observation, desired_goal, step_remain, is_deterministic=True)
-                    action = action.detach().cpu().numpy().squeeze()
-                    # unnormalize
-                    action = np.clip(action, -1.0, 1.0)
-                    action = (action + 1.0) / 2.0 * (self.action_range[1] - self.action_range[0]) + self.action_range[0]
+                    if heuristic_policy is not None and train_policy is False:
+                        action = heuristic_policy(obs, step_remain)
+                    else:
+                        action = self.predict(observation, desired_goal, step_remain, is_deterministic=True)
+                        action = action.detach().cpu().numpy().squeeze()
+                        # unnormalize
+                        action = np.clip(action, -1.0, 1.0)
+                        action = (action + 1.0) / 2.0 * (self.action_range[1] - self.action_range[0]) + self.action_range[0]
                     obs, reward, terminated, truncated, _ = self.env.step(action)
 
                     if reward > 0:
@@ -202,7 +206,10 @@ class BDNPolicy:
             som_loss = self.optimize_som(idx_episode, batch_size=batch_size)
 
             # optimize policy
-            pi_loss = self.optimize_policy(idx_episode, batch_size=batch_size)
+            if train_policy:
+                pi_loss = self.optimize_policy(idx_episode, batch_size=batch_size)
+            else:
+                pi_loss = 0.0
 
             # update som target network
             if idx_episode % self.target_update_period == 0:
