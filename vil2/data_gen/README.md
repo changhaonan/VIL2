@@ -13,5 +13,5 @@ During this process, we generated a series of random poses. It creates a series 
 ### Step 2: Render depth & color images under generated initialization
 
 ```bash
-blenderproc run render_object.py --num_cam_poses 10
+blenderproc run render_object.py --num_cam_poses 4
 ```

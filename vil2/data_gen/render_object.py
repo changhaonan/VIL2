@@ -120,8 +120,10 @@ for sample_idx, (init_pose_1, init_pose_2, transform) in enumerate(zip(init_pose
 
     # -------------------------- Render & Save -------------------------- #
     sample_export_dir = os.path.join(export_dir, f"{sample_idx:06d}")
-    for obj_idx, obj in enumerate(objs):
-        obj.blender_obj.hide_render = True
+    for obj_idx in range(len(objs)):
+        for _idx, obj in enumerate(objs):
+            if _idx != obj_idx:
+                obj.blender_obj.hide_render = True
         # Render the segmentation under Cycles engine
         bpy.context.scene.render.engine = 'CYCLES'
         data = bproc.renderer.render(load_keys={'segmap'})
@@ -132,7 +134,11 @@ for sample_idx, (init_pose_1, init_pose_2, transform) in enumerate(zip(init_pose
 
         # Write the rendering into an hdf5 file
         bproc.writer.write_hdf5(sample_export_dir, data, append_to_existing_output=True)
-        obj.blender_obj.hide_render = False
+
+        # Recover the visibility
+        for _idx, obj in enumerate(objs):
+            if _idx != obj_idx:
+                obj.blender_obj.hide_render = False
 
     # -------------------------- Export information -------------------------- #
     # Write camera info

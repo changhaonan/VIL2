@@ -106,10 +106,15 @@ class DmorpSceneAugmentor:
 
 
 if __name__ == "__main__":
+    random_region = 0.5
+    num_samples = 10
+
     # Prepare data
     root_path = os.path.dirname(os.path.dirname((os.path.abspath(__file__))))
     mesh_1_file = os.path.join(root_path, "assets", "google_scanned_objects", "tea_pot", "meshes", "model.obj")
     mesh_2_file = os.path.join(root_path, "assets", "google_scanned_objects", "tea_mug", "meshes", "model.obj")
+
+    # Goal poses pair
     pose_1 = np.eye(4)
     pose_1[:3, 3] = np.array([0.15, 0.15, 0.0])
     pose_1[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi/3.0]).as_matrix()
@@ -120,6 +125,6 @@ if __name__ == "__main__":
     augmentor = DmorpSceneAugmentor([mesh_1_file], [mesh_2_file], [pose_1], [pose_2])
 
     export_dir = os.path.join(root_path, "test_data", "dmorp_augmented")
-    augmentor.augment(0, 2, export_dir)
-    # for i in range(10):
-    #     augmentor.visualize(0, export_dir, sample_idx=i)
+    augmentor.augment(0, num_samples, export_dir, random_region=random_region)
+    for i in range(10):
+        augmentor.visualize(0, export_dir, sample_idx=i)
