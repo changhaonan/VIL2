@@ -45,7 +45,7 @@ class DmorpSceneAugmentor:
             random_init_pose_1[:3, 3] = np.random.uniform(-random_region/2.0, random_region/2.0, size=3)
             random_init_pose_1[:3, :3] = R.from_euler("xyz", np.random.uniform(-np.pi, np.pi, size=3)).as_matrix()
             random_init_pose_2 = np.eye(4)  # Anchor object will always be at center
-            random_init_pose_2[:3, :3] = R.from_euler("xyz", np.random.uniform(-np.pi, np.pi, size=3)).as_matrix()
+            # random_init_pose_2[:3, :3] = R.from_euler("xyz", np.random.uniform(-np.pi, np.pi, size=3)).as_matrix()
             # Compute the required pose to reach the target pose
             target_goal_pose = random_init_pose_2 @ (np.linalg.inv(pose_2) @ pose_1)
             transform = target_goal_pose @ np.linalg.inv(random_init_pose_1)
