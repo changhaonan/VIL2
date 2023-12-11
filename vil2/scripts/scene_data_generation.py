@@ -30,7 +30,7 @@ d_num_obj = 8  # number of objects
 d_num_structure = 4  # total number of structures
 d_knn = 5
 d_noise_level = 0.02
-d_semantic_feat_noise_level = 0.0
+d_semantic_feat_noise_level = 0.05
 d_fix_z = True
 
 # Objects define
@@ -120,9 +120,14 @@ if __name__ == "__main__":
     if semantic_feat_type == "clip":
         clip_model, preprocess = clip.load("ViT-B/32", device="cuda")
         for obj_name, obj_data in obj_dict.items():
-            text_inputs = torch.cat([clip.tokenize(obj_name)]).to("cuda")
+            text_inputs = torch.cat([clip.tokenize(f"A picture of {obj_name}")]).to("cuda")
             obj_data["semantic_feature"] = clip_model.encode_text(
                 text_inputs).detach().cpu().numpy()[0]
+    elif semantic_feat_type == "one_hot":
+        for obj_name, obj_data in obj_dict.items():
+            obj_data["semantic_feature"] = np.zeros(
+                (cfg.ENV.SEMANTIC_FEAT_DIM,), dtype=np.float32)
+            obj_data["semantic_feature"][obj_data["semantic_id"]-1] = 1.0
 
     # Build objects data
     obj_data_list = []

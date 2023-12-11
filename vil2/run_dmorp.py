@@ -20,7 +20,13 @@ from detectron2.config import LazyConfig, instantiate
 import vil2.utils.eval_utils as eval_utils
 
 
-def run_dmorp(root_path: str, cfg: dict, retrain: bool = True, task_name: str = "Dmorp", save_subdir: str = None, subdir_child: str = None, save_str: str = None):
+if __name__ == "__main__":
+    # Load config
+    task_name = "Dmorp"
+    root_path = os.path.dirname((os.path.abspath(__file__)))
+    cfg_file = os.path.join(root_path, "config", "dmorp_simplify.py")
+    cfg = LazyConfig.load(cfg_file)
+    retrain = False
     # Load dataset & data loader
     dataset = DmorpDataset(
         dataset_path=f"{root_path}/test_data/{task_name}/raw_data/dmorp_data.zarr",
@@ -46,11 +52,20 @@ def run_dmorp(root_path: str, cfg: dict, retrain: bool = True, task_name: str = 
     # i/o related
     recon_data_stamp = cfg.MODEL.RECON_DATA_STAMP
     recon_semantic_feature = cfg.MODEL.RECON_SEMANTIC_FEATURE
-    embedding_dim = cfg.MODEL.TIME_EMB_DIM if cfg.MODEL.USE_POSITIONAL_EMBEDDING else 1
+    recon_pose = cfg.MODEL.RECON_POSE
+    aggregate_list = cfg.MODEL.AGGREGATE_LIST
     if recon_data_stamp:
-        input_dim += embedding_dim
+        for agg_type in aggregate_list:
+            if agg_type == "SEMANTIC":
+                input_dim += cfg.MODEL.SEMANTIC_FEAT_DIM
+            elif agg_type == "POSE":
+                input_dim += cfg.MODEL.POSE_DIM
+            else:
+                raise NotImplementedError
     if recon_semantic_feature:
         input_dim += cfg.MODEL.SEMANTIC_FEAT_DIM
+    if recon_pose:
+        input_dim += cfg.MODEL.POSE_DIM
     if cond_geometry_feature:
         global_cond_dim += cfg.MODEL.GEOMETRY_FEAT_DIM
     if cond_semantic_feature:
@@ -90,7 +105,10 @@ def run_dmorp(root_path: str, cfg: dict, retrain: bool = True, task_name: str = 
     with open(vocab_path, "r") as f:
         vocab = json.load(f)
     vocab_names = list(vocab.keys())
-    for i in range(2):
+    for i in range(1):
+        # Gt sem_feat distribution
+        gt_sem_feat = dataset.normalized_train_data["sem_feat"]
+
         # Sample a scene query
         batch_size = 1000
         num_query_obj = 4
@@ -98,20 +116,31 @@ def run_dmorp(root_path: str, cfg: dict, retrain: bool = True, task_name: str = 
             vocab_names, size=num_query_obj, replace=False
         )
         obs = dict()
-        obs["sem_feat"] = np.stack([dmorp_model.encode_text(obj_name) for obj_name in objs_query], axis=0)
+        obs["sem_feat"] = np.zeros((num_query_obj, cfg.MODEL.SEMANTIC_FEAT_DIM))
         obs["geo_feat"] = np.zeros((num_query_obj, cfg.MODEL.GEOMETRY_FEAT_DIM))
-
-        pred = dmorp_model.inference(obs, stats=stats, batch_size=batch_size)
+        pred = dmorp_model.inference(obs, stats=stats, batch_size=batch_size, init_noise=None, draw_sample=False)
         pred_vocab_names, pred_vocab_ids = dmorp_model.parse_vocab(pred["sem_feat"],  vocab_names)
-        # print(pred_vocab_ids)
-        # print(pred["data_stamp"])
 
-        # Compare distribution
-        pred_sem_feat = pred["sem_feat"]  # (batch_size, num_query_obj, sem_feat_dim)
-        pred_sem_feat = pred_sem_feat.reshape(-1, cfg.MODEL.SEMANTIC_FEAT_DIM)
-        # Gt sem_feat distribution
-        gt_sem_feat = unnormalize_data(dataset.normalized_train_data["sem_feat"], stats=stats["sem_feat"])
-        gt_sem_feat = gt_sem_feat.reshape(-1, cfg.MODEL.SEMANTIC_FEAT_DIM)
+        # Checking the distribution of poses
+        if cfg.MODEL.RECON_POSE:
+            gt_pose = dataset.normalized_train_data["pose"]
+            gt_pose = gt_pose.reshape(-1, cfg.MODEL.POSE_DIM)
+            gt_pose = unnormalize_data(gt_pose, stats=stats["pose"])
+            eval_utils.compare_distribution(gt_pose, pred["pose"].reshape(-1, cfg.MODEL.POSE_DIM), dim_start=0, dim_end=3, title="Pose")
 
-        eval_utils.compare_distribution(pred_sem_feat, gt_sem_feat, num_dim=8, save_path=os.path.join(save_dir, f"dis_{i}_{save_str}.png"))
+        # Checking the distribution of data stamp
+        # Build batch data first
+        if cfg.MODEL.RECON_DATA_STAMP:
+            nbatch = {}
+            nbatch["sem_feat"] = torch.from_numpy(dataset.normalized_train_data["sem_feat"]).reshape(-1,
+                                                                                                     cfg.MODEL.MAX_SCENE_SIZE, cfg.MODEL.SEMANTIC_FEAT_DIM)
+            nbatch["pose"] = torch.from_numpy(dataset.normalized_train_data["pose"]).reshape(-1, cfg.MODEL.MAX_SCENE_SIZE, cfg.MODEL.POSE_DIM)
+            naction = dmorp_model.assemble_action(nbatch, B=1000, M=cfg.MODEL.MAX_SCENE_SIZE)
+            gt_data_stamp = naction[:, :dmorp_model.data_stamp_dim].detach().cpu().numpy().reshape(-1, dmorp_model.data_stamp_dim)
+            pred_data_stamp = pred["data_stamp"].reshape(-1, dmorp_model.data_stamp_dim)
+            eval_utils.compare_distribution(gt_data_stamp, pred_data_stamp, dim_start=16, dim_end=23, title="Data Stamp")
+
+        # Check if the relative pose is correct
         pass
+    # DEBUG TRAIN
+    # dmorp_model.debug_train(data_loader=data_loader)

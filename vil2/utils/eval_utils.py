@@ -51,16 +51,39 @@ def draw_pose_distribution(
     plt.show()
 
 
-def compare_distribution(data_0, data_1, num_dim: int, save_path: str | None = None):
+def compare_distribution(data_0, data_1=None, dim_start: int = 0, dim_end: int = 1, title: str = None, plot_type: str = "histogram"):
     """Compare two distribution: data_0 and data_1; Compare the first num_dim dimensions
     We draw them using histogram
     """
-    fig, axs = plt.subplots(1, num_dim, figsize=(20, 5))
-    for i in range(num_dim):
-        # draw histogram for each dimension in ratio
-        axs[i].hist(data_0[:, i], bins=100, alpha=0.5, label="data_0")
-        axs[i].hist(data_1[:, i], bins=100, alpha=0.5, label="data_1")
-        axs[i].legend(loc="upper right")
-    # plt.show()
-    if save_path is not None:
-        plt.savefig(save_path)
+    num_dim = dim_end - dim_start
+    if plot_type == "histogram":
+        fig, axs = plt.subplots(1, num_dim, figsize=(20, 5))
+        plt.suptitle(title)
+        for i in range(num_dim):
+            # draw histogram for each dimension in ratio
+            if data_0 is not None:
+                axs[i].hist(data_0[:, dim_start+i], bins=100, alpha=0.5, label="data_0")
+            if data_1 is not None:
+                axs[i].hist(data_1[:, dim_start+i], bins=100, alpha=0.5, label="data_1")
+            axs[i].legend(loc="upper right")
+    elif plot_type == "scatter":
+        # draw only one figure
+        fig = plt.figure(figsize=(8, 8))
+        ax = fig.add_subplot(projection='3d')
+        if num_dim == 2:
+            # draw scatter plot for each dimension
+            if data_0 is not None:
+                ax.scatter(data_0[:, dim_start], data_0[:, dim_start+1], alpha=0.5, label="data_0")
+            if data_1 is not None:
+                ax.scatter(data_1[:, dim_start], data_1[:, dim_start+1], alpha=0.5, label="data_1")
+            ax.legend(loc="upper right")
+        elif num_dim == 3:
+            # draw scatter plot for each dimension
+            if data_0 is not None:
+                ax.scatter(data_0[:, dim_start], data_0[:, dim_start+1], data_0[:, dim_start+2], marker='o', label="data_0")
+            if data_1 is not None:
+                ax.scatter(data_1[:, dim_start], data_1[:, dim_start+1], data_1[:, dim_start+2], marker='o', label="data_1")
+            ax.legend(loc="upper right")
+        else:
+            raise NotImplementedError
+    plt.show()

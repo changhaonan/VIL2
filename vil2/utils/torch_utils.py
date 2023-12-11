@@ -9,7 +9,7 @@ class SinusoidalEmbedding(nn.Module):
         self.size = size
         self.scale = scale
         half_size = self.size // 2
-        self.emb = torch.log(torch.Tensor([24.0])) / (half_size - 1)
+        self.emb = torch.log(torch.Tensor([10000.0])) / (half_size - 1)
         self.emb = torch.exp(torch.arange(half_size, dtype=torch.float) * -self.emb)
 
     def forward(self, x: torch.Tensor):
