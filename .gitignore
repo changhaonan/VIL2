@@ -19,3 +19,6 @@ checkpoint/*
 
 *.mp4
 *.ckpt
+
+vil2/scripts/data_augmentation.py
+vil2/scripts/relative_transform.py 
