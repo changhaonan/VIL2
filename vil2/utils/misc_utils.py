@@ -258,3 +258,27 @@ def quat_to_rotvec(quat_pose):
         return rotvec
     else:
         raise NotImplementedError
+
+# -----------------------------------------------------------------------------
+# 3D Utils
+# -----------------------------------------------------------------------------
+
+
+def get_pointcloud(depth, intrinsic):
+    """Get 3D pointcloud from perspective depth image.
+
+    Args:
+      depth: HxW float array of perspective depth in meters.
+      intrinsics: 3x3 float array of camera intrinsics matrix.
+
+    Returns:
+      points: HxWx3 float array of 3D points in camera coordinates.
+    """
+    height, width = depth.shape
+    xlin = np.linspace(0, width - 1, width)
+    ylin = np.linspace(0, height - 1, height)
+    px, py = np.meshgrid(xlin, ylin)
+    px = (px - intrinsic[0, 2]) * (depth / intrinsic[0, 0])
+    py = (py - intrinsic[1, 2]) * (depth / intrinsic[1, 1])
+    points = np.float32([px, py, depth]).transpose(1, 2, 0)
+    return points.reshape(-1, 3)

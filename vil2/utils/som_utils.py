@@ -22,7 +22,7 @@ def sample_som(env: gym.Env, policy_fn, num_steps: int, num_samples: int, seed: 
     for _ in tqdm(range(num_samples)):
         obs, info = env.reset()
         for i in range(num_steps):
-            action = policy_fn(obs)
+            action = policy_fn(obs).squeeze()
             obs, _, done, truncated, info = env.step(action)
             observation_list.append(obs['observation'])
             achieved_goal_list.append(obs['achieved_goal'])

@@ -73,7 +73,6 @@ class DmorpModel:
         self.noise_pred_net = noise_pred_net
         self.nets = nn.ModuleDict(
             {
-                # "vision_encoder": self.vision_encoder,
                 "noise_pred_net": self.noise_pred_net,
                 "positional_embedding": torch_utils.SinusoidalEmbedding(size=self.time_emb_dim),
             }
