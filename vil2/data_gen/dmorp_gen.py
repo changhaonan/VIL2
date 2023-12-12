@@ -107,7 +107,7 @@ class DmorpSceneAugmentor:
 
 if __name__ == "__main__":
     random_region = 0.5
-    num_samples = 10
+    num_samples = 2
 
     # Prepare data
     root_path = os.path.dirname(os.path.dirname((os.path.abspath(__file__))))

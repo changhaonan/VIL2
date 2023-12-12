@@ -60,6 +60,11 @@ bproc.renderer.enable_depth_output(activate_antialiasing=False)
 # enable segmentation masks (per class and per instance)
 bproc.renderer.enable_segmentation_output(map_by=["category_id", "instance"])
 
+# Background light
+light_background = bproc.types.Light(light_type="SUN")
+# Point light
+light_point = bproc.types.Light(light_type="POINT")
+
 for sample_idx, (init_pose_1, init_pose_2, transform) in enumerate(zip(init_pose_1_list, init_pose_2_list, transform_list)):
     print(f"Generating sample {sample_idx}....")
     # -------------------------- Object Pose -------------------------- #
@@ -72,14 +77,9 @@ for sample_idx, (init_pose_1, init_pose_2, transform) in enumerate(zip(init_pose
     objs[1].set_location(init_pose_2[:3, 3])
     objs[1].set_rotation_mat(init_pose_2[:3, :3])
     # -------------------------- Light -------------------------- #
-    # Background light
-    light_background = bproc.types.Light(light_type="SUN")
     light_background.set_energy(5)
     light_background.set_color(np.random.uniform([0.5, 0.5, 0.5], [1, 1, 1]))
     light_background.set_location([np.random.random(), np.random.random(), 10])
-
-    # Point light
-    light_point = bproc.types.Light(light_type="POINT")
     light_point.set_energy(200)
     light_point.set_color(np.random.uniform([0.5, 0.5, 0.5], [1, 1, 1]))
     location = bproc.sampler.shell(center=[0, 0, 0], radius_min=light_radius_min, radius_max=light_radius_max,
@@ -126,10 +126,10 @@ for sample_idx, (init_pose_1, init_pose_2, transform) in enumerate(zip(init_pose
                 obj.blender_obj.hide_render = True
         # Render the segmentation under Cycles engine
         bpy.context.scene.render.engine = 'CYCLES'
-        data = bproc.renderer.render(load_keys={'segmap'})
+        data = bproc.renderer.render(load_keys={'segmap', 'depth'})
         # Render color and depth under Eevee engine
         bpy.context.scene.render.engine = 'BLENDER_EEVEE'
-        data.update(bproc.renderer.render(load_keys={'colors', 'depth'}))
+        data.update(bproc.renderer.render(load_keys={'colors'}))
         bpy.context.scene.render.engine = 'CYCLES'
 
         # Write the rendering into an hdf5 file

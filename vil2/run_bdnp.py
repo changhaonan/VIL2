@@ -10,6 +10,7 @@ from vil2.utils.som_utils import sample_som
 from vil2.utils.eval_utils import compare_distribution
 import gymnasium as gym
 import gymnasium_robotics as gym_robotics
+from vil2.model.net_factory import build_vision_encoder, build_noise_pred_net
 
 
 class CustomFetchWrapper(gym.Wrapper):
@@ -29,7 +30,7 @@ class CustomFetchWrapper(gym.Wrapper):
         achieved_goal = obs['achieved_goal']
         desired_goal = obs['desired_goal']
         override_obs = {
-            'observation': np.concatenate([observation, achieved_goal, desired_goal]),
+            'observation': observation,
             'achieved_goal': achieved_goal,
             'desired_goal': self.new_goal,
         }
@@ -45,7 +46,7 @@ class CustomFetchWrapper(gym.Wrapper):
 
 
 if __name__ == "__main__":
-    # prepare path
+    # Prepare path
     root_path = os.path.dirname((os.path.abspath(__file__)))
     env_name = "GYM-FetchReach-v2"
     export_path = os.path.join(root_path, "test_data", env_name)
@@ -55,88 +56,122 @@ if __name__ == "__main__":
     os.makedirs(check_point_path, exist_ok=True)
     os.makedirs(log_path, exist_ok=True)
 
-    # prepare data
+    # Load config
+    task_name = "BDNP"
+    root_path = os.path.dirname((os.path.abspath(__file__)))
+    cfg_file = os.path.join(root_path, "config", "bdnp.py")
+    cfg = LazyConfig.load(cfg_file)
+
+    # Prepare data
     env = env_builder(env_name, render_mode="rgb_array")
-    config = {
-        # ----- som related -----
-        'som_hidden_dim': 32,
-        'som_hidden_layer': 3,
-        'som_time_emb': 'learnable',
-        'som_input_emb': 'learnable',
-        'beta_schedule': 'squaredcos_cap_v2',
-        'num_diffusion_iters': 20,
-        'som_gamma': 0.3,  # balancing loss; to distinguish from the gamma for discount factor
-        'som_lr': 1e-4,
-        'som_weight_decay': 1e-6,
-        # ----- policy related -----
-        'pi_hidden_dim': 256,
-        'pi_hidden_layer': 3,
-        'policy_std': 0.1,
-        'batch_size': 512,
-        'finite_horizon': 50,
-        'policy_lr': 1e-4,
-        'policy_weight_decay': 1e-6,
-        # ----- training related -----
-        'num_epochs': 500,
-        'eval_period': 1000,
-        'max_epoch_per_episode': 8,
-        'log_period': 100,
-        'her_tolerance': 0.2,  # HER tolerance
-        'alpha': 0.1,
-        'target_update_period': 1,
-        'enable_save': True,
-        'enable_load': False,
-        'log_path': log_path,
-        'render_eval': True,  # render evaluation
-        'lamda': 10.0,  # regularization parameter
-        'sample_size': 32,
-        'a_lazy_init': True,  # use last a_0 to init current a_T
-    }
-    # env = DictConcatWrapper(env)
-    # bdnp = BDNPolicy(env=env, config=config)
-    # # do train
-    # goal_pi = np.zeros((31,), dtype=np.float32)
-    # bdnp.train(batch_size=config['batch_size'],
-    #            num_episode=config['num_epochs'])
+    # config = {
+    #     # ----- model related -----
+    #     'time_emd_dim': 16,
+    #     # ----- som related -----
+    #     'som_hidden_dim': 32,
+    #     'som_hidden_layer': 3,
+    #     'som_time_emb': 'learnable',
+    #     'som_input_emb': 'learnable',
+    #     'beta_schedule': 'squaredcos_cap_v2',
+    #     'num_diffusion_iters': 20,
+    #     'som_gamma': 0.3,  # balancing loss; to distinguish from the gamma for discount factor
+    #     'som_lr': 1e-4,
+    #     'som_weight_decay': 1e-6,
+    #     # ----- policy related -----
+    #     'pi_hidden_dim': 256,
+    #     'pi_hidden_layer': 3,
+    #     'policy_std': 0.1,
+    #     'batch_size': 512,
+    #     'finite_horizon': 50,
+    #     'policy_lr': 1e-4,
+    #     'policy_weight_decay': 1e-6,
+    #     # ----- training related -----
+    #     'num_epochs': 500,
+    #     'eval_period': 1000,
+    #     'max_epoch_per_episode': 8,
+    #     'log_period': 100,
+    #     'her_tolerance': 0.2,  # HER tolerance
+    #     'alpha': 0.1,
+    #     'target_update_period': 1,
+    #     'enable_save': True,
+    #     'enable_load': False,
+    #     'log_path': log_path,
+    #     'render_eval': True,  # render evaluation
+    #     'lamda': 10.0,  # regularization parameter
+    #     'sample_size': 32,
+    #     'a_lazy_init': True,  # use last a_0 to init current a_T
+    # }
 
     # Build a heuristic policy
     if env_name == "GYM-FetchReach-v2":
         def heuristic_policy(obs, step_remain=0, action_noise=0.0):
-            gripper_pos = obs['observation'][:3]
-            goal_pos = obs['desired_goal']
+            # Adapt data structure
+            observation = obs['observation']
+            desired_goal = obs['desired_goal']
+            if len(observation.shape) == 1:
+                observation = observation[None, :]
+                desired_goal = desired_goal[None, :]
+                batch = 1
+            else:
+                batch = observation.shape[0]
+
+            gripper_pos = observation[:, :3]
+            goal_pos = desired_goal
             gripper_movement = goal_pos - gripper_pos
-            cur_diff = np.linalg.norm(gripper_movement)
-            # print(f"cur_diff: {cur_diff}")
-            gripper_action = np.zeros(4)
-            gripper_action[:3] = gripper_movement * 3.0
+            gripper_action = np.zeros([batch, 4])
+            gripper_action[:, :3] = gripper_movement * 3.0
             # apply noise
-            gripper_action[:3] += np.random.normal(size=3) * action_noise
+            random_noise = np.random.uniform(-1, 1, size=[batch, 3]) * action_noise
+            gripper_action[:, :3] += random_noise
             # clip by (-1, 1)
             gripper_action = np.clip(gripper_action, -1, 1)
             return gripper_action
     else:
         raise NotImplementedError
 
-    # do train
-    # goal_pi = np.zeros((31,), dtype=np.float32)
-    # bdnp.train(batch_size=config['batch_size'],
-    #            num_episode=config['num_epochs'],
-    #            train_policy=False,
-    #            heuristic_policy=heuristic,)
-
-    # bdnp.save(os.path.join(check_point_path, 'model.pt'))
-
-    # save the stats for replay buffer
-    # stats = bdnp.replay_buffer.compute_stats()
-    # with open(os.path.join(export_path, 'bdnp', 'stats.pkl'), 'wb') as f:
-    #     pickle.dump(stats, f)
-
     #################### Compute SOM ########################
+    def policy_fn(obs): return heuristic_policy(obs, 0, action_noise=0.01)
     # apply a wrapper
     desired_goal = np.array([1.3, 0.8, 0.8])
     env = CustomFetchWrapper(env, new_goal=desired_goal)
     num_steps = 30
     num_samples = 1000
-    sampled_som = sample_som(env=env, policy_fn=lambda obs: heuristic_policy(obs, 0, action_noise=0.01), num_steps=num_steps, num_samples=num_samples)
+    sampled_som = sample_som(env=env, policy_fn=policy_fn, num_steps=num_steps, num_samples=num_samples)
     compare_distribution(sampled_som['desired_goal'], sampled_som['observation'], dim_end=3, plot_type="scatter")
-    pass
+
+    # #################### Train SOM ########################
+    # noise_net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS
+    # # Assemble network
+    # input_dim = 0
+    # global_cond_dim = 0
+    # time_emb_dim = 0
+    # goal_dim = env.observation_space['desired_goal'].shape[0]
+    # action_dim = env.action_space.shape[0]
+    # obs_dim = env.observation_space['observation'].shape[0]
+    # # I/O input
+    # input_dim += goal_dim
+    # # Cond input
+    # if cfg.MODEL.COND_ACTION:
+    #     global_cond_dim += action_dim
+    # if cfg.MODEL.COND_OBS:
+    #     global_cond_dim += obs_dim
+    # if cfg.MODEL.COND_REMAIN_TIMESTEP:
+    #     global_cond_dim += cfg.MODEL.TIME_EMB_DIM
+    # noise_net_init_args["input_dim"] = input_dim
+    # noise_net_init_args["global_cond_dim"] = global_cond_dim
+    # som_net = build_noise_pred_net(
+    #     cfg.MODEL.NOISE_NET.NAME, **noise_net_init_args
+    # )
+    # vision_encoder = None
+    # retrain = True
+    # bdnp = BDNPolicy(env=env, cfg=cfg, vision_encoder=vision_encoder, noise_pred_net=som_net, policy_fn=policy_fn)
+    # # do train
+    # if retrain:
+    #     bdnp.train(batch_size=cfg.TRAIN.BATCH_SIZE,
+    #                num_episode=cfg.TRAIN.NUM_EPOCHS,
+    #                train_policy=False)
+    #     bdnp.save(os.path.join(check_point_path, 'model.pt'))
+    # # save the stats for replay buffer
+    # stats = bdnp.replay_buffer.compute_stats()
+    # with open(os.path.join(export_path, 'bdnp', 'stats.pkl'), 'wb') as f:
+    #     pickle.dump(stats, f)
