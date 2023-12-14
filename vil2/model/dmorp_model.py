@@ -274,44 +274,52 @@ class DmorpModel:
                 plt.plot(loss_wrt_timestep)
                 plt.show()
 
-    def debug_inference(self, dataset, sample_size: int = 750, consider_only_one_pair: bool = False, debug: bool = False):
+    def debug_inference(self, dataset, sample_size: int = 750, consider_only_one_pair: bool = False, debug: bool = False, shuffle: bool = False):
         eval_data_loader = torch.utils.data.DataLoader(
+            dataset[4000:4000+sample_size],
+            batch_size=sample_size,
+            shuffle=shuffle,
+            # num_workers=self.cfg.DATALOADER.NUM_WORKERS,
+            # pin_memory=True,
+            # persistent_workers=True,
+        )
+        eval_data_loader_shuffled = torch.utils.data.DataLoader(
             dataset,
             batch_size=sample_size,
             shuffle=True,
-            num_workers=self.cfg.DATALOADER.NUM_WORKERS,
-            pin_memory=True,
-            persistent_workers=True,
+            # num_workers=self.cfg.DATALOADER.NUM_WORKERS,
+            # pin_memory=True,
+            # persistent_workers=True,
         )
         full_data_loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=len(dataset),
             shuffle=True,
-            num_workers=self.cfg.DATALOADER.NUM_WORKERS,
-            pin_memory=True,
-            persistent_workers=True,
+            # num_workers=self.cfg.DATALOADER.NUM_WORKERS,
+            # pin_memory=True,
+            # persistent_workers=True,
         )
         pose9d_full = None
-        for _, dt in enumerate(full_data_loader):
-            pose9d_f = dt["shifted"]["9dpose"].detach().cpu().numpy()
+        for _, dt2 in enumerate(full_data_loader):
+            pose9d_f = dt2["shifted"]["9dpose"]
             if not consider_only_one_pair:
                 pose9d_full = pose9d_f
             break
         for _, dt in enumerate(eval_data_loader):
-            target = dt["shifted"]["target"].to("cuda")
-            fixed = dt["shifted"]["fixed"].to("cuda")
-            pose9d = dt["shifted"]["9dpose"].to("cuda")
+            target = dt["shifted"]["target"].to(self.device)
+            fixed = dt["shifted"]["fixed"].to(self.device)
+            pose9d = dt["shifted"]["9dpose"].to(self.device)
             pose9d = pose9d.to(torch.float32)
-            
+            transform = dt["shifted"]["transform"].to(torch.float32)
             if consider_only_one_pair:
                 random_index = np.random.randint(0, pose9d.shape[0])
-                pose9d_full = pose9d[random_index].unsqueeze(0).repeat(pose9d_f.shape[0], 1).detach().cpu().numpy()
+                pose9d_full = pose9d[random_index].unsqueeze(0).repeat(sample_size, 1).detach().cpu().numpy()
             B, _ = target.shape[0], 1
             # sample noise to add to actions
             noise_sample = torch.randn((pose9d.shape[0], pose9d.shape[1]), device="cuda")
             if consider_only_one_pair:
-                target_random = target[random_index].unsqueeze(0).repeat(B, 1, 1)
-                fixed_random = fixed[random_index].unsqueeze(0).repeat(B, 1, 1)
+                target_random = target[random_index].unsqueeze(0).repeat(sample_size, 1, 1)
+                fixed_random = fixed[random_index].unsqueeze(0).repeat(sample_size, 1, 1)
 
             with torch.no_grad():
                 self.nets.eval()
@@ -325,7 +333,7 @@ class DmorpModel:
                     noise_sample = self.noise_scheduler.step(residual, t[0], noise_sample).prev_sample
             
             for i, pred_transform9d in enumerate(noise_sample):
-                pred_transform9d = torch.clamp(pred_transform9d, min=-1.0, max=1.0)
+                # pred_transform9d = torch.clamp(pred_transform9d, min=-1.0, max=1.0)
                 pred_transform9d = pred_transform9d.detach().cpu().numpy()
                 trans = pred_transform9d[:3].T
                 v1 = pred_transform9d[3:6].T

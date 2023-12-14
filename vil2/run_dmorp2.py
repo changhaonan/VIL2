@@ -6,6 +6,7 @@ import argparse
 import json
 import random
 import numpy as np
+import copy
 import collections
 from tqdm.auto import tqdm
 from vil2.env import env_builder
@@ -26,18 +27,19 @@ if __name__ == "__main__":
     root_path = os.path.dirname((os.path.abspath(__file__)))
     cfg_file = os.path.join(root_path, "config", "dmorp_simplify.py")
     cfg = LazyConfig.load(cfg_file)
-    retrain = False
+    retrain = True
+    pcd_size = 4096
     # Load dataset & data loader
-    with open(os.path.join(root_path, "test_data", "dmorp_augmented", "diffusion_dataset.pkl"), "rb") as f:
+    with open(os.path.join(root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}.pkl"), "rb") as f:
         dtset = pickle.load(f)
     dataset = DiffDataset(dtset=dtset)
     data_loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
         shuffle=True,
-        num_workers=cfg.DATALOADER.NUM_WORKERS,
-        pin_memory=True,
-        persistent_workers=True,
+        # num_workers=cfg.DATALOADER.NUM_WORKERS,
+        # pin_memory=True,
+        # persistent_workers=True,
     )
 
     # Compute network input/output dimension
@@ -86,18 +88,18 @@ if __name__ == "__main__":
         # dmorp_model.module.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
         best_model, best_epoch = dmorp_model.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
         # save the data
-        save_path = os.path.join(save_dir, f"dmorp_model_rel.pt")
+        save_path = os.path.join(save_dir, f"dmorp_model_rel_{pcd_size}.pt")
         torch.save(best_model, save_path)
         print(f"Saving the best epoch:{best_epoch}. Model saved to {save_path}")
     else:
         # load the model
-        save_path = os.path.join(save_dir, f"dmorp_model_rel.pt")
+        save_path = os.path.join(save_dir, f"dmorp_model_rel_{pcd_size}.pt")
         dmorp_model.nets.load_state_dict(torch.load(save_path))
         print(f"Model loaded from {save_path}")
 
     # Test inference
     # Load vocabulary
     if not retrain:
-        dmorp_model.debug_inference(dataset, sample_size=750, consider_only_one_pair=True)
+        dmorp_model.debug_inference(copy.deepcopy(dataset), sample_size=750, consider_only_one_pair=True, debug=False, shuffle=False)
     pass
     

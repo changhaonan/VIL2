@@ -48,7 +48,7 @@ MODEL = dict(
 )
 
 TRAIN = dict(
-    NUM_EPOCHS=2,
+    NUM_EPOCHS=200,
 )
 
 CUDA_DEVICE = "cuda"
