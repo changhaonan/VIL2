@@ -264,21 +264,33 @@ def quat_to_rotvec(quat_pose):
 # -----------------------------------------------------------------------------
 
 
-def get_pointcloud(depth, intrinsic):
-    """Get 3D pointcloud from perspective depth image.
+def get_pointcloud(color, depth, intrinsic):
+    """Get 3D pointcloud from perspective depth image and color image.
 
     Args:
+      color: HxWx3 uint8 array of RGB images.
       depth: HxW float array of perspective depth in meters.
       intrinsics: 3x3 float array of camera intrinsics matrix.
 
     Returns:
       points: HxWx3 float array of 3D points in camera coordinates.
     """
+
     height, width = depth.shape
     xlin = np.linspace(0, width - 1, width)
     ylin = np.linspace(0, height - 1, height)
     px, py = np.meshgrid(xlin, ylin)
     px = (px - intrinsic[0, 2]) * (depth / intrinsic[0, 0])
     py = (py - intrinsic[1, 2]) * (depth / intrinsic[1, 1])
-    points = np.float32([px, py, depth]).transpose(1, 2, 0)
-    return points.reshape(-1, 3)
+    # Stack the coordinates and reshape
+    points = np.float32([px, py, depth]).transpose(1, 2, 0).reshape(-1, 3)
+
+    # Assuming color image is in the format height x width x 3 (RGB)
+    # Reshape color image to align with points
+    colors = color.reshape(-1, 3)
+
+    # Concatenate points with colors
+    pcd_with_color = np.hstack((points, colors))
+
+    return pcd_with_color
+

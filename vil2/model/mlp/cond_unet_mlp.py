@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-
+from vil2.model.embeddings.pct import PointTransformerEncoderSmall, EncoderMLP, DropoutSampler
 
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):
@@ -105,7 +105,7 @@ class ConditionalUnetMLP(nn.Module):
             nn.GELU(),
             nn.Linear(4 * dsed, dsed),
         )
-        cond_dim = dsed + global_cond_dim
+        cond_dim = dsed + global_cond_dim*2
 
         in_out = list(zip(all_dims[:-1], all_dims[1:]))
         mid_dim = all_dims[-1]
@@ -159,15 +159,20 @@ class ConditionalUnetMLP(nn.Module):
             )
 
         final_linear = nn.Sequential(
-            nn.Linear(start_dim, input_dim),
+            nn.Linear(start_dim, 9),
         )
+
+        self.pcd_encoder = PointTransformerEncoderSmall(output_dim=256, input_dim=6, mean_center=False)
+        self.pcd_mlp_encoder = EncoderMLP(256, input_dim, uses_pt=True)
+        self.pose_encoder = nn.Sequential(nn.Linear(9, input_dim))
+        # self.obj_head = DropoutSampler(10, 9, dropout_rate=0.0)
 
         self.diffusion_step_encoder = diffusion_step_encoder
         self.up_modules = up_modules
         self.down_modules = down_modules
         self.final_liner = final_linear
 
-    def forward(self, sample, timestep, global_cond=None):
+    def forward(self, sample, timestep, global_cond1=None, global_cond2=None):
 
         # 1. time
         timesteps = timestep
@@ -181,10 +186,14 @@ class ConditionalUnetMLP(nn.Module):
 
         global_feature = self.diffusion_step_encoder(timesteps)
 
-        if global_cond is not None:
-            global_feature = torch.cat([global_feature, global_cond], dim=-1)
+        if global_cond1 is not None:
+            center1, enc_pcd1 = self.pcd_encoder(global_cond1[:, :, :3], global_cond1[:, :, 3:])
+            center2, enc_pcd2 = self.pcd_encoder(global_cond2[:, :, :3], global_cond2[:, :, 3:])
+            enc_pcd1 = self.pcd_mlp_encoder(enc_pcd1, center1)
+            enc_pcd2 = self.pcd_mlp_encoder(enc_pcd2, center2)
+            global_feature = torch.cat([enc_pcd1, enc_pcd2, global_feature], dim=-1)
 
-        x = sample
+        x = self.pose_encoder(sample)
         h = []  # skip connections
         for idx, (resnet, resnet2, downsample) in enumerate(self.down_modules):
             x = resnet(x, global_feature)
@@ -202,4 +211,5 @@ class ConditionalUnetMLP(nn.Module):
             # x = upsample(x)
 
         x = self.final_liner(x)
+        # x = self.obj_head(x)
         return x

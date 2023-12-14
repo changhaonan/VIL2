@@ -2,6 +2,8 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import math
+from vil2.model.embeddings.pct import PointTransformerEncoderSmall, EncoderMLP, DropoutSampler
+
 
 
 class SinusoidalPosEmb(nn.Module):
@@ -34,10 +36,11 @@ class MLP(nn.Module):
         super().__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.emb_size = input_dim
+        diffusion_step_embed_dim = 80
         self.time_emb_size = diffusion_step_embed_dim
         self.use_conditioning = global_cond_dim > 0
 
-        input_size = input_dim + global_cond_dim + self.time_emb_size if self.use_conditioning else input_dim + self.time_emb_size
+        input_size = 80*4
         layers = [nn.Linear(input_size, hidden_size), nn.GELU()]
         for _ in range(nlayers):
             layers.append(ResBlock(hidden_size))
@@ -52,10 +55,14 @@ class MLP(nn.Module):
             nn.GELU(),
             nn.Linear(4 * dsed, dsed),
         )
+        self.pcd_encoder = PointTransformerEncoderSmall(output_dim=256, input_dim=6, mean_center=False)
+        self.pcd_mlp_encoder = EncoderMLP(256, 80, uses_pt=True)
+        self.pose_encoder = nn.Sequential(nn.Linear(9, 80))
+        self.obj_head = DropoutSampler(80, 9, dropout_rate=0.0)
 
-    def forward(self, sample: torch.Tensor,  timestep: int, global_cond: torch.Tensor | None):
+    def forward(self, sample: torch.Tensor,  timestep: int, global_cond1: torch.Tensor | None, global_cond2: torch.Tensor | None):
         sample = sample.to(dtype=torch.float32, device=self.device)
-
+        sample = self.pose_encoder(sample)
         # time
         timesteps = timestep
         if not torch.is_tensor(timesteps):
@@ -67,11 +74,15 @@ class MLP(nn.Module):
         timesteps = timesteps.expand(sample.shape[0])
         time_emb = self.diffusion_step_encoder(timesteps)
 
-        if global_cond is not None:
-            embeddings = torch.concat([sample, global_cond, time_emb], dim=-1)
+        if global_cond1 is not None:
+            center1, enc_pcd1 = self.pcd_encoder(global_cond1[:, :, :3], global_cond1[:, :, 3:])
+            center2, enc_pcd2 = self.pcd_encoder(global_cond2[:, :, :3], global_cond2[:, :, 3:])
+            enc_pcd1 = self.pcd_mlp_encoder(enc_pcd1, center1)
+            enc_pcd2 = self.pcd_mlp_encoder(enc_pcd2, center2)
+            embeddings = torch.concat([sample, enc_pcd1, enc_pcd2, time_emb], dim=-1)
         else:
             embeddings = torch.concat([sample, time_emb], dim=-1)
 
-        output_scene = self.joint_mlp(embeddings)[:, :self.emb_size]
+        output_scene = self.joint_mlp(embeddings)[:, :9]
 
         return output_scene

@@ -15,6 +15,7 @@ from vil2.data.obj_dp_dataset import normalize_data, unnormalize_data
 import vil2.utils.torch_utils as torch_utils
 import clip
 from vil2.utils.eval_utils import compare_distribution
+from vil2.data_gen.data_loader import visualize_pcd_with_open3d
 
 
 class DmorpModel:
@@ -103,58 +104,70 @@ class DmorpModel:
             num_warmup_steps=500,
             num_training_steps=len(data_loader) * num_epochs,
         )
+        global_step = 0
+        best_loss = float("inf")
+        best_state_dict = None
+        best_epoch  = None
+        for epoch in range(num_epochs):
+            epoch_loss = 0
+            progress_bar = tqdm(data_loader)
+            progress_bar.set_description(f"Epoch {epoch}")
+            for it, dt in enumerate(data_loader):
+                target = dt["shifted"]["target"].to(self.device)
+                fixed = dt["shifted"]["fixed"].to(self.device)
+                pose9d = dt["shifted"]["9dpose"].to(self.device)
+                # set type of pose9d to float32
+                pose9d = pose9d.to(torch.float32)
+                B, M = dt["shifted"]["target"].shape[0], 1
+                # sample noise to add to actions
+                noise = torch.randn((pose9d.shape[0], pose9d.shape[1]), device=self.device)
+                # sample a diffusion iteration for each data point
+                timesteps = torch.randint(
+                    0,
+                    self.noise_scheduler.config.num_train_timesteps,
+                    (B*M,),
+                    device=self.device,
+                ).long()
 
-        with tqdm(range(num_epochs), desc="Epoch") as tglobal:
-            # epoch loop
-            for epoch_idx in tglobal:
-                epoch_loss = list()
-                # batch loop
-                with tqdm(data_loader, desc="Batch", leave=False) as tepoch:
-                    for nbatch in tepoch:
-                        B = nbatch["sem_feat"].shape[0]  # (B, M, D)
-                        M = nbatch["sem_feat"].shape[1]
-                        ncond = self.assemble_cond(nbatch, B, M)  # (B*M, cond_dim)
-                        naction = self.assemble_action(nbatch, B, M).to(self.device)  # (B*V, pred_horizon, action_dim)
-                        # sample noise to add to actions
-                        noise = torch.randn(naction.shape, device=self.device)
-                        # sample a diffusion iteration for each data point
-                        timesteps = torch.randint(
-                            0,
-                            self.noise_scheduler.config.num_train_timesteps,
-                            (B*M,),
-                            device=self.device,
-                        ).long()
+                # add noise to the clean images according to the noise magnitude at each diffusion iteration
+                # (this is the forward diffusion process)
+                noisy_actions = self.noise_scheduler.add_noise(pose9d, noise, timesteps)
 
-                        # add noise to the clean images according to the noise magnitude at each diffusion iteration
-                        # (this is the forward diffusion process)
-                        noisy_actions = self.noise_scheduler.add_noise(naction, noise, timesteps)
+                # predict the noise residual
+                noise_pred = self.noise_pred_net(
+                    noisy_actions, timesteps, global_cond1=target, global_cond2=fixed
+                )
 
-                        # predict the noise residual
-                        noise_pred = self.noise_pred_net(
-                            noisy_actions, timesteps, global_cond=ncond
-                        )
+                # L2 loss
+                loss = nn.functional.mse_loss(noise_pred, noise)
 
-                        # L2 loss
-                        loss = nn.functional.mse_loss(noise_pred, noise)
+                # optimize
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+                # step lr scheduler every batch
+                # this is different from standard pytorch behavior
+                lr_scheduler.step()
 
-                        # optimize
-                        loss.backward()
-                        optimizer.step()
-                        optimizer.zero_grad()
-                        # step lr scheduler every batch
-                        # this is different from standard pytorch behavior
-                        lr_scheduler.step()
+                # update Exponential Moving Average of the model weights
+                ema.step(self.nets.parameters())
 
-                        # update Exponential Moving Average of the model weights
-                        ema.step(self.nets.parameters())
-
-                        # logging
-                        loss_cpu = loss.item()
-                        epoch_loss.append(loss_cpu)
-                        tepoch.set_postfix(loss=loss_cpu)
-                tglobal.set_postfix(loss=np.mean(epoch_loss))
+                progress_bar.update(1)
+                epoch_loss += loss.detach().cpu().item()
+                logs = {"loss": epoch_loss/(it+1), "step": global_step}
+                progress_bar.set_postfix(**logs)
+                global_step += 1
+            
+            epoch_loss /= len(data_loader)
+            # print(f"Epoch {epoch}, loss {epoch_loss}")
+            if epoch_loss < best_loss:
+                best_loss = epoch_loss
+                best_epoch = epoch
+                best_state_dict = self.nets.state_dict()
+            progress_bar.close()
         # copy ema back to model
         ema.copy_to(self.nets.parameters())
+        return best_state_dict, best_epoch
 
     def inference(self, obs, stats: dict, batch_size: int, init_noise: np.ndarray = None, draw_sample: bool = False):
         """Inference with the model"""
@@ -261,6 +274,77 @@ class DmorpModel:
                 plt.plot(loss_wrt_timestep)
                 plt.show()
 
+    def debug_inference(self, dataset, sample_size: int = 750, consider_only_one_pair: bool = False, debug: bool = False):
+        eval_data_loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=sample_size,
+            shuffle=True,
+            num_workers=self.cfg.DATALOADER.NUM_WORKERS,
+            pin_memory=True,
+            persistent_workers=True,
+        )
+        full_data_loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=len(dataset),
+            shuffle=True,
+            num_workers=self.cfg.DATALOADER.NUM_WORKERS,
+            pin_memory=True,
+            persistent_workers=True,
+        )
+        pose9d_full = None
+        for _, dt in enumerate(full_data_loader):
+            pose9d_f = dt["shifted"]["9dpose"].detach().cpu().numpy()
+            if not consider_only_one_pair:
+                pose9d_full = pose9d_f
+            break
+        for _, dt in enumerate(eval_data_loader):
+            target = dt["shifted"]["target"].to("cuda")
+            fixed = dt["shifted"]["fixed"].to("cuda")
+            pose9d = dt["shifted"]["9dpose"].to("cuda")
+            pose9d = pose9d.to(torch.float32)
+            
+            if consider_only_one_pair:
+                random_index = np.random.randint(0, pose9d.shape[0])
+                pose9d_full = pose9d[random_index].unsqueeze(0).repeat(pose9d_f.shape[0], 1).detach().cpu().numpy()
+            B, _ = target.shape[0], 1
+            # sample noise to add to actions
+            noise_sample = torch.randn((pose9d.shape[0], pose9d.shape[1]), device="cuda")
+            if consider_only_one_pair:
+                target_random = target[random_index].unsqueeze(0).repeat(B, 1, 1)
+                fixed_random = fixed[random_index].unsqueeze(0).repeat(B, 1, 1)
+
+            with torch.no_grad():
+                self.nets.eval()
+                timesteps = list(range(len(self.noise_scheduler)))[::-1]
+                for _, t in enumerate(tqdm(timesteps, desc="Denoising steps")):
+                    t = torch.from_numpy(np.repeat(t, noise_sample.shape[0])).long().to("cuda")  # num_samples is config.eval.batch_size
+                    if consider_only_one_pair:
+                        residual = self.nets.noise_pred_net(noise_sample, t, target_random, fixed_random)
+                    else:
+                        residual = self.nets.noise_pred_net(noise_sample, t, target, fixed)
+                    noise_sample = self.noise_scheduler.step(residual, t[0], noise_sample).prev_sample
+            
+            for i, pred_transform9d in enumerate(noise_sample):
+                pred_transform9d = torch.clamp(pred_transform9d, min=-1.0, max=1.0)
+                pred_transform9d = pred_transform9d.detach().cpu().numpy()
+                trans = pred_transform9d[:3].T
+                v1 = pred_transform9d[3:6].T
+                v2 = pred_transform9d[6:].T
+                v1 = v1 / np.linalg.norm(v1)
+                v2_orthogonal = v2 - np.dot(v2, v1) * v1
+                v2 = v2_orthogonal / np.linalg.norm(v2_orthogonal)
+                v3 = np.cross(v1, v2)
+                rotation = np.column_stack((v1, v2, v3))
+                pred_transform_matrix = np.eye(4)
+                pred_transform_matrix[:3, :3] = rotation
+                pred_transform_matrix[:3, 3] = trans 
+                if debug:
+                    if consider_only_one_pair:
+                        visualize_pcd_with_open3d(target_random[i].detach().cpu().numpy(), fixed_random[i].detach().cpu().numpy(), pred_transform_matrix)
+                    else:
+                        visualize_pcd_with_open3d(target[i].detach().cpu().numpy(), fixed[i].detach().cpu().numpy(), pred_transform_matrix)
+            compare_distribution(pose9d_full, noise_sample.detach().cpu().numpy(), dim_start=0, dim_end=9, title="Pose")        
+            break
     def save(self, export_path):
         """Save model weights"""
         torch.save(self.nets.state_dict(), export_path)
