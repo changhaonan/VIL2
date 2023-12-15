@@ -20,6 +20,16 @@
                 "host": "localhost",      
                 "port": 5678 
             }   
+        },
+        {
+            "name": "GenDMorp",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/vil2/data_gen/dmorp_gen.py",
+            "args": ["--fix_anchor"],
+            "cwd": "${workspaceFolder}/vil2/data_gen",
+            "console": "integratedTerminal",
+            "justMyCode": false
         }
     ]
 }

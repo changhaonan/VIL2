@@ -23,3 +23,6 @@ checkpoint/*
 vil2/scripts/data_augmentation.py
 vil2/scripts/relative_transform.py 
 vil2/dummy.py
+
+*.exr
+vil2/data_gen/examples/*

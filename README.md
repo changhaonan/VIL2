@@ -33,7 +33,14 @@ There seems to have encoding problem. The most important now is to do encoding.
 
 ## Trouble-shooting
 
+1. Mujoco install
 There is `cypython` problem can be found [here](https://github.com/openai/mujoco-py/issues/773).
 ```bash
 pip install "cython<3"
+```
+
+2. BlenderProc
+imgcodecs: OpenEXR codec is disabled. You can enable it via 'OPENCV_IO_ENABLE_OPENEXR' option.
+```bash
+export OPENCV_IO_ENABLE_OPENEXR=true
 ```
