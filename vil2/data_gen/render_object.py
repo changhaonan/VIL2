@@ -19,6 +19,7 @@ argparser.add_argument('--light_radius_min', type=float, default=1.0)
 argparser.add_argument('--light_radius_max', type=float, default=2.0)
 argparser.add_argument('--cam_radius_min', type=float, default=1.0)
 argparser.add_argument('--cam_radius_max', type=float, default=1.5)
+argparser.add_argument('--fix_cam', action='store_true')
 args = argparser.parse_args()
 
 # Set parameters
@@ -36,7 +37,8 @@ init_pose_2_list = scene_info["init_pose_2_list"]
 transform_list = scene_info["transform_list"]
 
 mesh_files = [scene_info["mesh_1"], scene_info["mesh_2"]]
-num_cam_poses = args.num_cam_poses
+fix_cam = args.fix_cam
+num_cam_poses = args.num_cam_poses if not fix_cam else 1
 light_radius_min = args.light_radius_min
 light_radius_max = args.light_radius_max
 cam_radius_min = args.cam_radius_min
@@ -93,15 +95,19 @@ for sample_idx, (init_pose_1, init_pose_2, transform) in enumerate(zip(init_pose
     count_cam_poses = 0
     # Render two camera poses
     while count_cam_poses < num_cam_poses:
-        # Sample location
-        location = bproc.sampler.shell(center=[0, 0, 0],
-                                       radius_min=cam_radius_min,
-                                       radius_max=cam_radius_max,
-                                       elevation_min=1,
-                                       elevation_max=89,
-                                       uniform_volume=False)
-        # Determine point of interest in scene as the object closest to the mean of a subset of objects
-        poi = bproc.object.compute_poi(objs)
+        if not fix_cam:
+            # Sample location
+            location = bproc.sampler.shell(center=[0, 0, 0],
+                                        radius_min=cam_radius_min,
+                                        radius_max=cam_radius_max,
+                                        elevation_min=1,
+                                        elevation_max=89,
+                                        uniform_volume=False)
+            # Determine point of interest in scene as the object closest to the mean of a subset of objects
+            poi = bproc.object.compute_poi(objs)
+        else:
+            location = np.array([1.0/np.sqrt(3.0), 1.0/np.sqrt(3.0), 1.0/np.sqrt(3.0)]) * (cam_radius_min + cam_radius_max) / 2.0
+            poi = np.array([0, 0, 0])
         # Compute rotation based on vector going from location towards poi
         # rotation_matrix = bproc.camera.rotation_from_forward_vec(poi - location,
         #                                                          inplane_rot=np.random.uniform(-0.7854, 0.7854))
