@@ -2,7 +2,7 @@ from .backbones.resetnet import *
 from .noise_nets.cond_unet_1d import ConditionalUnet1D
 from .mlp.cond_unet_mlp import ConditionalUnetMLP
 from .mlp.mlp import MLP
-
+from .mlp.transformer import Transformer
 
 def build_vision_encoder(name: str, **kwargs):
     if name.startswith("resnet"):
@@ -21,5 +21,7 @@ def build_noise_pred_net(name: str, **kwargs):
         return ConditionalUnetMLP(**kwargs)
     elif name.startswith("MLP"):
         return MLP(**kwargs)
+    elif name.startswith("Transformer"):
+        return Transformer(**kwargs)
     else:
         raise NotImplementedError(f"Unknown noise net: {name}")

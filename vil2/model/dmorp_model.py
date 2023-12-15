@@ -113,9 +113,9 @@ class DmorpModel:
             progress_bar = tqdm(data_loader)
             progress_bar.set_description(f"Epoch {epoch}")
             for it, dt in enumerate(data_loader):
-                target = dt["shifted"]["target"].to(self.device)
-                fixed = dt["shifted"]["fixed"].to(self.device)
-                pose9d = dt["shifted"]["9dpose"].to(self.device)
+                target = dt["shifted"]["target"].to(self.device).to(torch.float32)
+                fixed = dt["shifted"]["fixed"].to(self.device).to(torch.float32)
+                pose9d = dt["shifted"]["9dpose"].to(self.device).to(torch.float32)
                 # set type of pose9d to float32
                 pose9d = pose9d.to(torch.float32)
                 B, M = dt["shifted"]["target"].shape[0], 1
@@ -274,19 +274,11 @@ class DmorpModel:
                 plt.plot(loss_wrt_timestep)
                 plt.show()
 
-    def debug_inference(self, dataset, sample_size: int = 750, consider_only_one_pair: bool = False, debug: bool = False, shuffle: bool = False):
+    def debug_inference(self, dataset, sample_size: int = 750, consider_only_one_pair: bool = False, debug: bool = False, shuffle: bool = False, save_path: str = None, save_fig: bool = False, visualize: bool = True):
         eval_data_loader = torch.utils.data.DataLoader(
-            dataset[4000:4000+sample_size],
-            batch_size=sample_size,
-            shuffle=shuffle,
-            # num_workers=self.cfg.DATALOADER.NUM_WORKERS,
-            # pin_memory=True,
-            # persistent_workers=True,
-        )
-        eval_data_loader_shuffled = torch.utils.data.DataLoader(
             dataset,
             batch_size=sample_size,
-            shuffle=True,
+            shuffle=shuffle,
             # num_workers=self.cfg.DATALOADER.NUM_WORKERS,
             # pin_memory=True,
             # persistent_workers=True,
@@ -306,13 +298,14 @@ class DmorpModel:
                 pose9d_full = pose9d_f
             break
         for _, dt in enumerate(eval_data_loader):
-            target = dt["shifted"]["target"].to(self.device)
-            fixed = dt["shifted"]["fixed"].to(self.device)
-            pose9d = dt["shifted"]["9dpose"].to(self.device)
+            target = dt["shifted"]["target"].to(self.device).to(torch.float32)
+            fixed = dt["shifted"]["fixed"].to(self.device).to(torch.float32)
+            pose9d = dt["shifted"]["9dpose"].to(self.device).to(torch.float32)
             pose9d = pose9d.to(torch.float32)
             transform = dt["shifted"]["transform"].to(torch.float32)
             if consider_only_one_pair:
                 random_index = np.random.randint(0, pose9d.shape[0])
+                save_path = save_path + f"_r{random_index}"
                 pose9d_full = pose9d[random_index].unsqueeze(0).repeat(sample_size, 1).detach().cpu().numpy()
             B, _ = target.shape[0], 1
             # sample noise to add to actions
@@ -351,7 +344,7 @@ class DmorpModel:
                         visualize_pcd_with_open3d(target_random[i].detach().cpu().numpy(), fixed_random[i].detach().cpu().numpy(), pred_transform_matrix)
                     else:
                         visualize_pcd_with_open3d(target[i].detach().cpu().numpy(), fixed[i].detach().cpu().numpy(), pred_transform_matrix)
-            compare_distribution(pose9d_full, noise_sample.detach().cpu().numpy(), dim_start=0, dim_end=9, title="Pose")        
+            compare_distribution(pose9d_full, noise_sample.detach().cpu().numpy(), dim_start=0, dim_end=9, title="Pose", save_path=save_path+".png", save_fig=save_fig, visualize=visualize)        
             break
     def save(self, export_path):
         """Save model weights"""

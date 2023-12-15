@@ -19,7 +19,9 @@ import vil2.utils.misc_utils as utils
 from detectron2.config import LazyConfig
 from vil2.model.mlp.cond_unet_mlp import ConditionalUnetMLP
 from vil2.model.mlp.mlp import MLP
+from vil2.model.mlp.transformer import Transformer
 import vil2.utils.eval_utils as eval_utils
+from torch.utils.data.dataset import random_split
 
 if __name__ == "__main__":
     # Load config
@@ -27,14 +29,17 @@ if __name__ == "__main__":
     root_path = os.path.dirname((os.path.abspath(__file__)))
     cfg_file = os.path.join(root_path, "config", "dmorp_simplify.py")
     cfg = LazyConfig.load(cfg_file)
-    retrain = True
-    pcd_size = 4096
+    retrain = cfg.MODEL.RETRAIN
+    pcd_size = cfg.MODEL.PCD_SIZE
     # Load dataset & data loader
-    with open(os.path.join(root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}.pkl"), "rb") as f:
+    with open(os.path.join(root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"), "rb") as f:
         dtset = pickle.load(f)
     dataset = DiffDataset(dtset=dtset)
+    train_size = int(cfg.MODEL.TRAIN_TEST_SPLIT * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
     data_loader = torch.utils.data.DataLoader(
-        dataset,
+        train_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
         shuffle=True,
         # num_workers=cfg.DATALOADER.NUM_WORKERS,
@@ -81,25 +86,47 @@ if __name__ == "__main__":
         ),
         device="cuda"
     )
-
+    model_name = f"dmorp_model_rel_p{pcd_size}_l{cfg.MODEL.POSE_DIM}_d{cfg.MODEL.NUM_DIFFUSION_ITERS}.pt"
     save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints")
     os.makedirs(save_dir, exist_ok=True)
     if retrain:
         # dmorp_model.module.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
         best_model, best_epoch = dmorp_model.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
         # save the data
-        save_path = os.path.join(save_dir, f"dmorp_model_rel_{pcd_size}.pt")
+        save_path = os.path.join(save_dir, model_name)
         torch.save(best_model, save_path)
         print(f"Saving the best epoch:{best_epoch}. Model saved to {save_path}")
     else:
         # load the model
-        save_path = os.path.join(save_dir, f"dmorp_model_rel_{pcd_size}.pt")
+        save_path = os.path.join(save_dir, model_name)
         dmorp_model.nets.load_state_dict(torch.load(save_path))
         print(f"Model loaded from {save_path}")
 
     # Test inference
     # Load vocabulary
+    res_path = os.path.join(root_path, "test_data", task_name, "results")
+    os.makedirs(res_path, exist_ok=True)
     if not retrain:
-        dmorp_model.debug_inference(copy.deepcopy(dataset), sample_size=750, consider_only_one_pair=True, debug=False, shuffle=False)
+        save_path = os.path.join(res_path, f"vis_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}")
+        if cfg.MODEL.INFERENCE.CANONICALIZE:
+            dmorp_model.debug_inference(copy.deepcopy(train_dataset), 
+                                        sample_size=cfg.MODEL.INFERENCE.SAMPLE_SIZE,
+                                        consider_only_one_pair=cfg.MODEL.INFERENCE.CONSIDER_ONLY_ONE_PAIR, 
+                                        debug=cfg.MODEL.INFERENCE.VISUALIZE, 
+                                        shuffle=cfg.MODEL.INFERENCE.SHUFFLE,
+                                        save_path=save_path,
+                                        save_fig=cfg.MODEL.SAVE_FIG,
+                                        visualize=cfg.MODEL.VISUALIZE
+                                        )
+        else:
+            dmorp_model.debug_inference(copy.deepcopy(val_dataset), 
+                            sample_size=cfg.MODEL.INFERENCE.SAMPLE_SIZE,
+                            consider_only_one_pair=cfg.MODEL.INFERENCE.CONSIDER_ONLY_ONE_PAIR, 
+                            debug=cfg.MODEL.INFERENCE.VISUALIZE, 
+                            shuffle=cfg.MODEL.INFERENCE.SHUFFLE,
+                            save_path=save_path,
+                            save_fig=cfg.MODEL.SAVE_FIG,
+                            visualize=cfg.MODEL.VISUALIZE)
+
     pass
     

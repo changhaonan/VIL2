@@ -115,6 +115,140 @@ def sample_and_group(npoint, nsample, xyz, points):
     new_points = torch.cat([grouped_points_norm, new_points.view(B, S, 1, -1).repeat(1, 1, nsample, 1)], dim=-1)
     return new_xyz, new_points
 
+class PointTransformerEncoderLarge(nn.Module):
+    def __init__(self, output_dim=256, input_dim=6, mean_center=True):
+        super(PointTransformerEncoderLarge, self).__init__()
+
+        self.mean_center = mean_center
+
+        self.conv1 = nn.Conv1d(input_dim, 64, kernel_size=1, bias=False)
+        self.conv2 = nn.Conv1d(64, 64, kernel_size=1, bias=False)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.bn2 = nn.BatchNorm1d(64)
+        self.gather_local_0 = Local_op(in_channels=128, out_channels=128)
+        self.gather_local_1 = Local_op(in_channels=256, out_channels=256)
+        self.pt_last = StackedAttention(channels=256)
+
+        self.relu = nn.ReLU()
+        self.conv_fuse = nn.Sequential(nn.Conv1d(768, 1024, kernel_size=1, bias=False),
+                                       nn.BatchNorm1d(1024),
+                                       nn.LeakyReLU(negative_slope=0.2))
+
+        self.linear1 = nn.Linear(1024, 512, bias=False)
+        self.bn6 = nn.BatchNorm1d(512)
+        self.dp1 = nn.Dropout(p=0.5)
+        self.linear2 = nn.Linear(512, 256)
+
+    def forward(self, xyz, f):
+        # xyz: B, N, 3
+        # f: B, N, D
+        center = torch.mean(xyz, dim=1)
+        if self.mean_center:
+            xyz = xyz - center.view(-1, 1, 3).repeat(1, xyz.shape[1], 1)
+        x = self.pct(torch.cat([xyz, f], dim=2))  # B, output_dim
+
+        return center, x
+
+    def pct(self, x):
+
+        xyz = x[..., :3]
+        x = x.permute(0, 2, 1)
+        batch_size, _, _ = x.size()
+        x = self.relu(self.bn1(self.conv1(x)))  # B, D, N
+        x = self.relu(self.bn2(self.conv2(x)))  # B, D, N
+        x = x.permute(0, 2, 1)
+        new_xyz, new_feature = sample_and_group(npoint=512, nsample=32, xyz=xyz, points=x)
+        feature_0 = self.gather_local_0(new_feature)
+        feature = feature_0.permute(0, 2, 1)
+        new_xyz, new_feature = sample_and_group(npoint=256, nsample=32, xyz=new_xyz, points=feature)
+        feature_1 = self.gather_local_1(new_feature)
+
+        x = self.pt_last(feature_1)
+        x = torch.cat([x, feature_1], dim=1)
+        x = self.conv_fuse(x)
+        x = torch.max(x, 2)[0]
+        x = x.view(batch_size, -1)
+
+        x = self.relu(self.bn6(self.linear1(x)))
+        x = self.dp1(x)
+        x = self.linear2(x)
+
+        return x
+class Pooling(torch.nn.Module):
+	def __init__(self, pool_type='max'):
+		self.pool_type = pool_type
+		super(Pooling, self).__init__()
+
+	def forward(self, input):
+		if self.pool_type == 'max':
+			return torch.max(input, 2)[0].contiguous()
+		elif self.pool_type == 'avg' or self.pool_type == 'average':
+			return torch.mean(input, 2).contiguous()
+		elif self.pool_type == 'sum':
+			return torch.sum(input, 2).contiguous()
+class PointNet(torch.nn.Module):
+	def __init__(self, emb_dims=1024, input_shape="bnc", use_bn=False, global_feat=True):
+		# emb_dims:			Embedding Dimensions for PointNet.
+		# input_shape:		Shape of Input Point Cloud (b: batch, n: no of points, c: channels)
+		super(PointNet, self).__init__()
+		if input_shape not in ["bcn", "bnc"]:
+			raise ValueError("Allowed shapes are 'bcn' (batch * channels * num_in_points), 'bnc' ")
+		self.input_shape = input_shape
+		self.emb_dims = emb_dims
+		self.use_bn = use_bn
+		self.global_feat = global_feat
+		self.pooling = Pooling('max')
+
+		self.layers = self.create_structure()
+
+	def create_structure(self):
+		self.conv1 = torch.nn.Conv1d(3, 64, 1)
+		self.conv2 = torch.nn.Conv1d(64, 64, 1)
+		self.conv3 = torch.nn.Conv1d(64, 64, 1)
+		self.conv4 = torch.nn.Conv1d(64, 128, 1)
+		self.conv5 = torch.nn.Conv1d(128, self.emb_dims, 1)
+		self.relu = torch.nn.ReLU()
+
+		if self.use_bn:
+			self.bn1 = torch.nn.BatchNorm1d(64)
+			self.bn2 = torch.nn.BatchNorm1d(64)
+			self.bn3 = torch.nn.BatchNorm1d(64)
+			self.bn4 = torch.nn.BatchNorm1d(128)
+			self.bn5 = torch.nn.BatchNorm1d(self.emb_dims)
+
+		if self.use_bn:
+			layers = [self.conv1, self.bn1, self.relu,
+					  self.conv2, self.bn2, self.relu,
+					  self.conv3, self.bn3, self.relu,
+					  self.conv4, self.bn4, self.relu,
+					  self.conv5, self.bn5, self.relu]
+		else:
+			layers = [self.conv1, self.relu,
+					  self.conv2, self.relu, 
+					  self.conv3, self.relu,
+					  self.conv4, self.relu,
+					  self.conv5, self.relu]
+		return layers
+	def forward(self, input_data):
+		# input_data: 		Point Cloud having shape input_shape.
+		# output:			PointNet features (Batch x emb_dims)
+		if self.input_shape == "bnc":
+			num_points = input_data.shape[1]
+			center = torch.mean(input_data, dim=1)
+			input_data = input_data.permute(0, 2, 1)
+			
+		else:
+			num_points = input_data.shape[2]
+		if input_data.shape[1] != 3:
+			raise RuntimeError("shape of x must be of [Batch x 3 x NumInPoints]")
+
+		output = input_data
+		for idx, layer in enumerate(self.layers):
+			output = layer(output)
+		
+		if self.global_feat:
+		    return center, self.pooling(output)
+
 class PointTransformerEncoderSmall(nn.Module):
 
     def __init__(self, output_dim=256, input_dim=6, mean_center=True):

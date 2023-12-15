@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-from vil2.model.embeddings.pct import PointTransformerEncoderSmall, EncoderMLP, DropoutSampler
+from vil2.model.embeddings.pct import PointTransformerEncoderSmall, DropoutSampler, EncoderMLP, PointNet
 
 class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):
@@ -89,7 +89,7 @@ class ConditionalResidualBlock(nn.Module):
 class ConditionalUnetMLP(nn.Module):
     """Multi-layer perceptron model."""
 
-    def __init__(self, input_dim, global_cond_dim, diffusion_step_embed_dim: int = 8, down_dims=[256, 512, 1024]):
+    def __init__(self, input_dim, global_cond_dim, diffusion_step_embed_dim: int = 8, down_dims=[256, 512, 1024], pct_large=False):
         super().__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.input_dim = input_dim
@@ -161,11 +161,14 @@ class ConditionalUnetMLP(nn.Module):
         final_linear = nn.Sequential(
             nn.Linear(start_dim, 9),
         )
-
+        # if pct_large:
+        # self.pcd_encoder = PointTransformerEncoderLarge(output_dim=256, input_dim=6, mean_center=False)
+        # else:
         self.pcd_encoder = PointTransformerEncoderSmall(output_dim=256, input_dim=6, mean_center=False)
-        self.pcd_mlp_encoder = EncoderMLP(256, input_dim, uses_pt=True)
+        # self.pcd_encoder = PointNet(emb_dims=256)
+        self.pcd_mlp_encoder = EncoderMLP(256, global_cond_dim, uses_pt=True)
         self.pose_encoder = nn.Sequential(nn.Linear(9, input_dim))
-        # self.obj_head = DropoutSampler(10, 9, dropout_rate=0.0)
+        self.obj_head = DropoutSampler(start_dim, 9, dropout_rate=0.0)
 
         self.diffusion_step_encoder = diffusion_step_encoder
         self.up_modules = up_modules
@@ -189,6 +192,8 @@ class ConditionalUnetMLP(nn.Module):
         if global_cond1 is not None:
             center1, enc_pcd1 = self.pcd_encoder(global_cond1[:, :, :3], global_cond1[:, :, 3:])
             center2, enc_pcd2 = self.pcd_encoder(global_cond2[:, :, :3], global_cond2[:, :, 3:])
+            # center1, enc_pcd1 = self.pcd_encoder(global_cond1[:, :, :3])
+            # center2, enc_pcd2 = self.pcd_encoder(global_cond2[:, :, :3])
             enc_pcd1 = self.pcd_mlp_encoder(enc_pcd1, center1)
             enc_pcd2 = self.pcd_mlp_encoder(enc_pcd2, center2)
             global_feature = torch.cat([enc_pcd1, enc_pcd2, global_feature], dim=-1)
@@ -210,6 +215,7 @@ class ConditionalUnetMLP(nn.Module):
             x = resnet2(x, global_feature)
             # x = upsample(x)
 
-        x = self.final_liner(x)
-        # x = self.obj_head(x)
+        # x = self.final_liner(x)
+        # x = nn.Linear(x.shape[1], 9)(x)
+        x = self.obj_head(x)
         return x

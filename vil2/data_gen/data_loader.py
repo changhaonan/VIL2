@@ -8,6 +8,36 @@ import torch
 import pickle 
 from tqdm import tqdm
 import copy 
+from detectron2.config import LazyConfig
+
+
+def farthest_point_sampling_with_color(pcd, n_points):
+    """ Perform Farthest Point Sampling on a point cloud with color information.
+
+    :param pcd: numpy array of shape (N, 6), where N is the number of points in the point cloud.
+                The first three columns are spatial coordinates and the last three are color information.
+    :param n_points: number of points to sample.
+    :return: sampled point cloud of shape (n_points, 6).
+    """
+    # Initialize an array to keep track of the farthest points with color
+    farthest_points = np.zeros((n_points, 6))
+    # Initialize a set of all indices in the point cloud
+    all_indices = set(range(len(pcd)))
+    # Randomly choose the first point
+    first_index = np.random.randint(len(pcd))
+    farthest_points[0] = pcd[first_index]
+    all_indices.remove(first_index)
+
+    for i in range(1, n_points):
+        # Compute distances from the last added point to all remaining points (consider only spatial coordinates)
+        distances = np.linalg.norm(pcd[list(all_indices), :3] - farthest_points[i - 1, :3], axis=1)
+        # Find the farthest point
+        farthest_index = np.argmax(distances)
+        # Update the set of farthest points and remaining indices
+        farthest_points[i] = pcd[list(all_indices)[farthest_index]]
+        all_indices.remove(list(all_indices)[farthest_index])
+
+    return farthest_points
 
 def read_hdf5(file_name):
     """Read HDF5 file and return data."""
@@ -67,14 +97,18 @@ def perform_gram_schmidt_transform(trans_matrix):
 
 if __name__ == "__main__":
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    scene_info_path = os.path.join(root_dir, "test_data", "dmorp_augmented", "000000")
-    camera_info_path = os.path.join(root_dir, "test_data", "Dmorp", "000000")
+    cfg_file = os.path.join(root_dir, "config", "dmorp_simplify.py")
+    cfg = LazyConfig.load(cfg_file)
+    scene_info_path = os.path.join(root_dir, "test_data", "dmorp_augmented", f"000000-{cfg.MODEL.DATASET_CONFIG}")
+    camera_info_path = os.path.join(root_dir, "test_data", "Dmorp", f"000000-{cfg.MODEL.DATASET_CONFIG}")
     with open(os.path.join(scene_info_path, "scene_info.json"), "r") as f:
         scene_info = json.load(f)
 
-    num_init_scenes = 25
-    num_cameras = 400
-    pcd_size = 4096
+
+
+    num_init_scenes = 250
+    num_cameras = 40
+    pcd_size = cfg.MODEL.PCD_SIZE
 
     dtset = []
     points_target = []
@@ -97,8 +131,7 @@ if __name__ == "__main__":
             
             target_pcd = target_pcd[target_pcd[:, 0] != 0.0, :]
             if target_pcd.shape[0] >= pcd_size:
-                idx = np.random.randint(0, target_pcd.shape[0], pcd_size)
-                target_pcd = target_pcd[idx]
+                target_pcd = farthest_point_sampling_with_color(target_pcd, pcd_size)
                 assert target_pcd.shape[0] == pcd_size
                 points_target.append(target_pcd.shape[0])
                 fixed_depth = fixed_depth.astype(np.float32)
@@ -107,10 +140,8 @@ if __name__ == "__main__":
                 fixed_pcd = utils.get_pointcloud(fixed_color, fixed_depth, intrinsic)
                 fixed_pcd = fixed_pcd[fixed_pcd[:, 0] != 0.0, :]
                 if fixed_pcd.shape[0] >= pcd_size:
-                    idx2 = np.random.randint(0, fixed_pcd.shape[0], pcd_size)
-                    fixed_pcd = fixed_pcd[idx2]
+                    fixed_pcd = farthest_point_sampling_with_color(fixed_pcd, pcd_size)
                     assert fixed_pcd.shape[0] == pcd_size
-
                     points_fixed.append(fixed_pcd.shape[0])
             
                     camera_pose_inv = np.linalg.inv(np.array(camera_pose_json["cam2world"][j]))
@@ -146,17 +177,19 @@ if __name__ == "__main__":
                                 "fixed" : fixed_pcd,
                                 "transform": target_transform_camera,
                                 "9dpose": perform_gram_schmidt_transform(target_transform_camera),
+                                "cam_pose" : camera_pose,
                             },
                             "shifted" : {
                                 "target" : target_pcd_shifted,
                                 "fixed" : fixed_pcd_shifted,
                                 "transform": target_transform_camera_shifted,
                                 "9dpose": perform_gram_schmidt_transform(target_transform_camera_shifted),
+                                "cam_pose" : camera_pose,
                             }
                         }
                     )
 
     print("Len of dtset:", len(dtset))
     # Save the dtset into a .pkl file 
-    with open(os.path.join(root_dir, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}.pkl"), "wb") as f:
+    with open(os.path.join(root_dir, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"), "wb") as f:
         pickle.dump(dtset, f)

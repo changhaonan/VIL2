@@ -51,7 +51,7 @@ def draw_pose_distribution(
     plt.show()
 
 
-def compare_distribution(data_0, data_1=None, dim_start: int = 0, dim_end: int = 1, title: str = None, plot_type: str = "histogram"):
+def compare_distribution(data_0, data_1=None, dim_start: int = 0, dim_end: int = 1, title: str = None, plot_type: str = "histogram", save_path: str = None, save_fig: bool = False, visualize: bool = True):
     """Compare two distribution: data_0 and data_1; Compare the first num_dim dimensions
     We draw them using histogram
     """
@@ -86,4 +86,7 @@ def compare_distribution(data_0, data_1=None, dim_start: int = 0, dim_end: int =
             ax.legend(loc="upper right")
         else:
             raise NotImplementedError
-    plt.show()
+    if save_fig:
+        plt.savefig(save_path)
+    if visualize:
+        plt.show()
