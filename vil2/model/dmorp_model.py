@@ -274,7 +274,11 @@ class DmorpModel:
                 plt.plot(loss_wrt_timestep)
                 plt.show()
 
-    def debug_inference(self, dataset, sample_size: int = 750, consider_only_one_pair: bool = False, debug: bool = False, shuffle: bool = False, save_path: str = None, save_fig: bool = False, visualize: bool = True):
+    def debug_inference(self, dataset, sample_size: int = 750, consider_only_one_pair: bool = False, debug: bool = False, shuffle: bool = False, save_path: str = None, save_fig: bool = False, visualize: bool = True, random_index: int = None):
+        if sample_size == -1:
+            sample_size = len(dataset)
+        if consider_only_one_pair:
+            sample_size = 300
         eval_data_loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=sample_size,
@@ -286,7 +290,7 @@ class DmorpModel:
         full_data_loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=len(dataset),
-            shuffle=True,
+            shuffle=shuffle,
             # num_workers=self.cfg.DATALOADER.NUM_WORKERS,
             # pin_memory=True,
             # persistent_workers=True,
@@ -304,7 +308,10 @@ class DmorpModel:
             pose9d = pose9d.to(torch.float32)
             transform = dt["shifted"]["transform"].to(torch.float32)
             if consider_only_one_pair:
-                random_index = np.random.randint(0, pose9d.shape[0])
+                if random_index is not None and random_index == 0:
+                    random_index = np.random.randint(0, pose9d.shape[0])
+                # random_index = 1374
+                print(f"Random index: {random_index}")
                 save_path = save_path + f"_r{random_index}"
                 pose9d_full = pose9d[random_index].unsqueeze(0).repeat(sample_size, 1).detach().cpu().numpy()
             B, _ = target.shape[0], 1
@@ -325,25 +332,27 @@ class DmorpModel:
                         residual = self.nets.noise_pred_net(noise_sample, t, target, fixed)
                     noise_sample = self.noise_scheduler.step(residual, t[0], noise_sample).prev_sample
             
-            for i, pred_transform9d in enumerate(noise_sample):
+            # for i, pred_transform9d in enumerate(noise_sample):
                 # pred_transform9d = torch.clamp(pred_transform9d, min=-1.0, max=1.0)
-                pred_transform9d = pred_transform9d.detach().cpu().numpy()
-                trans = pred_transform9d[:3].T
-                v1 = pred_transform9d[3:6].T
-                v2 = pred_transform9d[6:].T
-                v1 = v1 / np.linalg.norm(v1)
-                v2_orthogonal = v2 - np.dot(v2, v1) * v1
-                v2 = v2_orthogonal / np.linalg.norm(v2_orthogonal)
-                v3 = np.cross(v1, v2)
-                rotation = np.column_stack((v1, v2, v3))
-                pred_transform_matrix = np.eye(4)
-                pred_transform_matrix[:3, :3] = rotation
-                pred_transform_matrix[:3, 3] = trans 
-                if debug:
-                    if consider_only_one_pair:
-                        visualize_pcd_with_open3d(target_random[i].detach().cpu().numpy(), fixed_random[i].detach().cpu().numpy(), pred_transform_matrix)
-                    else:
-                        visualize_pcd_with_open3d(target[i].detach().cpu().numpy(), fixed[i].detach().cpu().numpy(), pred_transform_matrix)
+            pred_transform9d = np.mean(noise_sample.detach().cpu().numpy(), axis=0)
+            trans = pred_transform9d[:3].T
+            v1 = pred_transform9d[3:6].T
+            v2 = pred_transform9d[6:].T
+            v1 = v1 / np.linalg.norm(v1)
+            v2_orthogonal = v2 - np.dot(v2, v1) * v1
+            v2 = v2_orthogonal / np.linalg.norm(v2_orthogonal)
+            v3 = np.cross(v1, v2)
+            rotation = np.column_stack((v1, v2, v3))
+            pred_transform_matrix = np.eye(4)
+            pred_transform_matrix[:3, :3] = rotation
+            pred_transform_matrix[:3, 3] = trans 
+
+            if debug:
+                if consider_only_one_pair:
+                    visualize_pcd_with_open3d(target_random[random_index].detach().cpu().numpy(), fixed_random[random_index].detach().cpu().numpy(), pred_transform_matrix)
+                    pass
+                # else:
+                #     visualize_pcd_with_open3d(target[0].detach().cpu().numpy(), fixed[0].detach().cpu().numpy(), pred_transform_matrix)
             compare_distribution(pose9d_full, noise_sample.detach().cpu().numpy(), dim_start=0, dim_end=9, title="Pose", save_path=save_path+".png", save_fig=save_fig, visualize=visualize)        
             break
     def save(self, export_path):

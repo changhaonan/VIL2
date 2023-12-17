@@ -24,6 +24,10 @@ import vil2.utils.eval_utils as eval_utils
 from torch.utils.data.dataset import random_split
 
 if __name__ == "__main__":
+    # Parse arguments
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("--random_index", type=int, default=0)
+    args = argparser.parse_args()
     # Load config
     task_name = "Dmorp"
     root_path = os.path.dirname((os.path.abspath(__file__)))
@@ -37,7 +41,19 @@ if __name__ == "__main__":
     dataset = DiffDataset(dtset=dtset)
     train_size = int(cfg.MODEL.TRAIN_TEST_SPLIT * len(dataset))
     val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    if os.path.exists(os.path.join(root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_train.pkl")):
+        print("Loading cached dataset....")
+        with open(os.path.join(root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_train.pkl"), "rb") as f:
+            train_dataset = pickle.load(f)
+        with open(os.path.join(root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_val.pkl"), "rb") as f:
+            val_dataset = pickle.load(f)
+    else:
+        print("Caching dataset....")
+        train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+        with open(os.path.join(root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_train.pkl"), "wb") as f:
+            pickle.dump(train_dataset, f)
+        with open(os.path.join(root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_val.pkl"), "wb") as f:
+            pickle.dump(val_dataset, f)
     data_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
@@ -86,7 +102,7 @@ if __name__ == "__main__":
         ),
         device="cuda"
     )
-    model_name = f"dmorp_model_rel_p{pcd_size}_l{cfg.MODEL.POSE_DIM}_d{cfg.MODEL.NUM_DIFFUSION_ITERS}.pt"
+    model_name = f"dmorp_model_rel_n{cfg.MODEL.NOISE_NET.NAME}_p{pcd_size}_l{cfg.MODEL.POSE_DIM}_d{cfg.MODEL.NUM_DIFFUSION_ITERS}_e{cfg.TRAIN.NUM_EPOCHS}_b{cfg.DATALOADER.BATCH_SIZE}.pt"
     save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints")
     os.makedirs(save_dir, exist_ok=True)
     if retrain:
@@ -107,7 +123,7 @@ if __name__ == "__main__":
     res_path = os.path.join(root_path, "test_data", task_name, "results")
     os.makedirs(res_path, exist_ok=True)
     if not retrain:
-        save_path = os.path.join(res_path, f"vis_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}")
+        save_path = os.path.join(res_path, f"vis_n{cfg.MODEL.NOISE_NET.NAME}_p{pcd_size}_l{cfg.MODEL.POSE_DIM}_d{cfg.MODEL.NUM_DIFFUSION_ITERS}_e{cfg.TRAIN.NUM_EPOCHS}_b{cfg.DATALOADER.BATCH_SIZE}_ca{cfg.MODEL.INFERENCE.CANONICALIZE}")
         if cfg.MODEL.INFERENCE.CANONICALIZE:
             dmorp_model.debug_inference(copy.deepcopy(train_dataset), 
                                         sample_size=cfg.MODEL.INFERENCE.SAMPLE_SIZE,
@@ -116,7 +132,8 @@ if __name__ == "__main__":
                                         shuffle=cfg.MODEL.INFERENCE.SHUFFLE,
                                         save_path=save_path,
                                         save_fig=cfg.MODEL.SAVE_FIG,
-                                        visualize=cfg.MODEL.VISUALIZE
+                                        visualize=cfg.MODEL.VISUALIZE,
+                                        random_index=args.random_index
                                         )
         else:
             dmorp_model.debug_inference(copy.deepcopy(val_dataset), 
@@ -126,7 +143,9 @@ if __name__ == "__main__":
                             shuffle=cfg.MODEL.INFERENCE.SHUFFLE,
                             save_path=save_path,
                             save_fig=cfg.MODEL.SAVE_FIG,
-                            visualize=cfg.MODEL.VISUALIZE)
+                            visualize=cfg.MODEL.VISUALIZE,
+                            random_index=args.random_index
+                            )
 
     pass
     

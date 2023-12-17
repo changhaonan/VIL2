@@ -26,3 +26,4 @@ vil2/dummy.py
 
 *.exr
 vil2/data_gen/examples/*
+run.sh

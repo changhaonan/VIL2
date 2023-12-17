@@ -12,33 +12,31 @@ from detectron2.config import LazyConfig
 
 
 def farthest_point_sampling_with_color(pcd, n_points):
-    """ Perform Farthest Point Sampling on a point cloud with color information.
+    """
+    Perform Farthest Point Sampling on a point cloud with color information.
 
     :param pcd: numpy array of shape (N, 6), where N is the number of points in the point cloud.
                 The first three columns are spatial coordinates and the last three are color information.
     :param n_points: number of points to sample.
     :return: sampled point cloud of shape (n_points, 6).
     """
-    # Initialize an array to keep track of the farthest points with color
     farthest_points = np.zeros((n_points, 6))
-    # Initialize a set of all indices in the point cloud
-    all_indices = set(range(len(pcd)))
-    # Randomly choose the first point
+    # Initialize an array to store the shortest distance of each point to any selected point
+    shortest_distances = np.full(len(pcd), np.inf)
+    # Randomly choose the first point and update the distances
     first_index = np.random.randint(len(pcd))
     farthest_points[0] = pcd[first_index]
-    all_indices.remove(first_index)
+    shortest_distances = np.linalg.norm(pcd[:, :3] - farthest_points[0, :3], axis=1)
 
     for i in range(1, n_points):
-        # Compute distances from the last added point to all remaining points (consider only spatial coordinates)
-        distances = np.linalg.norm(pcd[list(all_indices), :3] - farthest_points[i - 1, :3], axis=1)
-        # Find the farthest point
-        farthest_index = np.argmax(distances)
-        # Update the set of farthest points and remaining indices
-        farthest_points[i] = pcd[list(all_indices)[farthest_index]]
-        all_indices.remove(list(all_indices)[farthest_index])
+        # Select the point that is farthest to any point in the farthest_points set
+        farthest_index = np.argmax(shortest_distances)
+        farthest_points[i] = pcd[farthest_index]
+        # Update shortest_distances array
+        distances_to_new_point = np.linalg.norm(pcd[:, :3] - farthest_points[i, :3], axis=1)
+        shortest_distances = np.minimum(shortest_distances, distances_to_new_point)
 
     return farthest_points
-
 def read_hdf5(file_name):
     """Read HDF5 file and return data."""
     with h5py.File(file_name, 'r') as file:
@@ -86,6 +84,7 @@ class DiffDataset(torch.utils.data.Dataset):
         return self.dtset[idx]
 
 def perform_gram_schmidt_transform(trans_matrix):
+    trans_matrix = copy.deepcopy(trans_matrix)
     translation = trans_matrix[:3, 3]
     rotation = trans_matrix[:3, :3]
     v1 = rotation[:, 0]
@@ -93,7 +92,7 @@ def perform_gram_schmidt_transform(trans_matrix):
     v2 = rotation[:, 1]
     v2_orthogonal = v2 - np.dot(v2, v1_normalized) * v1_normalized
     v2_normalized = v2_orthogonal / np.linalg.norm(v2_orthogonal)
-    return np.concatenate((translation, v1_normalized, v2_normalized))
+    return copy.deepcopy(np.concatenate((translation, v1_normalized, v2_normalized)))
 
 if __name__ == "__main__":
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -106,8 +105,8 @@ if __name__ == "__main__":
 
 
 
-    num_init_scenes = 250
-    num_cameras = 40
+    num_init_scenes = 500
+    num_cameras = 20
     pcd_size = cfg.MODEL.PCD_SIZE
 
     dtset = []
@@ -169,7 +168,7 @@ if __name__ == "__main__":
                     centroid_shift_transform = np.eye(4)
                     centroid_shift_transform[:3, 3] = -fixed_centroid[:3]
                     target_transform_camera_shifted = centroid_shift_transform @ target_transform_camera @ np.linalg.inv(centroid_shift_transform)
-                    # visualize_pcd_with_open3d(target_pcd_shifted, fixed_pcd_shifted, target_transform_camera_shifted)
+                    visualize_pcd_with_open3d(target_pcd_shifted, fixed_pcd_shifted, target_transform_camera_shifted)
                     dtset.append(
                         {
                             "original": {

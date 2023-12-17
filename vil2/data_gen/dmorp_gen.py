@@ -139,5 +139,5 @@ if __name__ == "__main__":
 
     export_dir = os.path.join(root_path, "test_data", "dmorp_augmented")
     augmentor.augment(data_id, num_samples, export_dir, random_region=random_region, fix_anchor=fix_anchor)
-    for i in range(10):
+    for i in range(3):
         augmentor.visualize(0, export_dir, sample_idx=i)
