@@ -1,5 +1,16 @@
 # VIL2
 
+## DMorp
+
+### Progress
+
+- [x] Fit two objects data.
+- [ ] Fit multi-object data, up to 5.
+- [ ] Fit to multi-modality data.
+- [ ] Combine with MCTS sampler.
+- [ ] Connect with real-data pipeline.
+
+
 ## Notice
 
 ```
