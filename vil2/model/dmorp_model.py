@@ -355,6 +355,7 @@ class DmorpModel:
                 #     visualize_pcd_with_open3d(target[0].detach().cpu().numpy(), fixed[0].detach().cpu().numpy(), pred_transform_matrix)
             compare_distribution(pose9d_full, noise_sample.detach().cpu().numpy(), dim_start=0, dim_end=9, title="Pose", save_path=save_path+".png", save_fig=save_fig, visualize=visualize)        
             break
+        
     def save(self, export_path):
         """Save model weights"""
         torch.save(self.nets.state_dict(), export_path)

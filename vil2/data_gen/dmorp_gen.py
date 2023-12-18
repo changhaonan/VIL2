@@ -30,10 +30,10 @@ class DmorpSceneAugmentor:
         """
         scene_info = {}
         scene_info["random_region"] = random_region
-        scene_info["mesh_1"] = self.mesh_1_list[data_idx]
-        scene_info["mesh_2"] = self.mesh_2_list[data_idx]
-        scene_info["pose_1"] = self.pose_1_list[data_idx].tolist()
-        scene_info["pose_2"] = self.pose_2_list[data_idx].tolist()
+        scene_info["mesh_1"] = self.mesh_1_list[0]
+        scene_info["mesh_2"] = self.mesh_2_list[0]
+        scene_info["pose_1"] = self.pose_1_list[0].tolist()
+        scene_info["pose_2"] = self.pose_2_list[0].tolist()
         # Compute relative pose
         pose_1 = np.array(scene_info["pose_1"])
         pose_2 = np.array(scene_info["pose_2"])
@@ -112,7 +112,7 @@ class DmorpSceneAugmentor:
 if __name__ == "__main__":
     # Parse arguments
     argparser = argparse.ArgumentParser()
-    argparser.add_argument("--data_id", type=int, default=0)
+    argparser.add_argument("--data_id", type=int, default=1)
     argparser.add_argument("--num_samples", type=int, default=2)
     argparser.add_argument("--target_object", type=str, default="tea_pot")
     argparser.add_argument("--anchor_object", type=str, default="tea_mug")
