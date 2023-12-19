@@ -23,6 +23,7 @@ from vil2.model.mlp.transformer import Transformer
 import vil2.utils.eval_utils as eval_utils
 from torch.utils.data.dataset import random_split
 
+
 if __name__ == "__main__":
     # Parse arguments
     argparser = argparse.ArgumentParser()

@@ -16,3 +16,9 @@ During this process, we generated a series of random poses. It creates a series 
 ```bash
 blenderproc run render_object.py --num_cam_poses 4
 ```
+
+### Step 3: Generate Diffusion Dataset
+
+```bash
+python data_loader.py
+```

@@ -1,13 +1,13 @@
-import json 
-import os 
+import json
+import os
 import numpy as np
 import h5py
 import open3d as o3d
 import vil2.utils.misc_utils as utils
-import torch 
-import pickle 
+import torch
+import pickle
 from tqdm import tqdm
-import copy 
+import copy
 from detectron2.config import LazyConfig
 
 
@@ -37,12 +37,17 @@ def farthest_point_sampling_with_color(pcd, n_points):
         shortest_distances = np.minimum(shortest_distances, distances_to_new_point)
 
     return farthest_points
+
+
 def read_hdf5(file_name):
     """Read HDF5 file and return data."""
-    with h5py.File(file_name, 'r') as file:
-        return np.array(file['colors']), np.array(file['depth'])
+    with h5py.File(file_name, "r") as file:
+        return np.array(file["colors"]), np.array(file["depth"])
 
-def visualize_pcd_with_open3d(pcd_with_color1, pcd_with_color2, transform1: np.ndarray = None, shift_transform: np.ndarray = None):
+
+def visualize_pcd_with_open3d(
+    pcd_with_color1, pcd_with_color2, transform1: np.ndarray = None, shift_transform: np.ndarray = None
+):
     # Create an Open3D point cloud object
     pcd1 = o3d.geometry.PointCloud()
 
@@ -52,7 +57,6 @@ def visualize_pcd_with_open3d(pcd_with_color1, pcd_with_color2, transform1: np.n
     # Assuming the colors are in the range [0, 255], normalize them to [0, 1]
     pcd1.colors = o3d.utility.Vector3dVector(pcd_with_color1[:, 3:] / 255.0)
 
-    
     # Create an Open3D point cloud object
     pcd2 = o3d.geometry.PointCloud()
 
@@ -72,16 +76,17 @@ def visualize_pcd_with_open3d(pcd_with_color1, pcd_with_color2, transform1: np.n
     # Visualize the point cloud
     o3d.visualization.draw_geometries([pcd1, pcd2])
 
-class DiffDataset(torch.utils.data.Dataset):
 
+class DiffDataset(torch.utils.data.Dataset):
     def __init__(self, dtset: dict):
-        self.dtset = dtset 
-    
+        self.dtset = dtset
+
     def __len__(self):
         return len(self.dtset)
 
     def __getitem__(self, idx):
         return self.dtset[idx]
+
 
 def perform_gram_schmidt_transform(trans_matrix):
     trans_matrix = copy.deepcopy(trans_matrix)
@@ -94,6 +99,7 @@ def perform_gram_schmidt_transform(trans_matrix):
     v2_normalized = v2_orthogonal / np.linalg.norm(v2_orthogonal)
     return copy.deepcopy(np.concatenate((translation, v1_normalized, v2_normalized)))
 
+
 if __name__ == "__main__":
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cfg_file = os.path.join(root_dir, "config", "dmorp_simplify.py")
@@ -102,8 +108,6 @@ if __name__ == "__main__":
     camera_info_path = os.path.join(root_dir, "test_data", "Dmorp", f"000000-{cfg.MODEL.DATASET_CONFIG}")
     with open(os.path.join(scene_info_path, "scene_info.json"), "r") as f:
         scene_info = json.load(f)
-
-
 
     num_init_scenes = 500
     num_cameras = 20
@@ -115,19 +119,25 @@ if __name__ == "__main__":
     for i in tqdm(range(num_init_scenes), desc="Processing scenes"):
         h5file_dir = os.path.join(camera_info_path, f"{i:06d}")
         intrinsic_json = json.load(open(os.path.join(h5file_dir, "camera.json"), "r"))
-        intrinsic = np.array([[-intrinsic_json["fx"], 0.0, intrinsic_json["cx"]], [0.0, intrinsic_json["fy"], intrinsic_json["cy"]], [0.0, 0.0, 1.0]])
-        camera_pose_json = json.load(open(os.path.join(h5file_dir, "poses.json"), "r"))    
+        intrinsic = np.array(
+            [
+                [-intrinsic_json["fx"], 0.0, intrinsic_json["cx"]],
+                [0.0, intrinsic_json["fy"], intrinsic_json["cy"]],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        camera_pose_json = json.load(open(os.path.join(h5file_dir, "poses.json"), "r"))
         target_transform_world = np.array(scene_info["transform_list"][i])
         initial_pose_A_world = np.array(scene_info["init_pose_1_list"][i])
         for j in tqdm(range(num_cameras), desc=f"Processing cameras for scene {i}", leave=False):
             target_color, target_depth = read_hdf5(os.path.join(h5file_dir, f"{j}.hdf5"))
             fixed_color, fixed_depth = read_hdf5(os.path.join(h5file_dir, f"{j + num_cameras}.hdf5"))
-            
+
             target_depth = target_depth.astype(np.float32)
             target_depth[target_depth > 1000.0] = 0.0
             target_depth = -target_depth
             target_pcd = utils.get_pointcloud(target_color, target_depth, intrinsic)
-            
+
             target_pcd = target_pcd[target_pcd[:, 0] != 0.0, :]
             if target_pcd.shape[0] >= pcd_size:
                 target_pcd = farthest_point_sampling_with_color(target_pcd, pcd_size)
@@ -142,10 +152,10 @@ if __name__ == "__main__":
                     fixed_pcd = farthest_point_sampling_with_color(fixed_pcd, pcd_size)
                     assert fixed_pcd.shape[0] == pcd_size
                     points_fixed.append(fixed_pcd.shape[0])
-            
+
                     camera_pose_inv = np.linalg.inv(np.array(camera_pose_json["cam2world"][j]))
                     camera_pose = np.array(camera_pose_json["cam2world"][j])
-                    
+
                     # Calculate centroid for fixed_pcd
                     fixed_centroid = np.mean(fixed_pcd, axis=0)
 
@@ -167,28 +177,35 @@ if __name__ == "__main__":
 
                     centroid_shift_transform = np.eye(4)
                     centroid_shift_transform[:3, 3] = -fixed_centroid[:3]
-                    target_transform_camera_shifted = centroid_shift_transform @ target_transform_camera @ np.linalg.inv(centroid_shift_transform)
+                    target_transform_camera_shifted = (
+                        centroid_shift_transform @ target_transform_camera @ np.linalg.inv(centroid_shift_transform)
+                    )
                     visualize_pcd_with_open3d(target_pcd_shifted, fixed_pcd_shifted, target_transform_camera_shifted)
                     dtset.append(
                         {
                             "original": {
-                                "target" : target_pcd,
-                                "fixed" : fixed_pcd,
+                                "target": target_pcd,
+                                "fixed": fixed_pcd,
                                 "transform": target_transform_camera,
                                 "9dpose": perform_gram_schmidt_transform(target_transform_camera),
-                                "cam_pose" : camera_pose,
+                                "cam_pose": camera_pose,
                             },
-                            "shifted" : {
-                                "target" : target_pcd_shifted,
-                                "fixed" : fixed_pcd_shifted,
+                            "shifted": {
+                                "target": target_pcd_shifted,
+                                "fixed": fixed_pcd_shifted,
                                 "transform": target_transform_camera_shifted,
                                 "9dpose": perform_gram_schmidt_transform(target_transform_camera_shifted),
-                                "cam_pose" : camera_pose,
-                            }
+                                "cam_pose": camera_pose,
+                            },
                         }
                     )
 
     print("Len of dtset:", len(dtset))
-    # Save the dtset into a .pkl file 
-    with open(os.path.join(root_dir, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"), "wb") as f:
+    # Save the dtset into a .pkl file
+    with open(
+        os.path.join(
+            root_dir, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"
+        ),
+        "wb",
+    ) as f:
         pickle.dump(dtset, f)
