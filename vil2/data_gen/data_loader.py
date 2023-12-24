@@ -1,13 +1,13 @@
-import json 
-import os 
+import json
+import os
 import numpy as np
 import h5py
 import open3d as o3d
 import vil2.utils.misc_utils as utils
-import torch 
-import pickle 
+import torch
+import pickle
 from tqdm import tqdm
-import copy 
+import copy
 from detectron2.config import LazyConfig
 
 
@@ -37,12 +37,17 @@ def farthest_point_sampling_with_color(pcd, n_points):
         shortest_distances = np.minimum(shortest_distances, distances_to_new_point)
 
     return farthest_points
+
+
 def read_hdf5(file_name):
     """Read HDF5 file and return data."""
-    with h5py.File(file_name, 'r') as file:
-        return np.array(file['colors']), np.array(file['depth'])
+    with h5py.File(file_name, "r") as file:
+        return np.array(file["colors"]), np.array(file["depth"])
 
-def visualize_pcd_with_open3d(pcd_with_color1, pcd_with_color2, transform1: np.ndarray = None, shift_transform: np.ndarray = None):
+
+def visualize_pcd_with_open3d(
+    pcd_with_color1, pcd_with_color2, transform1: np.ndarray = None, shift_transform: np.ndarray = None
+):
     # Create an Open3D point cloud object
     pcd1 = o3d.geometry.PointCloud()
 
@@ -52,7 +57,6 @@ def visualize_pcd_with_open3d(pcd_with_color1, pcd_with_color2, transform1: np.n
     # Assuming the colors are in the range [0, 255], normalize them to [0, 1]
     pcd1.colors = o3d.utility.Vector3dVector(pcd_with_color1[:, 3:] / 255.0)
 
-    
     # Create an Open3D point cloud object
     pcd2 = o3d.geometry.PointCloud()
 
@@ -72,16 +76,17 @@ def visualize_pcd_with_open3d(pcd_with_color1, pcd_with_color2, transform1: np.n
     # Visualize the point cloud
     o3d.visualization.draw_geometries([pcd1, pcd2])
 
-class DiffDataset(torch.utils.data.Dataset):
 
+class DiffDataset(torch.utils.data.Dataset):
     def __init__(self, dtset: dict):
-        self.dtset = dtset 
-    
+        self.dtset = dtset
+
     def __len__(self):
         return len(self.dtset)
 
     def __getitem__(self, idx):
         return self.dtset[idx]
+
 
 def perform_gram_schmidt_transform(trans_matrix):
     trans_matrix = copy.deepcopy(trans_matrix)
@@ -93,6 +98,7 @@ def perform_gram_schmidt_transform(trans_matrix):
     v2_orthogonal = v2 - np.dot(v2, v1_normalized) * v1_normalized
     v2_normalized = v2_orthogonal / np.linalg.norm(v2_orthogonal)
     return copy.deepcopy(np.concatenate((translation, v1_normalized, v2_normalized)))
+
 
 if __name__ == "__main__":
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

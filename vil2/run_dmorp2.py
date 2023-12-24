@@ -10,6 +10,7 @@ from vil2.model.net_factory import build_noise_pred_net
 from detectron2.config import LazyConfig
 from torch.utils.data.dataset import random_split
 
+
 if __name__ == "__main__":
     # Parse arguments
     argparser = argparse.ArgumentParser()
