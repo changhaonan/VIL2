@@ -26,7 +26,8 @@
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/vil2/data_gen/dmorp_gen.py",
-            "args": ["--fix_anchor", "--data_id=1", "--target_object=spoon", "--anchor_object=tea_pot"],
+            "args": ["--fix_anchor", "--data_id=1", "--target_object=spoon", "--anchor_object=tea_pot", "--num_samples=300"],
+            // "args" : ["--fix_anchor", "--data_id=0", "--target_object=tea_pot", "--anchor_object=tea_mug", "--num_samples=300"],
             "cwd": "${workspaceFolder}/vil2/data_gen",
             "console": "integratedTerminal",
             "justMyCode": false

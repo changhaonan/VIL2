@@ -3,24 +3,11 @@ import os
 import torch
 import pickle
 import argparse
-import json
-import random
-import numpy as np
 import copy
-import collections
-from tqdm.auto import tqdm
-from vil2.env import env_builder
-from torch import nn
-from vil2.data_gen.data_loader import DiffDataset, visualize_pcd_with_open3d
-from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+from vil2.data_gen.data_loader import DiffDataset
 from vil2.model.dmorp_model import DmorpModel
-from vil2.model.net_factory import build_vision_encoder, build_noise_pred_net
-import vil2.utils.misc_utils as utils
+from vil2.model.net_factory import build_noise_pred_net
 from detectron2.config import LazyConfig
-from vil2.model.mlp.cond_unet_mlp import ConditionalUnetMLP
-from vil2.model.mlp.mlp import MLP
-from vil2.model.mlp.transformer import Transformer
-import vil2.utils.eval_utils as eval_utils
 from torch.utils.data.dataset import random_split
 
 if __name__ == "__main__":
@@ -64,7 +51,8 @@ if __name__ == "__main__":
     )
 
     # Compute network input/output dimension
-    noise_net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS
+    noise_net_name = cfg.MODEL.NOISE_NET.NAME
+    noise_net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name]
     input_dim = 0
     global_cond_dim = 0
     # condition related
@@ -98,12 +86,40 @@ if __name__ == "__main__":
         cfg,
         vision_encoder=None,
         noise_pred_net=build_noise_pred_net(
-            cfg.MODEL.NOISE_NET.NAME, **noise_net_init_args
+            noise_net_name, **noise_net_init_args
         ),
         device="cuda"
     )
-    model_name = f"dmorp_model_rel_n{cfg.MODEL.NOISE_NET.NAME}_p{pcd_size}_l{cfg.MODEL.POSE_DIM}_d{cfg.MODEL.NUM_DIFFUSION_ITERS}_e{cfg.TRAIN.NUM_EPOCHS}_b{cfg.DATALOADER.BATCH_SIZE}.pt"
-    save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints")
+    model_name = f"dmorp_model_rel_n{noise_net_name}"
+    model_name += f"_ps{pcd_size}"
+    model_name += f"_ndi{cfg.MODEL.NUM_DIFFUSION_ITERS}" 
+    model_name += f"_ne{cfg.TRAIN.NUM_EPOCHS}" 
+    model_name += f"_bs{cfg.DATALOADER.BATCH_SIZE}"
+    model_name += f"_ug{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].use_global_geometry}"
+    model_name += f"_id{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].input_dim}"
+    model_name += f"_cgf{cfg.MODEL.COND_GEOMETRY_FEATURE}"    
+    model_name += f"_dsed{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].diffusion_step_embed_dim}"
+    model_name += f"_up{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].use_pointnet}"
+    model_name += f"_ro{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].rotation_orthogonalization}"
+    if noise_net_name == "UNETMLP":
+        model_name += f"_dd{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].down_dims}"
+        model_name += f"_dpe{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].downsample_pcd_enc}"
+        model_name += f"_ds{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].downsample_size}"
+    elif noise_net_name == "TRANSFORMER":
+        model_name += f"_nah{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].num_attention_heads}"
+        model_name += f"_ehd{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].encoder_hidden_dim}"
+        model_name += f"_ed{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].encoder_dropout}"
+        model_name += f"_ea{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].encoder_activation}"
+        model_name += f"_enl{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].encoder_num_layers}"
+        model_name += f"_fpd{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].fusion_projection_dim}"
+    elif noise_net_name == "PARALLEL_MLP":
+        model_name += f"_fpd{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].fusion_projection_dim}"
+    
+    model_name += f"_ro{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].rotation_orthogonalization}"
+    model_name += f"_uds{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].use_dropout_sampler}"
+    model_name += ".pt"
+
+    save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints", noise_net_name)
     os.makedirs(save_dir, exist_ok=True)
     if retrain:
         # dmorp_model.module.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
@@ -120,10 +136,37 @@ if __name__ == "__main__":
 
     # Test inference
     # Load vocabulary
-    res_path = os.path.join(root_path, "test_data", task_name, "results")
+    res_path = os.path.join(root_path, "test_data", task_name, "results", noise_net_name)
     os.makedirs(res_path, exist_ok=True)
     if not retrain:
-        save_path = os.path.join(res_path, f"vis_n{cfg.MODEL.NOISE_NET.NAME}_p{pcd_size}_l{cfg.MODEL.POSE_DIM}_d{cfg.MODEL.NUM_DIFFUSION_ITERS}_e{cfg.TRAIN.NUM_EPOCHS}_b{cfg.DATALOADER.BATCH_SIZE}_ca{cfg.MODEL.INFERENCE.CANONICALIZE}")
+        save_path_str = f"vis_n{noise_net_name}" 
+        save_path_str += f"_ps{pcd_size}" 
+        save_path_str += f"_ndi{cfg.MODEL.NUM_DIFFUSION_ITERS}" 
+        save_path_str += f"_ne{cfg.TRAIN.NUM_EPOCHS}" 
+        save_path_str += f"_bs{cfg.DATALOADER.BATCH_SIZE}" 
+        save_path_str += f"_ca{cfg.MODEL.INFERENCE.CANONICALIZE}"
+        save_path_str += f"_ug{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].use_global_geometry}"
+        save_path_str += f"_id{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].input_dim}"
+        save_path_str += f"_cgf{cfg.MODEL.COND_GEOMETRY_FEATURE}"    
+        save_path_str += f"_dsed{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].diffusion_step_embed_dim}"
+        save_path_str += f"_up{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].use_pointnet}"
+        save_path_str += f"_ro{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].rotation_orthogonalization}"
+        if noise_net_name == "UNETMLP":
+            save_path_str += f"_dd{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].down_dims}"
+            save_path_str += f"_dpe{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].downsample_pcd_enc}"
+            save_path_str += f"_ds{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].downsample_size}"
+        elif noise_net_name == "TRANSFORMER":
+            save_path_str += f"_nah{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].num_attention_heads}"
+            save_path_str += f"_ehd{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].encoder_hidden_dim}"
+            save_path_str += f"_ed{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].encoder_dropout}"
+            save_path_str += f"_ea{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].encoder_activation}"
+            save_path_str += f"_enl{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].encoder_num_layers}"
+            save_path_str += f"_fpd{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].fusion_projection_dim}"
+        elif noise_net_name == "PARALLEL_MLP":
+            save_path_str += f"_fpd{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].fusion_projection_dim}"
+        save_path_str += f"_uds{cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].use_dropout_sampler}"
+
+        save_path = os.path.join(res_path, save_path_str)
         if cfg.MODEL.INFERENCE.CANONICALIZE:
             dmorp_model.debug_inference(copy.deepcopy(train_dataset), 
                                         sample_size=cfg.MODEL.INFERENCE.SAMPLE_SIZE,

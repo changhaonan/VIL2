@@ -26,7 +26,7 @@ from torchvision.ops import box_convert
 
 device = "cpu"
 if torch.cuda.is_available():
-    device = "cuda:0"
+    device = "cuda"
 
 
 class GroundingDinoObjectDetection:

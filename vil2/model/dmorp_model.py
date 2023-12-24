@@ -1,12 +1,11 @@
 """Modified from official Diffusion Policy"""
 from __future__ import annotations
-import diffusers
-import collections
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm.auto import tqdm
 import torch
 import torch.nn as nn
+import math
 import torch.nn.functional as F
 from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
@@ -31,7 +30,8 @@ class DmorpModel:
         # self.device = "cpu"
         # parameters
         self.max_scene_size = cfg.MODEL.MAX_SCENE_SIZE
-        self.action_dim = cfg.MODEL.NOISE_NET.INIT_ARGS["input_dim"]
+        noise_net_name = cfg.MODEL.NOISE_NET.NAME
+        self.action_dim = cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name]["input_dim"]
         self.pose_dim = cfg.MODEL.POSE_DIM
         self.time_emb_dim = cfg.MODEL.TIME_EMB_DIM if cfg.MODEL.USE_POSITIONAL_EMBEDDING else 1
         self.geometry_feat_dim = cfg.MODEL.GEOMETRY_FEAT_DIM
@@ -59,6 +59,7 @@ class DmorpModel:
         # vision encoder
         # self.vision_encoder = vision_encoder
         # scheduler
+        self.use_global_geometry = cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].use_global_geometry
         self.num_diffusion_iters = cfg.MODEL.NUM_DIFFUSION_ITERS
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=self.num_diffusion_iters,
@@ -95,7 +96,9 @@ class DmorpModel:
 
         # Standard ADAM optimizer
         # Note that EMA parametesr are not optimized
-        optimizer = torch.optim.AdamW(params=self.nets.parameters(), lr=1e-4, weight_decay=1e-6)
+        optimizer = torch.optim.AdamW(params=self.nets.parameters(), lr=1e-5, weight_decay=1e-6)
+        
+        # optimizer = torch.optim.AdamW(params=self.nets.parameters(), lr=1e-4, eps=1e-8, betas=(0.9, 0.999))
 
         # Cosine LR schedule with linear warmup
         lr_scheduler = get_scheduler(
@@ -104,17 +107,29 @@ class DmorpModel:
             num_warmup_steps=500,
             num_training_steps=len(data_loader) * num_epochs,
         )
+        # lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.98)
         global_step = 0
         best_loss = float("inf")
         best_state_dict = None
         best_epoch  = None
         for epoch in range(num_epochs):
             epoch_loss = 0
+            epoch_norm_loss = 0
+            a_loss = 0
+            b_loss = 0
+            c_loss = 0
+            t_loss = 0
+            r1_loss = 0
+            r2_loss = 0
             progress_bar = tqdm(data_loader)
-            progress_bar.set_description(f"Epoch {epoch}")
+            progress_bar.set_description(f"E{epoch}")
             for it, dt in enumerate(data_loader):
-                target = dt["shifted"]["target"].to(self.device).to(torch.float32)
-                fixed = dt["shifted"]["fixed"].to(self.device).to(torch.float32)
+                if self.use_global_geometry:
+                    target = dt["shifted"]["target_enc"].to(self.device).to(torch.float32)
+                    fixed = dt["shifted"]["fixed_enc"].to(self.device).to(torch.float32)
+                else:
+                    target = dt["shifted"]["target"].to(self.device).to(torch.float32)
+                    fixed = dt["shifted"]["fixed"].to(self.device).to(torch.float32)
                 pose9d = dt["shifted"]["9dpose"].to(self.device).to(torch.float32)
                 # set type of pose9d to float32
                 pose9d = pose9d.to(torch.float32)
@@ -135,16 +150,38 @@ class DmorpModel:
 
                 # predict the noise residual
                 noise_pred = self.noise_pred_net(
-                    noisy_actions, timesteps, global_cond1=target, global_cond2=fixed
+                    noisy_actions, timesteps, geometry1=target, geometry2=fixed
                 )
 
                 # L2 loss
                 loss = nn.functional.mse_loss(noise_pred, noise)
+                
+                normalization_loss1 = abs(torch.norm(noise_pred[:, 3:6], dim=-1).mean() - 1)
+                normalization_loss2 = abs(torch.norm(noise_pred[:, 6:9], dim=-1).mean() - 1) 
+                normalization_loss3 = torch.norm(torch.sum(noise_pred[:, 3:6] * noise_pred[:, 6:9], dim=1), dim=-1).mean()
+                trans_loss = nn.functional.mse_loss(noise_pred[:, :3], noise[:, :3])
+                rot1_loss = nn.functional.mse_loss(noise_pred[:, 3:6], noise[:, 3:6])
+                rot2_loss = nn.functional.mse_loss(noise_pred[:, 6:9], noise[:, 6:9])
 
+                # print(f"Normal loss: {normalization_loss.item()}")
                 # optimize
-                loss.backward()
-                optimizer.step()
+                epoch_norm_loss += normalization_loss1.item() + normalization_loss2.item() + normalization_loss3.item()
+                a_loss += normalization_loss1.item()
+                b_loss += normalization_loss2.item()
+                c_loss += normalization_loss3.item()
+                t_loss += trans_loss.item()
+                r1_loss += rot1_loss.item()
+                r2_loss += rot2_loss.item()
+                penalty_param = 1
+                loss = loss + penalty_param * (normalization_loss1 + normalization_loss2 + normalization_loss3)
                 optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    self.nets.parameters(), 
+                    max_norm=1.0
+                )
+                optimizer.step()
+                
                 # step lr scheduler every batch
                 # this is different from standard pytorch behavior
                 lr_scheduler.step()
@@ -154,7 +191,7 @@ class DmorpModel:
 
                 progress_bar.update(1)
                 epoch_loss += loss.detach().cpu().item()
-                logs = {"loss": epoch_loss/(it+1), "step": global_step}
+                logs = {"loss": epoch_loss/(it+1), "t": t_loss/(it+1), "r1": r1_loss/(it+1), "r2": r2_loss/(it+1), "norm": epoch_norm_loss/(it+1), "lr": lr_scheduler.get_last_lr()[0]}
                 progress_bar.set_postfix(**logs)
                 global_step += 1
             
@@ -302,8 +339,13 @@ class DmorpModel:
                 pose9d_full = pose9d_f
             break
         for _, dt in enumerate(eval_data_loader):
-            target = dt["shifted"]["target"].to(self.device).to(torch.float32)
-            fixed = dt["shifted"]["fixed"].to(self.device).to(torch.float32)
+            if self.use_global_geometry:
+                target = dt["shifted"]["target_enc"].to(self.device).to(torch.float32)
+                fixed = dt["shifted"]["fixed_enc"].to(self.device).to(torch.float32)
+            else:
+                target = dt["shifted"]["target"].to(self.device).to(torch.float32)
+                fixed = dt["shifted"]["fixed"].to(self.device).to(torch.float32)
+            
             pose9d = dt["shifted"]["9dpose"].to(self.device).to(torch.float32)
             pose9d = pose9d.to(torch.float32)
             transform = dt["shifted"]["transform"].to(torch.float32)

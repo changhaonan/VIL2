@@ -32,3 +32,27 @@ def SinusoidalTimeEmbedding(timesteps, embedding_dim, base=10000.0):
     ste[:, 1::2] = torch.cos(position * div_term)
 
     return ste
+
+class SinusoidalPosEmb(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x):
+        half_dim = self.dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=x.device) * -emb)
+        emb = x[:, None] * emb[None, :]
+        return torch.cat((emb.sin(), emb.cos()), dim=-1)
+    
+class PositionalEmbedding(nn.Module):
+    def __init__(self, num_channels, max_positions=10000, endpoint=False):
+        super().__init__()
+        self.num_channels, self.max_positions, self.endpoint = num_channels, max_positions, endpoint
+
+    def forward(self, x):
+        freqs = torch.arange(0, self.num_channels//2, dtype=torch.float32, device=x.device)
+        freqs /= (self.num_channels // 2 - (1 if self.endpoint else 0))
+        freqs = (1 / self.max_positions) ** freqs
+        x = x.ger(freqs.to(x.dtype))
+        return torch.cat([x.cos(), x.sin()], dim=1)

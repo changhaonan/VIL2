@@ -113,13 +113,13 @@ if __name__ == "__main__":
     # Parse arguments
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--data_id", type=int, default=1)
-    argparser.add_argument("--num_samples", type=int, default=2)
-    argparser.add_argument("--target_object", type=str, default="tea_pot")
+    argparser.add_argument("--num_samples", type=int, default=200)
+    argparser.add_argument("--target_object", type=str, default="spoon")
     argparser.add_argument("--anchor_object", type=str, default="tea_mug")
     argparser.add_argument("--random_region", type=float, default=0.5)
     argparser.add_argument("--fix_anchor", action="store_true")
     args = argparser.parse_args()
-
+    args.fix_anchor = True
     data_id = args.data_id
     num_samples = args.num_samples
     random_region = args.random_region
@@ -140,16 +140,16 @@ if __name__ == "__main__":
         pose_2 = np.eye(4)
         pose_2[:3, 3] = np.array([0.0, 0.0, 0.0])
         pose_2[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi / 2.0]).as_matrix()
-    elif target_object == "spoon" and anchor_object == "tea_pot":
+    elif target_object == "spoon" and anchor_object == "tea_mug":
         pose_1 = np.eye(4)
         pose_1[:3, 3] = np.array([0.2, 0.0, 0.0])
         pose_1[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi / 2.0]).as_matrix()
         pose_2 = np.eye(4)
         pose_2[:3, 3] = np.array([0.0, 0.0, 0.0])
-        pose_2[:3, :3] = R.from_euler("xyz", [0.0, 0.0, -np.pi / 3.0]).as_matrix()
+        pose_2[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi / 2.0]).as_matrix()
     augmentor = DmorpSceneAugmentor([mesh_1_file], [mesh_2_file], [pose_1], [pose_2])
 
     export_dir = os.path.join(root_path, "test_data", "dmorp_augmented")
     augmentor.augment(data_id, num_samples, export_dir, random_region=random_region, fix_anchor=fix_anchor)
     for i in range(3):
-        augmentor.visualize(0, export_dir, sample_idx=i)
+        augmentor.visualize(data_id, export_dir, sample_idx=i)
