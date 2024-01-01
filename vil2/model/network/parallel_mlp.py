@@ -7,7 +7,7 @@ import functools
 from vil2.model.embeddings.pct import PointTransformerEncoderSmall, EncoderMLP, PointNet
 from vil2.model.embeddings.sinusoidal import PositionalEmbedding
 from vil2.model.network.genpose_modules import Linear
-
+from vil2.model.embeddings.pointnetplus import Pointnet2ClsMSG
 
     
 class ParallelMLP(nn.Module):
@@ -16,7 +16,7 @@ class ParallelMLP(nn.Module):
                  downsample_size: bool = False, fusion_projection_dim: int = 512, use_pointnet: bool = False, 
                  use_dropout_sampler: bool = False, rotation_orthogonalization: bool = False):
         super().__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
         self.diffusion_step_encoder = nn.Sequential(
             PositionalEmbedding(num_channels=diffusion_step_embed_dim),
             nn.Linear(diffusion_step_embed_dim, diffusion_step_embed_dim),
@@ -71,9 +71,14 @@ class ParallelMLP(nn.Module):
             nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), 
             nn.ReLU(inplace=True),
             Linear(fusion_projection_dim, 3, **init_zero),
-        )    
+        )
 
         self.rotation_orthogonalization = rotation_orthogonalization
+
+        self.net = Pointnet2ClsMSG(input_channels=3)
+        seed = 100
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
 
     def forward(self, sample, timestep, geometry1=None, geometry2=None):
 
@@ -90,9 +95,11 @@ class ParallelMLP(nn.Module):
         global_feature = self.diffusion_step_encoder(timesteps)
         if geometry1 is not None:
             if self.use_global_geometry:
+                geometry1 = self.net(geometry1)
+                geometry2 = self.net(geometry2)
                 if self.downsample_pcd_enc:
-                    geometry1 = self.psenc(geometry1.to(self.device))
-                    geometry2 = self.psenc(geometry2.to(self.device))
+                    geometry1 = self.psenc(geometry1)
+                    geometry2 = self.psenc(geometry2)
                 if len(geometry1.shape) == 3:
                     geometry1 = geometry1.squeeze(1)
                     geometry2 = geometry2.squeeze(1)

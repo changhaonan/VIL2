@@ -89,7 +89,7 @@ if __name__ == "__main__":
         noise_pred_net=build_noise_pred_net(
             noise_net_name, **noise_net_init_args
         ),
-        device="cuda"
+        device="cuda:0"
     )
     model_name = f"dmorp_model_rel_n{noise_net_name}"
     model_name += f"_ps{pcd_size}"
@@ -123,10 +123,11 @@ if __name__ == "__main__":
     save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints", noise_net_name)
     os.makedirs(save_dir, exist_ok=True)
     if retrain:
-        # dmorp_model.module.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
-        best_model, best_epoch = dmorp_model.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
         # save the data
         save_path = os.path.join(save_dir, model_name)
+        # dmorp_model.module.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
+        best_model, best_epoch = dmorp_model.train(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader, save_path=save_path)
+        # best_model, best_epoch = dmorp_model.train_score(num_epochs=cfg.TRAIN.NUM_EPOCHS, data_loader=data_loader)
         torch.save(best_model, save_path)
         print(f"Saving the best epoch:{best_epoch}. Model saved to {save_path}")
     else:

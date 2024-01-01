@@ -24,7 +24,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--grid_param_list", type=str, default="NUM_DIFFUSION_ITERS,SEMANTIC_FEAT_DIM,GEOMETRY_FEAT_DIM,NUM_EPOCHS")
     parser.add_argument("--index_list", type=str, default="1,6,4,1")
-    parser.add_argument("--cuda_device", type=str, default="cuda")
+    parser.add_argument("--cuda_device", type=str, default="cuda:0")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 

@@ -115,7 +115,7 @@ if __name__ == "__main__":
         with open(os.path.join(scene_info_path, "scene_info.json"), "r") as f:
             scene_info = json.load(f)
 
-        num_init_scenes = 200
+        num_init_scenes = 300
         num_cameras = 20
         pcd_size = cfg.MODEL.PCD_SIZE
 

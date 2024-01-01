@@ -23,6 +23,9 @@ checkpoint/*
 vil2/scripts/data_augmentation.py
 vil2/scripts/relative_transform.py 
 dummy.py
+dummy-hist2.py 
+analyze.ipynb 
+
 
 *.exr
 vil2/data_gen/examples/*

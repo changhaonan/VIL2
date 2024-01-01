@@ -1,11 +1,11 @@
 from __future__ import annotations
 import torch
-import numpy as np
 import torch.nn as nn
 from vil2.model.embeddings.pct import PointTransformerEncoderSmall, EncoderMLP, PointNet, DropoutSampler 
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from vil2.model.embeddings.sinusoidal import PositionalEmbedding
 from vil2.model.network.genpose_modules import Linear
+from vil2.model.embeddings.pointnetplus import Pointnet2ClsMSG
 
 class Transformer(nn.Module):
     def __init__(self, 
@@ -26,32 +26,41 @@ class Transformer(nn.Module):
                   use_dropout_sampler: bool = False,
                   ):
         super().__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.emb_size = input_dim
+        self.downsample_pcd_enc = downsample_pcd_enc
+        
+        if self.downsample_pcd_enc:
+            fusion_dim = diffusion_step_embed_dim + input_dim + downsample_size*2
+        else:
+            fusion_dim = diffusion_step_embed_dim + input_dim + global_cond_dim*2
 
-        encoder_input_dim = input_dim + diffusion_step_embed_dim + 2*global_cond_dim
-
-        self.encoder_layer = TransformerEncoderLayer(d_model=encoder_input_dim, 
+        self.encoder_layer = TransformerEncoderLayer(d_model=fusion_dim, 
                                                  nhead=num_attention_heads,
                                                  dim_feedforward=encoder_hidden_dim, 
                                                  dropout=encoder_dropout, 
                                                  activation=encoder_activation,
-                                                #  batch_first=True,
-                                                #  norm_first=True
+                                                 batch_first=True,
+                                                 norm_first=True
                                                  )
         self.transformer_encoder = TransformerEncoder(encoder_layer=self.encoder_layer, 
                                                       num_layers=encoder_num_layers)
         
         self.use_global_geometry = use_global_geometry  
 
-        self.transformer_decoder = nn.Linear(encoder_input_dim, 9)
+        self.transformer_decoder = nn.Linear(fusion_dim, 9)
         self.diffusion_step_encoder = nn.Sequential(
             PositionalEmbedding(num_channels=diffusion_step_embed_dim),
             nn.Linear(diffusion_step_embed_dim, diffusion_step_embed_dim),
             nn.ReLU(inplace=True)
         )
         self.pcd_encoder = PointTransformerEncoderSmall(output_dim=global_cond_dim, input_dim=6, mean_center=False) if not use_pointnet else PointNet(emb_dims=256)
-        self.pcd_mlp_encoder = EncoderMLP(256, global_cond_dim, uses_pt=True)
+        
+        if self.downsample_pcd_enc:
+            self.pcd_mlp_encoder = EncoderMLP(256, downsample_size, uses_pt=True)
+        else:    
+            self.pcd_mlp_encoder = EncoderMLP(256, global_cond_dim, uses_pt=True)
+        
         self.pose_encoder = nn.Sequential(
                                         nn.Linear(9, input_dim),
                                         nn.ReLU(),
@@ -59,14 +68,23 @@ class Transformer(nn.Module):
                                         nn.ReLU(),
                                         )
         init_zero = dict(init_mode='kaiming_uniform', init_weight=0, init_bias=0) # init the final output layer's weights to zeros
-        fusion_dim = diffusion_step_embed_dim + input_dim + global_cond_dim*2
+
+        self.psenc = nn.Sequential(
+                nn.Linear(global_cond_dim, global_cond_dim//2),
+                nn.ReLU(inplace=True),
+                nn.Linear(global_cond_dim//2, downsample_size))
+
+        self.final_linear = nn.Sequential(nn.Linear(fusion_dim, 9)) if not use_dropout_sampler else DropoutSampler(fusion_dim, 9, dropout_rate=0.0)
+        self.use_dropout_sampler = use_dropout_sampler
+
+
         self.fusion_tail_rot_x = nn.Sequential(
                 nn.Linear(fusion_dim, fusion_projection_dim),
-                nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), 
-                nn.ReLU(inplace=True),
-                # nn.Linear(fusion_projection_dim, fusion_projection_dim),
                 # nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), 
-                # nn.ReLU(inplace=True),
+                nn.ReLU(inplace=True),
+                nn.Linear(fusion_projection_dim, fusion_projection_dim),
+                # nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True), 
+                nn.ReLU(inplace=True),
                 Linear(fusion_projection_dim, 9, **init_zero),
             )
         self.fusion_tail_rot_y = nn.Sequential(
@@ -89,18 +107,21 @@ class Transformer(nn.Module):
             # nn.ReLU(inplace=True),
             Linear(fusion_projection_dim, 3, **init_zero),
         )    
-        self.final_linear = nn.Sequential(nn.Linear(fusion_dim, 9)) if not use_dropout_sampler else DropoutSampler(fusion_dim, 9, dropout_rate=0.0)
-        self.use_dropout_sampler = use_dropout_sampler
-        self.downsample_pcd_enc = downsample_pcd_enc
-        self.psenc = nn.Sequential(
-                nn.Linear(global_cond_dim, downsample_size))
+
+        
         self.rotation_orthogonalization = rotation_orthogonalization
+        seed  = 100
+        self.net = Pointnet2ClsMSG(3).to(self.device)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
 
     def forward(self, x: torch.Tensor,  timestep: int, geometry1: torch.Tensor | None, geometry2: torch.Tensor | None):
         x = x.to(dtype=torch.float32, device=self.device)
         sample_enc = self.pose_encoder(x)
 
         # time
+        if len(timestep.shape) == 2:
+            timestep = timestep.squeeze(1)
         timesteps = timestep
         if not torch.is_tensor(timesteps):
             # TODO: this requires sync between CPU and GPU. So try to pass timesteps as tensors if you can
@@ -109,11 +130,13 @@ class Transformer(nn.Module):
             timesteps = timesteps[None].to(sample_enc.device)
 
         # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
-        timesteps = timesteps.expand(sample_enc.shape[0])
+        # timesteps = timesteps.expand(sample_enc.shape[0])
         global_feature = self.diffusion_step_encoder(timesteps)
 
         if geometry1 is not None:
             if self.use_global_geometry:
+                geometry1 = self.net(geometry1)
+                geometry2 = self.net(geometry2)
                 if self.downsample_pcd_enc:
                     geometry1 = self.psenc(geometry1.to(self.device))
                     geometry2 = self.psenc(geometry2.to(self.device))
@@ -126,7 +149,7 @@ class Transformer(nn.Module):
                 center2, enc_pcd2 = self.pcd_encoder(geometry2[:, :, :3], geometry2[:, :, 3:])
                 enc_pcd1 = self.pcd_mlp_encoder(enc_pcd1, center1)
                 enc_pcd2 = self.pcd_mlp_encoder(enc_pcd2, center2)
-                global_feature = torch.concat([sample_enc, enc_pcd1, enc_pcd2, global_feature], dim=-1)
+                global_feature = torch.concat([enc_pcd1, enc_pcd2, global_feature], dim=-1)
         else:
             global_feature = torch.concat([sample_enc, global_feature], dim=-1)
 
@@ -139,7 +162,7 @@ class Transformer(nn.Module):
             output_scene = self.final_linear(encoder_output)
             return output_scene
         
-        rot_x = self.fusion_tail_rot_x(encoder_output.detach().cpu().cuda(0).clone())
+        rot_x = self.fusion_tail_rot_x(encoder_output.detach().cpu().cuda().clone())
         if self.rotation_orthogonalization:
             process_decoder_output = rot_x.clone()
             v1 = process_decoder_output[:, 3:6]

@@ -8,10 +8,24 @@ from vil2.model.embeddings.pct import PointTransformerEncoderSmall
 from vil2.model.embeddings.pct import  DropoutSampler
 from vil2.model.embeddings.pct import EncoderMLP
 
-def ve_marginal_prob(x, t, sigma_min=0.01, sigma_max=90):
+def ve_marginal_prob(x, t, sigma_min=0.01, sigma_max=200):
     std = sigma_min * (sigma_max / sigma_min) ** t
     mean = x
     return mean, std
+
+def perturb_pose(gt_pose: torch.Tensor = None, eps: float = 1e-5):
+    batch_size = gt_pose.shape[0]
+    random_t = torch.rand(batch_size, device=gt_pose.device) * (1 - eps) + eps
+    random_t = random_t.unsqueeze(-1)
+    assert len(random_t.shape) == len(gt_pose.shape)
+    # Obtaining the standard deviation
+    mu, std = ve_marginal_prob(gt_pose, random_t)
+    std = std.view(-1, 1)
+    # Perturb the data and get estimated score
+    z = torch.randn_like(gt_pose)
+    perturbed_pose = mu + std * z
+    target_score = (-z * std) / (std ** 2)
+    return perturbed_pose, std, random_t, target_score
 
 def weight_init(shape, mode, fan_in, fan_out):
     if mode == 'xavier_uniform': return np.sqrt(6 / (fan_in + fan_out)) * (torch.rand(*shape) * 2 - 1)

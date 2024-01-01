@@ -35,7 +35,7 @@ def position_encoding(x: torch.Tensor, min_timescale: float = 1.0, max_timescale
 def draw_V_map(
     observations: np.ndarray, V_f: nn.Module, sample_ratio: float = 0.01, output_path: str = None
 ):
-    obs = torch.from_numpy(observations).float().to("cuda")
+    obs = torch.from_numpy(observations).float().to("cuda:0")
     V = V_f(obs).detach().cpu().numpy()
     num_samples = int(obs.shape[0] * sample_ratio)
     obs_samples = obs[np.random.choice(obs.shape[0], num_samples, replace=False)]
@@ -60,10 +60,10 @@ def draw_Q_map(
     sample_ratio: float = 0.01,
     output_path: str = None,
 ):
-    obs = torch.from_numpy(observations).float().to("cuda")
+    obs = torch.from_numpy(observations).float().to("cuda:0")
     num_samples = int(obs.shape[0] * sample_ratio)
     obs_samples = obs[np.random.choice(obs.shape[0], num_samples, replace=False)]
-    action_samples = torch.from_numpy(np.tile(action, (num_samples, 1))).float().to("cuda")
+    action_samples = torch.from_numpy(np.tile(action, (num_samples, 1))).float().to("cuda:0")
     Q = Q_f(torch.cat([obs_samples, action_samples], axis=1)).detach().cpu().numpy()
     obs_samples = obs_samples.detach().cpu().numpy()
     plt.clf()
@@ -87,10 +87,10 @@ def draw_A_map(
     sample_ratio: float = 0.01,
     output_path: str = None,
 ):
-    obs = torch.from_numpy(observations).float().to("cuda")
+    obs = torch.from_numpy(observations).float().to("cuda:0")
     num_samples = int(obs.shape[0] * sample_ratio)
     obs_samples = obs[np.random.choice(obs.shape[0], num_samples, replace=False)]
-    action_samples = torch.from_numpy(np.tile(action, (num_samples, 1))).float().to("cuda")
+    action_samples = torch.from_numpy(np.tile(action, (num_samples, 1))).float().to("cuda:0")
     Q1 = Q_f1(torch.cat([obs_samples, action_samples], axis=1)).detach().cpu().numpy()
     Q2 = Q_f2(torch.cat([obs_samples, action_samples], axis=1)).detach().cpu().numpy()
     Q = np.minimum(Q1, Q2)

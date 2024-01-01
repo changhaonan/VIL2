@@ -6,6 +6,7 @@ from tqdm.auto import tqdm
 import torch
 import torch.nn as nn
 import math
+import torch 
 import torch.nn.functional as F
 from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
@@ -15,7 +16,7 @@ import vil2.utils.torch_utils as torch_utils
 import clip
 from vil2.utils.eval_utils import compare_distribution
 from vil2.data_gen.data_loader import visualize_pcd_with_open3d
-
+from vil2.model.network.genpose_modules import perturb_pose
 
 class DmorpModel:
     """Diffusion Model for multi-object relative Pose Generation"""
@@ -39,6 +40,7 @@ class DmorpModel:
         self.use_positional_embedding = cfg.MODEL.USE_POSITIONAL_EMBEDDING
         self.aggregate_type = cfg.MODEL.AGGREGATE_TYPE
         self.aggregate_list = cfg.MODEL.AGGREGATE_LIST
+        self.rotation_orthogonalization = cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name].rotation_orthogonalization
         self.data_stamp_dim = 0  # Data stamp is an aggregation of multiple features
         for agg_type in self.aggregate_list:
             if agg_type == "SEMANTIC":
@@ -72,13 +74,16 @@ class DmorpModel:
             prediction_type="epsilon",
         )
         # noise net
-        self.noise_pred_net = noise_pred_net
+        # Check if 
+        self.noise_pred_net = nn.DataParallel(noise_pred_net)
+        # self.noise_pred_net = noise_pred_net    
         self.nets = nn.ModuleDict(
             {
                 "noise_pred_net": self.noise_pred_net,
                 "positional_embedding": torch_utils.SinusoidalEmbedding(size=self.time_emb_dim),
             }
-        ).to(self.device)
+        ).to(device=self.device)
+        # self.nets = nn.DataParallel(self.nets)
         # build embedding key
         # self.build_embedding_key()
         # semantic feature related
@@ -88,7 +93,7 @@ class DmorpModel:
             self.clip_model.eval()
             self.clip_model.requires_grad_(False)
 
-    def train(self, num_epochs: int, data_loader):
+    def train(self, num_epochs: int, data_loader, save_path: str = None):
         # Exponential Moving Average
         # accelerates training and improves stability
         # holds a copy of the model weights
@@ -96,7 +101,7 @@ class DmorpModel:
 
         # Standard ADAM optimizer
         # Note that EMA parametesr are not optimized
-        optimizer = torch.optim.AdamW(params=self.nets.parameters(), lr=1e-5, weight_decay=1e-6)
+        optimizer = torch.optim.AdamW(params=self.nets.parameters(), lr=1e-4, weight_decay=1e-8)
         
         # optimizer = torch.optim.AdamW(params=self.nets.parameters(), lr=1e-4, eps=1e-8, betas=(0.9, 0.999))
 
@@ -125,14 +130,14 @@ class DmorpModel:
             progress_bar.set_description(f"E{epoch}")
             for it, dt in enumerate(data_loader):
                 if self.use_global_geometry:
-                    target = dt["shifted"]["target_enc"].to(self.device).to(torch.float32)
-                    fixed = dt["shifted"]["fixed_enc"].to(self.device).to(torch.float32)
+                    target = dt["shifted"]["target"].to(torch.float32)
+                    fixed = dt["shifted"]["fixed"].to(torch.float32)
                 else:
-                    target = dt["shifted"]["target"].to(self.device).to(torch.float32)
-                    fixed = dt["shifted"]["fixed"].to(self.device).to(torch.float32)
-                pose9d = dt["shifted"]["9dpose"].to(self.device).to(torch.float32)
+                    target = dt["shifted"]["target"].to(torch.float32)
+                    fixed = dt["shifted"]["fixed"].to(torch.float32)
+                pose9d = dt["shifted"]["9dpose"].to(torch.float32)
                 # set type of pose9d to float32
-                pose9d = pose9d.to(torch.float32)
+                pose9d = pose9d.to(torch.float32).to(self.device)
                 B, M = dt["shifted"]["target"].shape[0], 1
                 # sample noise to add to actions
                 noise = torch.randn((pose9d.shape[0], pose9d.shape[1]), device=self.device)
@@ -173,7 +178,10 @@ class DmorpModel:
                 r1_loss += rot1_loss.item()
                 r2_loss += rot2_loss.item()
                 penalty_param = 1
-                loss = loss + penalty_param * (normalization_loss1 + normalization_loss2 + normalization_loss3)
+                if self.rotation_orthogonalization:
+                    loss = loss + penalty_param * (normalization_loss1 + normalization_loss2 + normalization_loss3)
+                else:
+                    loss = loss
                 optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(
@@ -192,6 +200,161 @@ class DmorpModel:
                 progress_bar.update(1)
                 epoch_loss += loss.detach().cpu().item()
                 logs = {"loss": epoch_loss/(it+1), "t": t_loss/(it+1), "r1": r1_loss/(it+1), "r2": r2_loss/(it+1), "norm": epoch_norm_loss/(it+1), "lr": lr_scheduler.get_last_lr()[0]}
+                progress_bar.set_postfix(**logs)
+                global_step += 1
+            
+            epoch_loss /= len(data_loader)
+            # print(f"Epoch {epoch}, loss {epoch_loss}")
+            if epoch_loss < best_loss:
+                best_loss = epoch_loss
+                best_epoch = epoch
+                best_state_dict = self.nets.state_dict()
+            if epoch % 1000 == 0:
+                print("Saving the best model until epoch {}...".format(epoch))
+                torch.save(best_state_dict, save_path)
+            progress_bar.close()
+        # copy ema back to model
+        ema.copy_to(self.nets.parameters())
+        return best_state_dict, best_epoch
+    
+
+    def rk45sampler(
+        score_model,
+        data,
+        prior,
+        sde_coeff,
+        atol=1e-5, 
+        rtol=1e-5, 
+        device='cuda', 
+        eps=1e-5,
+        T=1.0,
+        num_steps=None,
+        pose_mode='quat_wxyz', 
+        denoise=True,
+        init_x=None,
+        ):
+        pose_dim = get_pose_dim(pose_mode)
+        batch_size=data['pts'].shape[0]
+        init_x = prior((batch_size, pose_dim), T=T).to(device) if init_x is None else init_x + prior((batch_size, pose_dim), T=T).to(device)
+        shape = init_x.shape
+        
+        def score_eval_wrapper(data):
+            """A wrapper of the score-based model for use by the ODE solver."""
+            with torch.no_grad():
+                score = score_model(data)
+            return score.cpu().numpy().reshape((-1,))
+        
+        def ode_func(t, x):      
+            """The ODE function for use by the ODE solver."""
+            x = torch.tensor(x.reshape(-1, pose_dim), dtype=torch.float32, device=device)
+            time_steps = torch.ones(batch_size, device=device).unsqueeze(-1) * t
+            drift, diffusion = sde_coeff(torch.tensor(t))
+            drift = drift.cpu().numpy()
+            diffusion = diffusion.cpu().numpy()
+            data['sampled_pose'] = x
+            data['t'] = time_steps
+            return drift - 0.5 * (diffusion**2) * score_eval_wrapper(data)
+    
+        # Run the black-box ODE solver, note the 
+        t_eval = None
+        if num_steps is not None:
+            # num_steps, from T -> eps
+            t_eval = np.linspace(T, eps, num_steps)
+        res = integrate.solve_ivp(ode_func, (T, eps), init_x.reshape(-1).cpu().numpy(), rtol=rtol, atol=atol, method='RK45', t_eval=t_eval)
+        xs = torch.tensor(res.y, device=device).T.view(-1, batch_size, pose_dim) # [num_steps, bs, pose_dim]
+        x = torch.tensor(res.y[:, -1], device=device).reshape(shape) # [bs, pose_dim]
+        # denoise, using the predictor step in P-C sampler
+        if denoise:
+            # Reverse diffusion predictor for denoising
+            vec_eps = torch.ones((x.shape[0], 1), device=x.device) * eps
+            drift, diffusion = sde_coeff(vec_eps)
+            data['sampled_pose'] = x.float()
+            data['t'] = vec_eps
+            grad = score_model(data)
+            drift = drift - diffusion**2*grad       # R-SDE
+            mean_x = x + drift * ((1-eps)/(1000 if num_steps is None else num_steps))
+            x = mean_x
+        
+        num_steps = xs.shape[0]
+        xs = xs.reshape(batch_size*num_steps, -1)
+        xs[:, :-3] = normalize_rotation(xs[:, :-3], pose_mode)
+        xs = xs.reshape(num_steps, batch_size, -1)
+        xs[:, :, -3:] += data['pts_center'].unsqueeze(0).repeat(xs.shape[0], 1, 1)
+        x[:, :-3] = normalize_rotation(x[:, :-3], pose_mode)
+        x[:, -3:] += data['pts_center']
+        return xs.permute(1, 0, 2), x
+    
+    def train_score(self, num_epochs: int, data_loader):
+        # Exponential Moving Average
+        # accelerates training and improves stability
+        # holds a copy of the model weights
+        ema = EMAModel(parameters=self.nets.parameters(), power=0.75)
+
+        # Standard ADAM optimizer
+        # Note that EMA parametesr are not optimized
+        optimizer = torch.optim.AdamW(params=self.nets.parameters(), lr=1e-4, weight_decay=1e-8)
+        
+        # optimizer = torch.optim.AdamW(params=self.nets.parameters(), lr=1e-4, eps=1e-8, betas=(0.9, 0.999))
+
+        # Cosine LR schedule with linear warmup
+        lr_scheduler = get_scheduler(
+            name="cosine",
+            optimizer=optimizer,
+            num_warmup_steps=500,
+            num_training_steps=len(data_loader) * num_epochs,
+        )
+        # lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.98)
+        global_step = 0
+        best_loss = float("inf")
+        best_state_dict = None
+        best_epoch  = None
+        for epoch in range(num_epochs):
+            epoch_loss = 0
+            progress_bar = tqdm(data_loader)
+            progress_bar.set_description(f"E{epoch}")
+            for it, dt in enumerate(data_loader):
+                if self.use_global_geometry:
+                    target = dt["shifted"]["target"].to(self.device).to(torch.float32)
+                    fixed = dt["shifted"]["fixed"].to(self.device).to(torch.float32)
+                else:
+                    target = dt["shifted"]["target"].to(self.device).to(torch.float32)
+                    fixed = dt["shifted"]["fixed"].to(self.device).to(torch.float32)
+                pose9d = dt["shifted"]["9dpose"].to(self.device).to(torch.float32)
+                # set type of pose9d to float32
+                pose9d = pose9d.to(torch.float32)
+                B, M = dt["shifted"]["target"].shape[0], 1
+                score_loss = 0
+                repeat_num = 2
+                for _ in range(repeat_num):
+                    perturbed_pose, std, ts, target_score = perturb_pose(pose9d.clone())
+                    estimated_score = self.noise_pred_net(perturbed_pose, ts, geometry1=target, geometry2=fixed)
+                    loss_weighting = std ** 2
+                    score_loss += torch.mean(torch.sum((loss_weighting * (estimated_score - target_score)**2).view(B, -1), dim=-1))
+                score_loss /= repeat_num
+                if self.rotation_orthogonalization:
+                    loss = score_loss
+                    pass
+                else:
+                    loss = score_loss
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    self.nets.parameters(), 
+                    max_norm=1.0
+                )
+                optimizer.step()
+                
+                # step lr scheduler every batch
+                # this is different from standard pytorch behavior
+                lr_scheduler.step()
+
+                # update Exponential Moving Average of the model weights
+                ema.step(self.nets.parameters())
+
+                progress_bar.update(1)
+                epoch_loss += loss.detach().cpu().item()
+                # logs = {"loss": epoch_loss/(it+1), "t": t_loss/(it+1), "r1": r1_loss/(it+1), "r2": r2_loss/(it+1), "norm": epoch_norm_loss/(it+1), "lr": lr_scheduler.get_last_lr()[0]}
+                logs = {"loss": epoch_loss/(it+1), "lr": lr_scheduler.get_last_lr()[0]}
                 progress_bar.set_postfix(**logs)
                 global_step += 1
             
@@ -340,8 +503,8 @@ class DmorpModel:
             break
         for _, dt in enumerate(eval_data_loader):
             if self.use_global_geometry:
-                target = dt["shifted"]["target_enc"].to(self.device).to(torch.float32)
-                fixed = dt["shifted"]["fixed_enc"].to(self.device).to(torch.float32)
+                target = dt["shifted"]["target"].to(self.device).to(torch.float32)
+                fixed = dt["shifted"]["fixed"].to(self.device).to(torch.float32)
             else:
                 target = dt["shifted"]["target"].to(self.device).to(torch.float32)
                 fixed = dt["shifted"]["fixed"].to(self.device).to(torch.float32)
@@ -358,7 +521,7 @@ class DmorpModel:
                 pose9d_full = pose9d[random_index].unsqueeze(0).repeat(sample_size, 1).detach().cpu().numpy()
             B, _ = target.shape[0], 1
             # sample noise to add to actions
-            noise_sample = torch.randn((pose9d.shape[0], pose9d.shape[1]), device="cuda")
+            noise_sample = torch.randn((pose9d.shape[0], pose9d.shape[1]), device="cuda:0")
             if consider_only_one_pair:
                 target_random = target[random_index].unsqueeze(0).repeat(sample_size, 1, 1)
                 fixed_random = fixed[random_index].unsqueeze(0).repeat(sample_size, 1, 1)
@@ -367,7 +530,7 @@ class DmorpModel:
                 self.nets.eval()
                 timesteps = list(range(len(self.noise_scheduler)))[::-1]
                 for _, t in enumerate(tqdm(timesteps, desc="Denoising steps")):
-                    t = torch.from_numpy(np.repeat(t, noise_sample.shape[0])).long().to("cuda")  # num_samples is config.eval.batch_size
+                    t = torch.from_numpy(np.repeat(t, noise_sample.shape[0])).long().to("cuda:0")  # num_samples is config.eval.batch_size
                     if consider_only_one_pair:
                         residual = self.nets.noise_pred_net(noise_sample, t, target_random, fixed_random)
                     else:

@@ -34,7 +34,7 @@ class ResBlock(nn.Module):
 class MLP(nn.Module):
     def __init__(self, input_dim: int = 8, global_cond_dim: int = 32, diffusion_step_embed_dim: int = 8, nlayers: int = 3, hidden_size: int = 1024):
         super().__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.emb_size = input_dim
         diffusion_step_embed_dim = 80
         self.time_emb_size = diffusion_step_embed_dim

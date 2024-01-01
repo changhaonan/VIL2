@@ -41,7 +41,7 @@ class ConditionalUnetMLP(nn.Module):
                  down_dims: list = [256, 512, 1024], use_global_geometry: bool = False, downsample_pcd_enc: bool=False, 
                  downsample_size: int = 256, use_pointnet: bool = False, use_dropout_sampler: bool = False, rotation_orthogonalization: bool = False):
         super().__init__()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.input_dim = input_dim
         self.down_dims = down_dims
 

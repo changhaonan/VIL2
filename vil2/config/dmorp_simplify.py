@@ -7,11 +7,11 @@ ENV = dict(
 )
 
 DATALOADER = dict(
-    BATCH_SIZE=32,
-    NUM_WORKERS=8,
+    BATCH_SIZE=128,
+    # NUM_WORKERS=8,
 )
 TRAIN = dict(
-    NUM_EPOCHS=3,
+    NUM_EPOCHS=10000,
 )
 MODEL = dict(
     POSE_DIM=256,  # 6d pose/ 3d translation
@@ -40,13 +40,13 @@ MODEL = dict(
                 use_pointnet=False,
                 rotation_orthogonalization=False,
                 num_attention_heads=2,
-                encoder_hidden_dim=1024,
+                encoder_hidden_dim=512,
                 encoder_dropout=0.1,
                 encoder_activation='relu',
                 encoder_num_layers=2,
-                fusion_projection_dim=512,
+                fusion_projection_dim=256,
                 downsample_pcd_enc=False,
-                downsample_size=256,
+                downsample_size=128,
                 use_dropout_sampler=False,
             ),
             PARALLELMLP = dict(
@@ -56,7 +56,7 @@ MODEL = dict(
                 use_global_geometry=True,
                 use_pointnet=False,
                 use_dropout_sampler=False,
-                rotation_orthogonalization=True,
+                rotation_orthogonalization=False,
                 fusion_projection_dim=512,
                 downsample_pcd_enc=False,
                 downsample_size=256,
@@ -64,7 +64,7 @@ MODEL = dict(
         ),
     ),
     TIME_EMB_DIM=128,
-    RETRAIN=False,
+    RETRAIN=True,
     PCD_SIZE=512,
     TRAIN_TEST_SPLIT=0.8,
     INFERENCE=dict(
@@ -74,7 +74,7 @@ MODEL = dict(
         SHUFFLE=False,
         CANONICALIZE=False,
     ),
-    DATASET_CONFIG = "s300-c20-r0.5", #"s500-c20-r0.5" #"s1000-c1-r0.5", # "s250-c40-r2", # "s100-c20-r2",
+    DATASET_CONFIG = "s300-c20-r0.5", # "s300-c20-r0.5", #"s500-c20-r0.5" #"s1000-c1-r0.5", # "s250-c40-r2", # "s100-c20-r2",
     SAVE_FIG=True,
     VISUALIZE=False,
 
@@ -101,4 +101,4 @@ MODEL = dict(
 
 
 
-CUDA_DEVICE = "cuda"
+CUDA_DEVICE = "cuda:0"

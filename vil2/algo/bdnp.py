@@ -31,7 +31,7 @@ class BDNPolicy:
         self.cfg = cfg
         self.env: gym.Env = env
         self.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu")
+            "cuda:0" if torch.cuda.is_available() else "cpu")
 
         obs, _ = self.env.reset()
         self.goal_dim = obs["desired_goal"].shape[0]
