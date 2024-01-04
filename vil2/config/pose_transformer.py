@@ -38,7 +38,6 @@ MODEL = dict(
                 pcd_output_dim=512,
                 use_pcd_mean_center=True,
                 points_pyramid=[128, 32],
-                ca_channels=[512, 512],
                 num_attention_heads=2,
                 encoder_hidden_dim=512,
                 encoder_dropout=0.1,

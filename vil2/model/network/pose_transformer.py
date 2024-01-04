@@ -99,7 +99,6 @@ class PoseTransformer(nn.Module):
         pcd_output_dim,
         points_pyramid: list,
         use_pcd_mean_center: bool,
-        ca_channels: list,
         num_attention_heads: int = 2,
         encoder_num_layers: int = 2,
         encoder_hidden_dim: int = 256,
@@ -118,16 +117,13 @@ class PoseTransformer(nn.Module):
             mean_center=use_pcd_mean_center,
         )
 
-        self.cross_attentions = nn.ModuleList()
-        for ca_channels in ca_channels:
-            self.cross_attentions.append(Symmetric_CA_Layer(ca_channels))
+        # Learnable embedding
+        self.seg_embedding_1 = nn.Embedding(1, pcd_output_dim)
+        self.seg_embedding_2 = nn.Embedding(1, pcd_output_dim)
+        self.special_token_embedding = nn.Embedding(1, pcd_output_dim)
 
-        # fusion_dim = encoder_hidden_dim * points_pyramid[-1] * 2
-        fusion_dim = encoder_hidden_dim * 2
-        # self.position_embedding = PositionEmbeddingCoordsSine(d_pos=pcd_output_dim)
-        self.position_embedding = PositionalEmbedding(num_channels=pcd_output_dim)
         self.encoder_layer = TransformerEncoderLayer(
-            d_model=fusion_dim,
+            d_model=pcd_output_dim,
             nhead=num_attention_heads,
             dim_feedforward=encoder_hidden_dim,
             dropout=encoder_dropout,
@@ -138,9 +134,9 @@ class PoseTransformer(nn.Module):
         self.joint_transformer = TransformerEncoder(encoder_layer=self.encoder_layer, num_layers=encoder_num_layers)
 
         self.final_linear = (
-            nn.Sequential(nn.Linear(fusion_dim, 9))
+            nn.Sequential(nn.Linear(encoder_hidden_dim, 9))
             if not use_dropout_sampler
-            else DropoutSampler(fusion_dim, 9, dropout_rate=0.0)
+            else DropoutSampler(encoder_hidden_dim, 9, dropout_rate=0.0)
         )
         self.use_dropout_sampler = use_dropout_sampler
 
@@ -149,32 +145,23 @@ class PoseTransformer(nn.Module):
             init_mode="kaiming_uniform", init_weight=0, init_bias=0
         )  # init the final output layer's weights to zeros
         self.fusion_tail_rot_x = nn.Sequential(
-            nn.Linear(fusion_dim, fusion_projection_dim),
-            # nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
-            nn.ReLU(inplace=True),
-            nn.Linear(fusion_projection_dim, fusion_projection_dim),
-            # nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
+            nn.Linear(encoder_hidden_dim, fusion_projection_dim),
+            nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
             nn.ReLU(inplace=True),
             Linear(fusion_projection_dim, 3, **init_zero),
         )
         self.fusion_tail_rot_y = nn.Sequential(
-            nn.Linear(fusion_dim, fusion_projection_dim),
+            nn.Linear(encoder_hidden_dim, fusion_projection_dim),
             nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
             nn.ReLU(inplace=True),
-            # nn.Linear(fusion_projection_dim, fusion_projection_dim),
-            # nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
-            # nn.ReLU(inplace=True),
             Linear(fusion_projection_dim, 3, **init_zero),
         )
 
         """ translation regress head """
         self.fusion_tail_trans = nn.Sequential(
-            nn.Linear(fusion_dim, fusion_projection_dim),
+            nn.Linear(encoder_hidden_dim, fusion_projection_dim),
             nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
             nn.ReLU(inplace=True),
-            # nn.Linear(fusion_projection_dim, fusion_projection_dim),
-            # nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
-            # nn.ReLU(inplace=True),
             Linear(fusion_projection_dim, 3, **init_zero),
         )
 
@@ -184,28 +171,23 @@ class PoseTransformer(nn.Module):
             pcd1: (B, N, 3)
             pcd2: (B, M, 3)
         Returns:
-            (B, M, 3)
+            (B, 3)
         """
         # Encode geometry1 and geometry2
         center1, enc_pcd1 = self.pcd_encoder(pcd1[:, :, :3], pcd1[:, :, 3:])
         center2, enc_pcd2 = self.pcd_encoder(pcd2[:, :, :3], pcd2[:, :, 3:])
 
-        # Positional embeddings
-        pos_emb_1 = self.position_embedding(torch.arange(enc_pcd1.shape[-1], device=self.device)).transpose(0, 1)
-        pos_emb_2 = self.position_embedding(torch.arange(enc_pcd2.shape[-1], device=self.device)).transpose(0, 1)
+        enc_pcd1 = enc_pcd1.transpose(1, 2)  # (B, N, C)
+        enc_pcd2 = enc_pcd2.transpose(1, 2)  # (B, M, C)
+        enc_pcd1 += self.seg_embedding_1.weight[None, ...]  # (B, N, C)
+        enc_pcd2 += self.seg_embedding_2.weight[None, ...]  # (B, M, C)
 
-        # Add positional embeddings to enc_pcd1 and enc_pcd2
-        enc_pcd1 = enc_pcd1 + pos_emb_1[None, :, :]  # (B, C, N)
-        enc_pcd2 = enc_pcd2 + pos_emb_2[None, :, :]  # (B, C, N)
-
-        # Do cross attention
-        for ca in self.cross_attentions:
-            enc_pcd1, enc_pcd2 = ca(enc_pcd1, enc_pcd2)
-
-        total_feat = torch.cat((enc_pcd1, enc_pcd2), dim=1)  # (B, 2C, N)
-        encoder_output = self.joint_transformer(total_feat.transpose(1, 2))  # (B, N, 2C)
-        # encoder_output = encoder_output.flatten(1)  # (B, N * 2C)
-        encoder_output = encoder_output.max(dim=1)[0]  # (B, 2C)
+        # Add special tokens
+        batch_size = enc_pcd1.size(0)
+        special_token = self.special_token_embedding.weight[None, ...].expand(batch_size, 1, -1)
+        total_feat = torch.cat((special_token, enc_pcd1, enc_pcd2), dim=1)  # (B, N + M + 1, C)
+        encoder_output = self.joint_transformer(total_feat)  # (B, N + M + 1, C)
+        encoder_output = encoder_output[:, 0, :]  # (B, C)  # only use the first token
         rot_x = self.fusion_tail_rot_x(encoder_output)
         rot_y = self.fusion_tail_rot_y(encoder_output)
         trans = self.fusion_tail_trans(encoder_output)

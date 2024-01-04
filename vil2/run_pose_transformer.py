@@ -91,21 +91,18 @@ if __name__ == "__main__":
         train_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
         shuffle=True,
-        num_worker=23,
+        # num_workers=23,
     )
     val_data_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
         shuffle=False,
-        num_worker=23,
+        # num_workers=23,
     )
 
     # Build model
     net_name = cfg.MODEL.NOISE_NET.NAME
     net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
-
-    # net_init_args["pcd_input_dim"] = cfg.MODEL.PCD_SIZE
-    # net_init_args["pcd_output_dim"] = cfg.MODEL.GEOMETRY_FEAT_DIM
 
     pose_transformer = PoseTransformer(**net_init_args)
     tmorp_model = TmorpModel(cfg, pose_transformer)
@@ -117,5 +114,8 @@ if __name__ == "__main__":
     os.makedirs(save_dir, exist_ok=True)
 
     tmorp_model.train(
-        num_epochs=cfg.TRAIN.NUM_EPOCHS, train_data_loader=train_data_loader, val_data_loader=val_data_loader, save_path=save_path
+        num_epochs=cfg.TRAIN.NUM_EPOCHS,
+        train_data_loader=train_data_loader,
+        val_data_loader=val_data_loader,
+        save_path=save_path,
     )
