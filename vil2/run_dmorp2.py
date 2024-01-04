@@ -4,7 +4,7 @@ import torch
 import pickle
 import argparse
 import copy
-from vil2.data_gen.data_loader import DiffDataset
+from vil2.data_gen.preprocess_data import DiffDataset
 from vil2.model.dmorp_model import DmorpModel
 from vil2.model.net_factory import build_noise_pred_net
 from detectron2.config import LazyConfig
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     retrain = cfg.MODEL.RETRAIN
     pcd_size = cfg.MODEL.PCD_SIZE
     # Load dataset & data loader
-    with open(os.path.join(root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"), "rb") as f:
+    with open(os.path.join(root_path, "test_data", "dmorp_agmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"), "rb") as f:
         dtset = pickle.load(f)
     dataset = DiffDataset(dtset=dtset)
     train_size = int(cfg.MODEL.TRAIN_TEST_SPLIT * len(dataset))

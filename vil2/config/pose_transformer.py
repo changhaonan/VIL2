@@ -7,11 +7,12 @@ ENV = dict(
 )
 
 DATALOADER = dict(
-    BATCH_SIZE=128,
+    BATCH_SIZE=32,
     # NUM_WORKERS=8,
 )
 TRAIN = dict(
     NUM_EPOCHS=10000,
+    LR=1e-4,
 )
 MODEL = dict(
     POSE_DIM=256,  # 6d pose/ 3d translation
@@ -20,38 +21,35 @@ MODEL = dict(
     NOISE_NET=dict(
         NAME="TRANSFORMER",
         INIT_ARGS=dict(
-            UNETMLP = dict(
+            UNETMLP=dict(
                 input_dim=256,
-                global_cond_dim=1024, 
+                global_cond_dim=1024,
                 diffusion_step_embed_dim=128,
                 use_global_geometry=True,
                 use_pointnet=False,
                 use_dropout_sampler=False,
                 rotation_orthogonalization=True,
-                down_dims=[256, 512, 1024], #[1024, 2048, 2048]
+                down_dims=[256, 512, 1024],  # [1024, 2048, 2048]
                 downsample_pcd_enc=False,
                 downsample_size=256,
             ),
-            TRANSFORMER = dict(
-                input_dim=256,
-                global_cond_dim=1024, 
-                diffusion_step_embed_dim=128,
-                use_global_geometry=True,
-                use_pointnet=False,
-                rotation_orthogonalization=False,
+            TRANSFORMER=dict(
+                pcd_input_dim=6,
+                pcd_output_dim=512,
+                use_pcd_mean_center=True,
+                points_pyramid=[128, 32],
+                ca_channels=[512, 512],
                 num_attention_heads=2,
                 encoder_hidden_dim=512,
                 encoder_dropout=0.1,
-                encoder_activation='relu',
+                encoder_activation="relu",
                 encoder_num_layers=2,
                 fusion_projection_dim=256,
-                downsample_pcd_enc=False,
-                downsample_size=128,
                 use_dropout_sampler=False,
             ),
-            PARALLELMLP = dict(
+            PARALLELMLP=dict(
                 input_dim=256,
-                global_cond_dim=1024, 
+                global_cond_dim=1024,
                 diffusion_step_embed_dim=128,
                 use_global_geometry=True,
                 use_pointnet=False,
@@ -60,7 +58,7 @@ MODEL = dict(
                 fusion_projection_dim=512,
                 downsample_pcd_enc=False,
                 downsample_size=256,
-            )
+            ),
         ),
     ),
     TIME_EMB_DIM=128,
@@ -74,15 +72,14 @@ MODEL = dict(
         SHUFFLE=False,
         CANONICALIZE=False,
     ),
-    DATASET_CONFIG = "s300-c20-r0.5", # "s300-c20-r0.5", #"s500-c20-r0.5" #"s1000-c1-r0.5", # "s250-c40-r2", # "s100-c20-r2",
+    DATASET_CONFIG="s300-c20-r0.5",  # "s300-c20-r0.5", #"s500-c20-r0.5" #"s1000-c1-r0.5", # "s250-c40-r2", # "s100-c20-r2",
     SAVE_FIG=True,
     VISUALIZE=False,
-
     MAX_SCENE_SIZE=4,
     ACTION_DIM=3 + 1,  # 6d pose/ 3d translation + time stamp
     VISION_ENCODER=dict(
-    NAME="resnet18",
-    PRETRAINED=True,
+        NAME="resnet18",
+        PRETRAINED=True,
     ),
     SEMANTIC_FEAT_DIM=10,
     AGGREGATE_TYPE="sum",  # mean, max, sum
@@ -96,9 +93,6 @@ MODEL = dict(
     GUIDE_DATA_CONSISTENCY=True,
     GUIDE_SEMANTIC_CONSISTENCY=False,
     USE_POSITIONAL_EMBEDDING=True,
-
 )
-
-
 
 CUDA_DEVICE = "cuda:0"

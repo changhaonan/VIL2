@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 import torch
 import torch.nn as nn
 import math
-import torch 
+import torch
 import torch.nn.functional as F
 from diffusers.training_utils import EMAModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
@@ -15,15 +15,16 @@ from vil2.data.obj_dp_dataset import normalize_data, unnormalize_data
 import vil2.utils.torch_utils as torch_utils
 import clip
 from vil2.utils.eval_utils import compare_distribution
-from vil2.data_gen.data_loader import visualize_pcd_with_open3d
+from vil2.data_gen.preprocess_data import visualize_pcd_with_open3d
 from vil2.model.network.genpose_modules import perturb_pose
+
 
 class DmorpModel:
     """Diffusion Model for multi-object relative Pose Generation"""
 
     def __init__(self, cfg, vision_encoder, noise_pred_net, device):
         self.cfg = cfg
-        # check cuda and mps
+        # check device
         if torch.cuda.is_available():
             self.device = torch.device(device)
         else:
@@ -74,9 +75,9 @@ class DmorpModel:
             prediction_type="epsilon",
         )
         # noise net
-        # Check if 
+        # Check if
         self.noise_pred_net = nn.DataParallel(noise_pred_net)
-        # self.noise_pred_net = noise_pred_net    
+        # self.noise_pred_net = noise_pred_net
         self.nets = nn.ModuleDict(
             {
                 "noise_pred_net": self.noise_pred_net,
@@ -102,7 +103,7 @@ class DmorpModel:
         # Standard ADAM optimizer
         # Note that EMA parametesr are not optimized
         optimizer = torch.optim.AdamW(params=self.nets.parameters(), lr=1e-4, weight_decay=1e-8)
-        
+
         # optimizer = torch.optim.AdamW(params=self.nets.parameters(), lr=1e-4, eps=1e-8, betas=(0.9, 0.999))
 
         # Cosine LR schedule with linear warmup
@@ -116,7 +117,7 @@ class DmorpModel:
         global_step = 0
         best_loss = float("inf")
         best_state_dict = None
-        best_epoch  = None
+        best_epoch = None
         for epoch in range(num_epochs):
             epoch_loss = 0
             epoch_norm_loss = 0
@@ -145,7 +146,7 @@ class DmorpModel:
                 timesteps = torch.randint(
                     0,
                     self.noise_scheduler.config.num_train_timesteps,
-                    (B*M,),
+                    (B * M,),
                     device=self.device,
                 ).long()
 
@@ -154,16 +155,16 @@ class DmorpModel:
                 noisy_actions = self.noise_scheduler.add_noise(pose9d, noise, timesteps)
 
                 # predict the noise residual
-                noise_pred = self.noise_pred_net(
-                    noisy_actions, timesteps, geometry1=target, geometry2=fixed
-                )
+                noise_pred = self.noise_pred_net(noisy_actions, timesteps, geometry1=target, geometry2=fixed)
 
                 # L2 loss
                 loss = nn.functional.mse_loss(noise_pred, noise)
-                
+
                 normalization_loss1 = abs(torch.norm(noise_pred[:, 3:6], dim=-1).mean() - 1)
-                normalization_loss2 = abs(torch.norm(noise_pred[:, 6:9], dim=-1).mean() - 1) 
-                normalization_loss3 = torch.norm(torch.sum(noise_pred[:, 3:6] * noise_pred[:, 6:9], dim=1), dim=-1).mean()
+                normalization_loss2 = abs(torch.norm(noise_pred[:, 6:9], dim=-1).mean() - 1)
+                normalization_loss3 = torch.norm(
+                    torch.sum(noise_pred[:, 3:6] * noise_pred[:, 6:9], dim=1), dim=-1
+                ).mean()
                 trans_loss = nn.functional.mse_loss(noise_pred[:, :3], noise[:, :3])
                 rot1_loss = nn.functional.mse_loss(noise_pred[:, 3:6], noise[:, 3:6])
                 rot2_loss = nn.functional.mse_loss(noise_pred[:, 6:9], noise[:, 6:9])
@@ -184,12 +185,9 @@ class DmorpModel:
                     loss = loss
                 optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    self.nets.parameters(), 
-                    max_norm=1.0
-                )
+                torch.nn.utils.clip_grad_norm_(self.nets.parameters(), max_norm=1.0)
                 optimizer.step()
-                
+
                 # step lr scheduler every batch
                 # this is different from standard pytorch behavior
                 lr_scheduler.step()
@@ -199,10 +197,17 @@ class DmorpModel:
 
                 progress_bar.update(1)
                 epoch_loss += loss.detach().cpu().item()
-                logs = {"loss": epoch_loss/(it+1), "t": t_loss/(it+1), "r1": r1_loss/(it+1), "r2": r2_loss/(it+1), "norm": epoch_norm_loss/(it+1), "lr": lr_scheduler.get_last_lr()[0]}
+                logs = {
+                    "loss": epoch_loss / (it + 1),
+                    "t": t_loss / (it + 1),
+                    "r1": r1_loss / (it + 1),
+                    "r2": r2_loss / (it + 1),
+                    "norm": epoch_norm_loss / (it + 1),
+                    "lr": lr_scheduler.get_last_lr()[0],
+                }
                 progress_bar.set_postfix(**logs)
                 global_step += 1
-            
+
             epoch_loss /= len(data_loader)
             # print(f"Epoch {epoch}, loss {epoch_loss}")
             if epoch_loss < best_loss:
@@ -216,74 +221,79 @@ class DmorpModel:
         # copy ema back to model
         ema.copy_to(self.nets.parameters())
         return best_state_dict, best_epoch
-    
 
     def rk45sampler(
         score_model,
         data,
         prior,
         sde_coeff,
-        atol=1e-5, 
-        rtol=1e-5, 
-        device='cuda', 
+        atol=1e-5,
+        rtol=1e-5,
+        device="cuda",
         eps=1e-5,
         T=1.0,
         num_steps=None,
-        pose_mode='quat_wxyz', 
+        pose_mode="quat_wxyz",
         denoise=True,
         init_x=None,
-        ):
+    ):
         pose_dim = get_pose_dim(pose_mode)
-        batch_size=data['pts'].shape[0]
-        init_x = prior((batch_size, pose_dim), T=T).to(device) if init_x is None else init_x + prior((batch_size, pose_dim), T=T).to(device)
+        batch_size = data["pts"].shape[0]
+        init_x = (
+            prior((batch_size, pose_dim), T=T).to(device)
+            if init_x is None
+            else init_x + prior((batch_size, pose_dim), T=T).to(device)
+        )
         shape = init_x.shape
-        
+
         def score_eval_wrapper(data):
             """A wrapper of the score-based model for use by the ODE solver."""
             with torch.no_grad():
                 score = score_model(data)
             return score.cpu().numpy().reshape((-1,))
-        
-        def ode_func(t, x):      
+
+        def ode_func(t, x):
             """The ODE function for use by the ODE solver."""
             x = torch.tensor(x.reshape(-1, pose_dim), dtype=torch.float32, device=device)
             time_steps = torch.ones(batch_size, device=device).unsqueeze(-1) * t
             drift, diffusion = sde_coeff(torch.tensor(t))
             drift = drift.cpu().numpy()
             diffusion = diffusion.cpu().numpy()
-            data['sampled_pose'] = x
-            data['t'] = time_steps
+            data["sampled_pose"] = x
+            data["t"] = time_steps
             return drift - 0.5 * (diffusion**2) * score_eval_wrapper(data)
-    
-        # Run the black-box ODE solver, note the 
+
+        # Run the black-box ODE solver, note the
         t_eval = None
         if num_steps is not None:
             # num_steps, from T -> eps
             t_eval = np.linspace(T, eps, num_steps)
-        res = integrate.solve_ivp(ode_func, (T, eps), init_x.reshape(-1).cpu().numpy(), rtol=rtol, atol=atol, method='RK45', t_eval=t_eval)
-        xs = torch.tensor(res.y, device=device).T.view(-1, batch_size, pose_dim) # [num_steps, bs, pose_dim]
-        x = torch.tensor(res.y[:, -1], device=device).reshape(shape) # [bs, pose_dim]
+        res = integrate.solve_ivp(
+            ode_func, (T, eps), init_x.reshape(-1).cpu().numpy(), rtol=rtol, atol=atol, method="RK45", t_eval=t_eval
+        )
+        xs = torch.tensor(res.y, device=device).T.view(-1, batch_size, pose_dim)  # [num_steps, bs, pose_dim]
+        x = torch.tensor(res.y[:, -1], device=device).reshape(shape)  # [bs, pose_dim]
         # denoise, using the predictor step in P-C sampler
         if denoise:
             # Reverse diffusion predictor for denoising
             vec_eps = torch.ones((x.shape[0], 1), device=x.device) * eps
             drift, diffusion = sde_coeff(vec_eps)
-            data['sampled_pose'] = x.float()
-            data['t'] = vec_eps
+            data["sampled_pose"] = x.float()
+            data["t"] = vec_eps
             grad = score_model(data)
-            drift = drift - diffusion**2*grad       # R-SDE
-            mean_x = x + drift * ((1-eps)/(1000 if num_steps is None else num_steps))
+            drift = drift - diffusion**2 * grad  # R-SDE
+            mean_x = x + drift * ((1 - eps) / (1000 if num_steps is None else num_steps))
             x = mean_x
-        
+
         num_steps = xs.shape[0]
-        xs = xs.reshape(batch_size*num_steps, -1)
+        xs = xs.reshape(batch_size * num_steps, -1)
         xs[:, :-3] = normalize_rotation(xs[:, :-3], pose_mode)
         xs = xs.reshape(num_steps, batch_size, -1)
-        xs[:, :, -3:] += data['pts_center'].unsqueeze(0).repeat(xs.shape[0], 1, 1)
+        xs[:, :, -3:] += data["pts_center"].unsqueeze(0).repeat(xs.shape[0], 1, 1)
         x[:, :-3] = normalize_rotation(x[:, :-3], pose_mode)
-        x[:, -3:] += data['pts_center']
+        x[:, -3:] += data["pts_center"]
         return xs.permute(1, 0, 2), x
-    
+
     def train_score(self, num_epochs: int, data_loader):
         # Exponential Moving Average
         # accelerates training and improves stability
@@ -293,7 +303,7 @@ class DmorpModel:
         # Standard ADAM optimizer
         # Note that EMA parametesr are not optimized
         optimizer = torch.optim.AdamW(params=self.nets.parameters(), lr=1e-4, weight_decay=1e-8)
-        
+
         # optimizer = torch.optim.AdamW(params=self.nets.parameters(), lr=1e-4, eps=1e-8, betas=(0.9, 0.999))
 
         # Cosine LR schedule with linear warmup
@@ -307,7 +317,7 @@ class DmorpModel:
         global_step = 0
         best_loss = float("inf")
         best_state_dict = None
-        best_epoch  = None
+        best_epoch = None
         for epoch in range(num_epochs):
             epoch_loss = 0
             progress_bar = tqdm(data_loader)
@@ -328,8 +338,10 @@ class DmorpModel:
                 for _ in range(repeat_num):
                     perturbed_pose, std, ts, target_score = perturb_pose(pose9d.clone())
                     estimated_score = self.noise_pred_net(perturbed_pose, ts, geometry1=target, geometry2=fixed)
-                    loss_weighting = std ** 2
-                    score_loss += torch.mean(torch.sum((loss_weighting * (estimated_score - target_score)**2).view(B, -1), dim=-1))
+                    loss_weighting = std**2
+                    score_loss += torch.mean(
+                        torch.sum((loss_weighting * (estimated_score - target_score) ** 2).view(B, -1), dim=-1)
+                    )
                 score_loss /= repeat_num
                 if self.rotation_orthogonalization:
                     loss = score_loss
@@ -338,12 +350,9 @@ class DmorpModel:
                     loss = score_loss
                 optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    self.nets.parameters(), 
-                    max_norm=1.0
-                )
+                torch.nn.utils.clip_grad_norm_(self.nets.parameters(), max_norm=1.0)
                 optimizer.step()
-                
+
                 # step lr scheduler every batch
                 # this is different from standard pytorch behavior
                 lr_scheduler.step()
@@ -354,10 +363,10 @@ class DmorpModel:
                 progress_bar.update(1)
                 epoch_loss += loss.detach().cpu().item()
                 # logs = {"loss": epoch_loss/(it+1), "t": t_loss/(it+1), "r1": r1_loss/(it+1), "r2": r2_loss/(it+1), "norm": epoch_norm_loss/(it+1), "lr": lr_scheduler.get_last_lr()[0]}
-                logs = {"loss": epoch_loss/(it+1), "lr": lr_scheduler.get_last_lr()[0]}
+                logs = {"loss": epoch_loss / (it + 1), "lr": lr_scheduler.get_last_lr()[0]}
                 progress_bar.set_postfix(**logs)
                 global_step += 1
-            
+
             epoch_loss /= len(data_loader)
             # print(f"Epoch {epoch}, loss {epoch_loss}")
             if epoch_loss < best_loss:
@@ -408,22 +417,23 @@ class DmorpModel:
 
             for k in self.noise_scheduler.timesteps:
                 # predict noise
-                noise_pred = self.nets["noise_pred_net"](
-                    sample=naction, timestep=k, global_cond=ncond
-                )
+                noise_pred = self.nets["noise_pred_net"](sample=naction, timestep=k, global_cond=ncond)
                 # inverse diffusion step (remove noise)
-                naction = self.noise_scheduler.step(
-                    model_output=noise_pred, timestep=k, sample=naction
-                ).prev_sample
+                naction = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=naction).prev_sample
                 # gradient guided time consistency
                 naction_grad = torch.zeros_like(naction)
                 offset = 0
                 gamma = 0.1
                 if self.guide_data_consistency and self.recon_data_stamp:
-                    ndata_stamp_mean = naction[..., offset:offset+self.time_emb_dim].reshape((B, M, self.time_emb_dim)).mean(
-                        dim=1, keepdim=True).repeat(1, M, 1).flatten(start_dim=0, end_dim=1)
-                    ndata_stamp_grad = naction[..., offset:offset+self.time_emb_dim] - ndata_stamp_mean
-                    naction_grad[..., offset:offset+self.time_emb_dim] = gamma * ndata_stamp_grad
+                    ndata_stamp_mean = (
+                        naction[..., offset : offset + self.time_emb_dim]
+                        .reshape((B, M, self.time_emb_dim))
+                        .mean(dim=1, keepdim=True)
+                        .repeat(1, M, 1)
+                        .flatten(start_dim=0, end_dim=1)
+                    )
+                    ndata_stamp_grad = naction[..., offset : offset + self.time_emb_dim] - ndata_stamp_mean
+                    naction_grad[..., offset : offset + self.time_emb_dim] = gamma * ndata_stamp_grad
                     offset += self.time_emb_dim
                 # apply gradient
                 naction = naction - naction_grad
@@ -451,15 +461,13 @@ class DmorpModel:
                     # sample noise to add to actions
                     noise = torch.randn(naction.shape, device=self.device)
                     # sample a diffusion iteration for each data point
-                    timesteps = torch.tensor([idx_time_step], device=self.device).tile((B*M,)).long()
+                    timesteps = torch.tensor([idx_time_step], device=self.device).tile((B * M,)).long()
                     # add noise to the clean images according to the noise magnitude at each diffusion iteration
                     # (this is the forward diffusion process)
                     noisy_actions = self.noise_scheduler.add_noise(naction, noise, timesteps)
 
                     # predict the noise residual
-                    noise_pred = self.noise_pred_net(
-                        noisy_actions, timesteps, global_cond=ncond
-                    )
+                    noise_pred = self.noise_pred_net(noisy_actions, timesteps, global_cond=ncond)
 
                     # L2 loss
                     loss = nn.functional.mse_loss(noise_pred, noise)
@@ -474,7 +482,18 @@ class DmorpModel:
                 plt.plot(loss_wrt_timestep)
                 plt.show()
 
-    def debug_inference(self, dataset, sample_size: int = 750, consider_only_one_pair: bool = False, debug: bool = False, shuffle: bool = False, save_path: str = None, save_fig: bool = False, visualize: bool = True, random_index: int = None):
+    def debug_inference(
+        self,
+        dataset,
+        sample_size: int = 750,
+        consider_only_one_pair: bool = False,
+        debug: bool = False,
+        shuffle: bool = False,
+        save_path: str = None,
+        save_fig: bool = False,
+        visualize: bool = True,
+        random_index: int = None,
+    ):
         if sample_size == -1:
             sample_size = len(dataset)
         if consider_only_one_pair:
@@ -508,7 +527,7 @@ class DmorpModel:
             else:
                 target = dt["shifted"]["target"].to(self.device).to(torch.float32)
                 fixed = dt["shifted"]["fixed"].to(self.device).to(torch.float32)
-            
+
             pose9d = dt["shifted"]["9dpose"].to(self.device).to(torch.float32)
             pose9d = pose9d.to(torch.float32)
             transform = dt["shifted"]["transform"].to(torch.float32)
@@ -530,15 +549,17 @@ class DmorpModel:
                 self.nets.eval()
                 timesteps = list(range(len(self.noise_scheduler)))[::-1]
                 for _, t in enumerate(tqdm(timesteps, desc="Denoising steps")):
-                    t = torch.from_numpy(np.repeat(t, noise_sample.shape[0])).long().to("cuda:0")  # num_samples is config.eval.batch_size
+                    t = (
+                        torch.from_numpy(np.repeat(t, noise_sample.shape[0])).long().to("cuda:0")
+                    )  # num_samples is config.eval.batch_size
                     if consider_only_one_pair:
                         residual = self.nets.noise_pred_net(noise_sample, t, target_random, fixed_random)
                     else:
                         residual = self.nets.noise_pred_net(noise_sample, t, target, fixed)
                     noise_sample = self.noise_scheduler.step(residual, t[0], noise_sample).prev_sample
-            
+
             # for i, pred_transform9d in enumerate(noise_sample):
-                # pred_transform9d = torch.clamp(pred_transform9d, min=-1.0, max=1.0)
+            # pred_transform9d = torch.clamp(pred_transform9d, min=-1.0, max=1.0)
             pred_transform9d = np.mean(noise_sample.detach().cpu().numpy(), axis=0)
             trans = pred_transform9d[:3].T
             v1 = pred_transform9d[3:6].T
@@ -550,17 +571,30 @@ class DmorpModel:
             rotation = np.column_stack((v1, v2, v3))
             pred_transform_matrix = np.eye(4)
             pred_transform_matrix[:3, :3] = rotation
-            pred_transform_matrix[:3, 3] = trans 
+            pred_transform_matrix[:3, 3] = trans
 
             if debug:
                 if consider_only_one_pair:
-                    visualize_pcd_with_open3d(target_random[random_index].detach().cpu().numpy(), fixed_random[random_index].detach().cpu().numpy(), pred_transform_matrix)
+                    visualize_pcd_with_open3d(
+                        target_random[random_index].detach().cpu().numpy(),
+                        fixed_random[random_index].detach().cpu().numpy(),
+                        pred_transform_matrix,
+                    )
                     pass
                 # else:
                 #     visualize_pcd_with_open3d(target[0].detach().cpu().numpy(), fixed[0].detach().cpu().numpy(), pred_transform_matrix)
-            compare_distribution(pose9d_full, noise_sample.detach().cpu().numpy(), dim_start=0, dim_end=9, title="Pose", save_path=save_path+".png", save_fig=save_fig, visualize=visualize)        
+            compare_distribution(
+                pose9d_full,
+                noise_sample.detach().cpu().numpy(),
+                dim_start=0,
+                dim_end=9,
+                title="Pose",
+                save_path=save_path + ".png",
+                save_fig=save_fig,
+                visualize=visualize,
+            )
             break
-        
+
     def save(self, export_path):
         """Save model weights"""
         torch.save(self.nets.state_dict(), export_path)
@@ -631,15 +665,15 @@ class DmorpModel:
         offset = 0
         actions = {}
         if self.recon_data_stamp:
-            ndata_stamp = naction[..., offset:offset + self.data_stamp_dim]
+            ndata_stamp = naction[..., offset : offset + self.data_stamp_dim]
             actions["data_stamp"] = ndata_stamp
             offset += self.data_stamp_dim
         if self.recon_semantic_feature:
-            nsem_feat = naction[..., offset:offset + self.semantic_feat_dim]
+            nsem_feat = naction[..., offset : offset + self.semantic_feat_dim]
             actions["sem_feat"] = unnormalize_data(nsem_feat, stats=stats["sem_feat"])
             offset += self.semantic_feat_dim
         if self.recon_pose:
-            npose = naction[..., offset:offset + self.pose_dim]
+            npose = naction[..., offset : offset + self.pose_dim]
             actions["pose"] = unnormalize_data(npose, stats=stats["pose"])
             offset += self.pose_dim
         return actions
@@ -648,7 +682,9 @@ class DmorpModel:
         """Build embedding key"""
         self.embedding_key = torch.arange(max_len, device=self.device).reshape((-1))
         self.embedding_key = self.nets["positional_embedding"](self.embedding_key).detach().to("cpu").numpy()
-        self.embedding_key = self.embedding_key / np.linalg.norm(self.embedding_key, axis=-1, keepdims=True)  # (max_len, time_emb_dim)
+        self.embedding_key = self.embedding_key / np.linalg.norm(
+            self.embedding_key, axis=-1, keepdims=True
+        )  # (max_len, time_emb_dim)
         compare_distribution(self.embedding_key, None, dim_end=8)
 
     def parse_embedding(self, embedding_query):
