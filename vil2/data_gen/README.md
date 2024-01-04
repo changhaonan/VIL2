@@ -5,7 +5,7 @@
 ### Step 1: Generate random initialization
 
 ```python
-python dmorp_gen.py --data_id=0 --target_object=tea_pot --anchor_object=tea_mug --num_samples=1000
+python dmorp_gen.py --data_id=0 --target_object=tea_pot --anchor_object=tea_mug --num_samples=20
 python dmorp_gen.py --data_id=1 --target_object=spoon --anchor_object=tea_pot --num_samples=1000
 ```
 
@@ -13,8 +13,10 @@ During this process, we generated a series of random poses. It creates a series 
 
 ### Step 2: Render depth & color images under generated initialization
 
+You can parallel multiple progress. (Depending your system capcity.)
 ```bash
-blenderproc run render_object.py --num_cam_poses 4
+blenderproc run render_object.py --num_cam_poses 4 --start_idx 0 --end_idx 10
+blenderproc run render_object.py --num_cam_poses 4 --start_idx 10 --end_idx 20
 ```
 
 ### Step 3: Generate Diffusion Dataset
