@@ -35,7 +35,7 @@ class LitPoseTransformer(L.LightningModule):
         # compute loss
         loss = F.mse_loss(pose9d_pred, pose9d)
         # log
-        self.log("train_loss", loss)
+        self.log("train_loss", loss, sync_dist=True)
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -47,7 +47,7 @@ class LitPoseTransformer(L.LightningModule):
         # compute loss
         loss = F.mse_loss(pose9d_pred, pose9d)
         # log
-        self.log("test_loss", loss)
+        self.log("test_loss", loss, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -59,7 +59,7 @@ class LitPoseTransformer(L.LightningModule):
         # compute loss
         loss = F.mse_loss(pose9d_pred, pose9d)
         # log
-        self.log("val_loss", loss)
+        self.log("val_loss", loss, sync_dist=True)
         return loss
 
     def configure_optimizers(self) -> OptimizerLRScheduler:

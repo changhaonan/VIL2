@@ -7,3 +7,5 @@ minigrid
 pymunk
 shapely
 scikit-image
+lightning
+wandb
