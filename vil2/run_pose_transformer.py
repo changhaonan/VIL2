@@ -11,6 +11,7 @@ from detectron2.config import LazyConfig
 from torch.utils.data.dataset import random_split
 
 
+
 if __name__ == "__main__":
     torch.set_float32_matmul_precision("medium")
     # Parse arguments
@@ -92,13 +93,13 @@ if __name__ == "__main__":
         train_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
         shuffle=True,
-        # num_workers=23,
+        # num_workers=24,
     )
     val_data_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
         shuffle=False,
-        # num_workers=23,
+        # num_workers=24,
     )
 
     # Build model
