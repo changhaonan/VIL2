@@ -6,6 +6,7 @@ import torch
 import cv2
 import os
 from scipy.spatial.transform import Rotation as R
+import open3d as o3d
 
 
 def position_encoding(x: torch.Tensor, min_timescale: float = 1.0, max_timescale: float = 1.0e2):
@@ -289,8 +290,32 @@ def get_pointcloud(color, depth, intrinsic):
     # Reshape color image to align with points
     colors = color.reshape(-1, 3)
 
-    # Concatenate points with colors
-    pcd_with_color = np.hstack((points, colors))
+    pcolors = np.hstack((points, colors))
+    pcolors = pcolors[pcolors[:, 0] != 0.0, :]
+    if pcolors.shape[0] == 0:
+        return None, 0
 
-    return pcd_with_color
+    points = pcolors[:, :3]
+    colors = pcolors[:, 3:]
+
+    tpcd = o3d.geometry.PointCloud()
+    tpcd.points = o3d.utility.Vector3dVector(points)
+
+    tpcd.colors = o3d.utility.Vector3dVector(colors / 255.0)
+
+    # Estimate normals
+    tpcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+
+    # Optional: Orient the normals to be consistent
+    tpcd.orient_normals_consistent_tangent_plane(k=50)
+
+    # Convert normals to numpy array
+    # normals = np.array(tpcd.normals)
+
+
+    # Concatenate points with colors
+    # pcd_with_color = np.hstack((points, normals, colors))
+
+    # return pcd_with_color
+    return tpcd, points.shape[0]
 
