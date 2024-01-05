@@ -1,4 +1,5 @@
 """Miscellaneous utilities."""
+from __future__ import annotations
 import torch.nn as nn
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,12 +16,9 @@ def position_encoding(x: torch.Tensor, min_timescale: float = 1.0, max_timescale
     channels = x.shape[-2]
     position = torch.arange(length, dtype=torch.float32, device=x.device)
     num_timescales = channels // 2
-    log_timescale_increment = np.log(float(max_timescale) / float(min_timescale)) / (
-        float(num_timescales) - 1
-    )
+    log_timescale_increment = np.log(float(max_timescale) / float(min_timescale)) / (float(num_timescales) - 1)
     inv_timescales = min_timescale * torch.exp(
-        torch.arange(num_timescales, dtype=torch.float32, device=x.device)
-        * -log_timescale_increment
+        torch.arange(num_timescales, dtype=torch.float32, device=x.device) * -log_timescale_increment
     )
     scaled_time = position.unsqueeze(1) * inv_timescales.unsqueeze(0)
     signal = torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], dim=1)
@@ -33,9 +31,7 @@ def position_encoding(x: torch.Tensor, min_timescale: float = 1.0, max_timescale
 # -----------------------------------------------------------------------------
 
 
-def draw_V_map(
-    observations: np.ndarray, V_f: nn.Module, sample_ratio: float = 0.01, output_path: str = None
-):
+def draw_V_map(observations: np.ndarray, V_f: nn.Module, sample_ratio: float = 0.01, output_path: str = None):
     obs = torch.from_numpy(observations).float().to("cuda:0")
     V = V_f(obs).detach().cpu().numpy()
     num_samples = int(obs.shape[0] * sample_ratio)
@@ -126,9 +122,7 @@ def plot_hist_scatter(
         data: (batch_size, state_dim)
     """
     plt.title(title)
-    fig, axes = plt.subplots(
-        nrows=data.shape[1], ncols=data.shape[1], figsize=(20, 20)
-    )  # Adjust the figsize as needed
+    fig, axes = plt.subplots(nrows=data.shape[1], ncols=data.shape[1], figsize=(20, 20))  # Adjust the figsize as needed
     # We'll create an aggregated version of data to compute statistics across all data
     all_data = np.stack(data, axis=0)
     # Compute max and min for the data for consistent axis limits
@@ -260,6 +254,37 @@ def quat_to_rotvec(quat_pose):
     else:
         raise NotImplementedError
 
+
+def pose9d_to_mat(pose9d):
+    trans = pose9d[:3]
+    rx = pose9d[3:6]
+    ry = pose9d[6:9]
+    mat = np.eye(4, dtype=np.float32)
+    mat[:3, 0] = rx
+    mat[:3, 1] = ry
+    mat[:3, 2] = np.cross(rx, ry)
+    mat[:3, 3] = trans
+    return mat
+
+
+def mat_to_pose9d(mat):
+    pose9d = np.zeros((9,), dtype=np.float32)
+    pose9d[:3] = mat[:3, 3]
+    pose9d[3:6] = mat[:3, 0]
+    pose9d[6:9] = mat[:3, 1]
+    return pose9d
+
+
+def mul_9d_pose(pose_1, pose_2):
+    """Multiply two 9d poses."""
+    mat_1 = pose9d_to_mat(pose_1)
+    mat_2 = pose9d_to_mat(pose_2)
+
+    mat_3 = mat_1 @ mat_2
+    pose_3 = mat_to_pose9d(mat_3)
+    return pose_3
+
+
 # -----------------------------------------------------------------------------
 # 3D Utils
 # -----------------------------------------------------------------------------
@@ -312,10 +337,80 @@ def get_pointcloud(color, depth, intrinsic):
     # Convert normals to numpy array
     # normals = np.array(tpcd.normals)
 
-
     # Concatenate points with colors
     # pcd_with_color = np.hstack((points, normals, colors))
 
     # return pcd_with_color
     return tpcd, points.shape[0]
 
+
+def farthest_point_sampling_with_color(pcd, n_points):
+    """
+    Perform Farthest Point Sampling on a point cloud with color information.
+
+    :param pcd: numpy array of shape (N, 6), where N is the number of points in the point cloud.
+                The first three columns are spatial coordinates and the last three are color information.
+    :param n_points: number of points to sample.
+    :return: sampled point cloud of shape (n_points, 6).
+    """
+    # farthest_points = np.zeros((n_points, 6))
+    farthest_points = np.zeros((n_points, 9))
+    # Initialize an array to store the shortest distance of each point to any selected point
+    shortest_distances = np.full(len(pcd), np.inf)
+    # Randomly choose the first point and update the distances
+    first_index = np.random.randint(len(pcd))
+    farthest_points[0] = pcd[first_index]
+    shortest_distances = np.linalg.norm(pcd[:, :3] - farthest_points[0, :3], axis=1)
+
+    for i in range(1, n_points):
+        # Select the point that is farthest to any point in the farthest_points set
+        farthest_index = np.argmax(shortest_distances)
+        farthest_points[i] = pcd[farthest_index]
+        # Update shortest_distances array
+        distances_to_new_point = np.linalg.norm(pcd[:, :3] - farthest_points[i, :3], axis=1)
+        shortest_distances = np.minimum(shortest_distances, distances_to_new_point)
+
+    return farthest_points
+
+
+def visualize_pcd(
+    coordinate: np.ndarray,
+    normal: np.ndarray | None = None,
+    color: np.ndarray | None = None,
+    pose: np.ndarray | None = None,
+):
+    """Visualize the given point cloud using open3d."""
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(coordinate)
+    if normal is not None:
+        pcd.normals = o3d.utility.Vector3dVector(normal)
+    if color is not None:
+        pcd.colors = o3d.utility.Vector3dVector(color)
+    if pose is not None:
+        pcd.transform(pose)
+
+    origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+    o3d.visualization.draw_geometries([pcd, origin])
+
+
+def visualize_pcd_list(
+    coordinate_list: list[np.ndarray],
+    normal_list: list[np.ndarray] | None = None,
+    color_list: list[np.ndarray] | None = None,
+    pose_list: list[np.ndarray] | None = None,
+):
+    """Visualize a list of point cloud"""
+    vis_list = []
+    for i in range(len(coordinate_list)):
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(coordinate_list[i])
+        if normal_list is not None:
+            pcd.normals = o3d.utility.Vector3dVector(normal_list[i])
+        if color_list is not None:
+            pcd.colors = o3d.utility.Vector3dVector(color_list[i])
+        if pose_list is not None:
+            pcd.transform(pose_list[i])
+        vis_list.append(pcd)
+    origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+    vis_list.append(origin)
+    o3d.visualization.draw_geometries(vis_list)

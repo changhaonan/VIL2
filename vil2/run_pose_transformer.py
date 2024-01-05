@@ -12,7 +12,7 @@ from torch.utils.data.dataset import random_split
 
 
 if __name__ == "__main__":
-    torch.set_float32_matmul_precision('medium')
+    torch.set_float32_matmul_precision("medium")
     # Parse arguments
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--random_index", type=int, default=0)

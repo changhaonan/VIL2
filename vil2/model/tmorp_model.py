@@ -89,7 +89,8 @@ class TmorpModel:
         trainer = L.Trainer(
             max_epochs=num_epochs,
             logger=WandbLogger(name="Tmorp_model", save_dir=os.path.join(save_path, "logs")),
-            callbacks=[checkpoint_callback], strategy='ddp_find_unused_parameters_true',
+            callbacks=[checkpoint_callback],
+            strategy="ddp_find_unused_parameters_true",
         )
         trainer.fit(self.pose_transformer, train_dataloaders=train_data_loader, val_dataloaders=val_data_loader)
 
