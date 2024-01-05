@@ -34,7 +34,7 @@ MODEL = dict(
                 downsample_size=256,
             ),
             TRANSFORMER=dict(
-                pcd_input_dim=6,
+                pcd_input_dim=9,  # 3 + 3 + 3
                 pcd_output_dim=512,
                 use_pcd_mean_center=True,
                 points_pyramid=[128, 32],

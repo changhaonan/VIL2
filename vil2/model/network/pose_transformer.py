@@ -165,7 +165,15 @@ class PoseTransformer(nn.Module):
             Linear(fusion_projection_dim, 3, **init_zero),
         )
 
-    def forward(self, pcd1: torch.Tensor, pcd2: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        coord1: torch.Tensor,
+        normal1: torch.Tensor,
+        color1: torch.Tensor,
+        coord2: torch.Tensor,
+        normal2: torch.Tensor,
+        color2: torch.Tensor,
+    ) -> torch.Tensor:
         """
         Args:
             pcd1: (B, N, 3)
@@ -174,8 +182,10 @@ class PoseTransformer(nn.Module):
             (B, 3)
         """
         # Encode geometry1 and geometry2
-        center1, enc_pcd1 = self.pcd_encoder(pcd1[:, :, :3], pcd1[:, :, 3:])
-        center2, enc_pcd2 = self.pcd_encoder(pcd2[:, :, :3], pcd2[:, :, 3:])
+        pcd_feat1 = torch.cat((normal1, color1), dim=-1)  # (B, N, 6)
+        pcd_feat2 = torch.cat((normal2, color2), dim=-1)  # (B, M, 6)
+        center1, enc_pcd1 = self.pcd_encoder(coord1, pcd_feat1)
+        center2, enc_pcd2 = self.pcd_encoder(coord2, pcd_feat2)
 
         enc_pcd1 = enc_pcd1.transpose(1, 2)  # (B, N, C)
         enc_pcd2 = enc_pcd2.transpose(1, 2)  # (B, M, C)

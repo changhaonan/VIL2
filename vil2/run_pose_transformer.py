@@ -5,11 +5,11 @@ import pickle
 import argparse
 import copy
 from vil2.data_gen.preprocess_data import DiffDataset
+from vil2.data.pcd_dataset import PointCloudDataset
 from vil2.model.network.pose_transformer import PoseTransformer
 from vil2.model.tmorp_model import TmorpModel
 from detectron2.config import LazyConfig
 from torch.utils.data.dataset import random_split
-
 
 
 if __name__ == "__main__":
@@ -26,14 +26,10 @@ if __name__ == "__main__":
     retrain = cfg.MODEL.RETRAIN
     pcd_size = cfg.MODEL.PCD_SIZE
     # Load dataset & data loader
-    with open(
-        os.path.join(
-            root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"
-        ),
-        "rb",
-    ) as f:
-        dtset = pickle.load(f)
-    dataset = DiffDataset(dtset=dtset)
+    dataset_file = os.path.join(
+        root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"
+    )
+    dataset = PointCloudDataset(data_file=dataset_file, dataset_name="dmorp", add_colors=True, add_normals=True)
     train_size = int(cfg.MODEL.TRAIN_TEST_SPLIT * len(dataset))
     val_size = len(dataset) - train_size
     if os.path.exists(
