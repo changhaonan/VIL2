@@ -21,21 +21,25 @@ argparser.add_argument("--light_radius_max", type=float, default=2.0)
 argparser.add_argument("--cam_radius_min", type=float, default=1.0)
 argparser.add_argument("--cam_radius_max", type=float, default=1.5)
 argparser.add_argument("--fix_cam", action="store_true")
+argparser.add_argument("--start_idx", type=int, default=0)
+argparser.add_argument("--end_idx", type=int, default=10)
 args = argparser.parse_args()
 
 # Set parameters
 output_dir = args.output_dir
 scene_path = args.scene_path
 data_id = args.data_id
+start_idx = args.start_idx
+end_idx = args.end_idx
 scene_path = os.path.join(scene_path, f"{data_id:06d}")
 export_dir = os.path.join(output_dir, f"{data_id:06d}")
 
 # Read scene info
 with open(os.path.join(scene_path, "scene_info.json"), "r") as f:
     scene_info = json.load(f)
-init_pose_1_list = scene_info["init_pose_1_list"]
-init_pose_2_list = scene_info["init_pose_2_list"]
-transform_list = scene_info["transform_list"]
+init_pose_1_list = scene_info["init_pose_1_list"][start_idx:end_idx]
+init_pose_2_list = scene_info["init_pose_2_list"][start_idx:end_idx]
+transform_list = scene_info["transform_list"][start_idx:end_idx]
 
 mesh_files = [scene_info["mesh_1"], scene_info["mesh_2"]]
 fix_cam = args.fix_cam
@@ -71,7 +75,7 @@ light_point = bproc.types.Light(light_type="POINT")
 for sample_idx, (init_pose_1, init_pose_2, transform) in enumerate(
     zip(init_pose_1_list, init_pose_2_list, transform_list)
 ):
-    print(f"Generating sample {sample_idx}....")
+    print(f"Generating sample {sample_idx + start_idx}....")
     # -------------------------- Object Pose -------------------------- #
     init_pose_1 = np.array(init_pose_1)
     init_pose_2 = np.array(init_pose_2)
@@ -138,7 +142,7 @@ for sample_idx, (init_pose_1, init_pose_2, transform) in enumerate(
             cam_poses.append(cam2world_matrix.tolist())
 
     # -------------------------- Render & Save -------------------------- #
-    sample_export_dir = os.path.join(export_dir, f"{sample_idx:06d}")
+    sample_export_dir = os.path.join(export_dir, f"{sample_idx + start_idx:06d}")
     for obj_idx in range(len(objs)):
         for _idx, obj in enumerate(objs):
             if _idx != obj_idx:

@@ -113,11 +113,12 @@ if __name__ == "__main__":
     # Parse arguments
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--data_id", type=int, default=1)
-    argparser.add_argument("--num_samples", type=int, default=200)
+    argparser.add_argument("--num_samples", type=int, default=10)
     argparser.add_argument("--target_object", type=str, default="spoon")
     argparser.add_argument("--anchor_object", type=str, default="tea_mug")
     argparser.add_argument("--random_region", type=float, default=0.5)
     argparser.add_argument("--fix_anchor", action="store_true")
+    argparser.add_argument("--visualize", action="store_true")
     args = argparser.parse_args()
     args.fix_anchor = True
     data_id = args.data_id
@@ -126,6 +127,7 @@ if __name__ == "__main__":
     target_object = args.target_object
     anchor_object = args.anchor_object
     fix_anchor = args.fix_anchor
+    visualize = args.visualize
 
     # Prepare data
     root_path = os.path.dirname(os.path.dirname((os.path.abspath(__file__))))
@@ -151,5 +153,8 @@ if __name__ == "__main__":
 
     export_dir = os.path.join(root_path, "test_data", "dmorp_augmented")
     augmentor.augment(data_id, num_samples, export_dir, random_region=random_region, fix_anchor=fix_anchor)
-    for i in range(3):
-        augmentor.visualize(data_id, export_dir, sample_idx=i)
+
+    # Check the result
+    if visualize:
+        for i in range(3):
+            augmentor.visualize(data_id, export_dir, sample_idx=i)
