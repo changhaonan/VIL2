@@ -28,7 +28,7 @@ class PointCloudDataset(Dataset):
         image_augmentations_path: Optional[str] = None,
         is_elastic_distortion: bool = False,
     ):
-        self._data = pickle.load(open(data_file, "rb"))
+        self._data = pickle.load(open(data_file, "rb"))  # A list of (coordinates, color, normals, labels, pose)
 
         # Color normalization
         if Path(str(color_mean_std)).exists():
