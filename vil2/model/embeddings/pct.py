@@ -80,13 +80,10 @@ class StackedAttention(nn.Module):
         super().__init__()
         self.conv1 = nn.Conv1d(channels, channels, kernel_size=1, bias=False)
         self.conv2 = nn.Conv1d(channels, channels, kernel_size=1, bias=False)
-
         self.bn1 = nn.BatchNorm1d(channels)
         self.bn2 = nn.BatchNorm1d(channels)
-
         self.sa1 = SA_Layer(channels)
         self.sa2 = SA_Layer(channels)
-
         self.relu = nn.ReLU()
 
     def forward(self, x):
@@ -96,30 +93,22 @@ class StackedAttention(nn.Module):
         # b * npoint, c, nsample
         # permute reshape
         batch_size, _, N = x.size()
-
         x = self.relu(self.bn1(self.conv1(x)))  # B, D, N
         x = self.relu(self.bn2(self.conv2(x)))
-
         x1 = self.sa1(x)
         x2 = self.sa2(x1)
-
         x = torch.cat((x1, x2), dim=1)
-
         return x
 
 
 def sample_and_group(npoint, nsample, xyz, points):
     B, N, C = xyz.shape
     S = npoint
-
     fps_idx = farthest_point_sample(xyz, npoint)  # [B, npoint]
-
     new_xyz = index_points(xyz, fps_idx)
     new_points = index_points(points, fps_idx)
-
     dists = square_distance(new_xyz, xyz)  # B x npoint x N
     idx = dists.argsort()[:, :, :nsample]  # B x npoint x K
-
     grouped_points = index_points(points, idx)
     grouped_points_norm = grouped_points - new_points.view(B, S, 1, -1)
     new_points = torch.cat([grouped_points_norm, new_points.view(B, S, 1, -1).repeat(1, 1, nsample, 1)], dim=-1)
@@ -129,9 +118,7 @@ def sample_and_group(npoint, nsample, xyz, points):
 class PointTransformerEncoderLarge(nn.Module):
     def __init__(self, output_dim=256, input_dim=6, mean_center=True):
         super(PointTransformerEncoderLarge, self).__init__()
-
         self.mean_center = mean_center
-
         self.conv1 = nn.Conv1d(input_dim, 64, kernel_size=1, bias=False)
         self.conv2 = nn.Conv1d(64, 64, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm1d(64)
@@ -139,12 +126,10 @@ class PointTransformerEncoderLarge(nn.Module):
         self.gather_local_0 = Local_op(in_channels=128, out_channels=128)
         self.gather_local_1 = Local_op(in_channels=256, out_channels=256)
         self.pt_last = StackedAttention(channels=256)
-
         self.relu = nn.ReLU()
         self.conv_fuse = nn.Sequential(
             nn.Conv1d(768, 1024, kernel_size=1, bias=False), nn.BatchNorm1d(1024), nn.LeakyReLU(negative_slope=0.2)
         )
-
         self.linear1 = nn.Linear(1024, 512, bias=False)
         self.bn6 = nn.BatchNorm1d(512)
         self.dp1 = nn.Dropout(p=0.5)
@@ -157,7 +142,6 @@ class PointTransformerEncoderLarge(nn.Module):
         if self.mean_center:
             xyz = xyz - center.view(-1, 1, 3).repeat(1, xyz.shape[1], 1)
         x = self.pct(torch.cat([xyz, f], dim=2))  # B, output_dim
-
         return center, x
 
     def pct(self, x):
@@ -178,11 +162,9 @@ class PointTransformerEncoderLarge(nn.Module):
         x = self.conv_fuse(x)
         x = torch.max(x, 2)[0]
         x = x.view(batch_size, -1)
-
         x = self.relu(self.bn6(self.linear1(x)))
         x = self.dp1(x)
         x = self.linear2(x)
-
         return x
 
 
@@ -334,7 +316,6 @@ class PointTransformerEncoderSmall(nn.Module):
         x = self.pt_last(feature_1)  # B, D * 2, nsamples
         x = torch.cat([x, feature_1], dim=1)  # B, D * 3, nsamples
         x = self.conv_fuse(x)
-
         return x
 
 
