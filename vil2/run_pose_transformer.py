@@ -64,8 +64,11 @@ if __name__ == "__main__":
         indices=val_indices,
         add_colors=True,
         add_normals=True,
+        is_elastic_distortion=is_elastic_distortion,
+        is_random_distortion=is_random_distortion,
         random_distortion_rate=random_distortion_rate,
-        random_distortion_mag=random_distortion_mag)
+        random_distortion_mag=random_distortion_mag,
+        volume_augmentations_path=volume_augmentations_path)
     val_dataset.set_mode("val")
 
     # # Use cached dataset if available

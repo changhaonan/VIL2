@@ -152,7 +152,7 @@ class PointCloudDataset(Dataset):
         target_pose = utils.pose9d_to_mat(target_pose)
         fixed_pose = np.eye(4)
 
-        if self.mode == "train":
+        if self.mode == "train" or self.mode == "val":
             # Augment data
             target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(
                 target_coord, target_normal, target_color, None, target_pose
@@ -286,28 +286,29 @@ def random_on_pose(
 
 
 def rotate_around_axis(coordinate, normal, color, pose, axis, angle, center_point=None):
-    # center_point = center_point if center_point is not None else np.mean(coordinate, axis=0)
-    pc = o3d.geometry.PointCloud()
-    pc.points = o3d.utility.Vector3dVector(coordinate)
-    pc.normals = o3d.utility.Vector3dVector(normal)
-    pc.colors = o3d.utility.Vector3dVector(color)
-    # Derive the rotation matrix from axis and angle
     axis = axis / np.linalg.norm(axis)
     rotation_matrix = R.from_rotvec(axis * angle).as_matrix()
-    transform = np.eye(4)
-    transform[:3, :3] = rotation_matrix
-    pc.transform(transform)
-    coordinate = np.array(pc.points)
-    normal = np.array(pc.normals)
-    color = np.array(pc.colors)
+    transformation_matrix = np.eye(4)
+    transformation_matrix[:3, :3] = rotation_matrix
+
+    # Manually apply the transformation to each point and normal
+    transformed_points = []
+    transformed_normals = []
+    for point, normal in zip(coordinate, normal):
+        # Convert to homogeneous coordinate and transform
+        point_homogeneous = np.append(point, 1)
+        transformed_point_homogeneous = np.dot(transformation_matrix, point_homogeneous)
+        transformed_point = transformed_point_homogeneous[:3]
+        transformed_points.append(transformed_point)
+
+        # Transform the normal (only rotation)
+        transformed_normal = np.dot(rotation_matrix, normal)
+        transformed_normals.append(transformed_normal)
 
     pose_transform = np.eye(4)
     pose_transform[:3, :3] = np.linalg.inv(rotation_matrix)
     pose = pose @ pose_transform
-
-    # Check
-
-    return copy.deepcopy(coordinate), copy.deepcopy(normal), copy.deepcopy(color), copy.deepcopy(pose)
+    return np.array(transformed_points), np.array(transformed_normals), copy.deepcopy(color), copy.deepcopy(pose)
 
 def random_translation(coordinate, normal, color, pose, offset_type: str = "given", offset=None):
     """
@@ -318,22 +319,29 @@ def random_translation(coordinate, normal, color, pose, offset_type: str = "give
         offset = -offset
     else:
         assert offset is not None
-    # update the coordinates
-    pc = o3d.geometry.PointCloud()
-    pc.points = o3d.utility.Vector3dVector(coordinate)
-    pc.normals = o3d.utility.Vector3dVector(normal)
-    pc.colors = o3d.utility.Vector3dVector(color)
+
+    transformation_matrix = np.eye(4)
+    rotation_matrix = np.eye(3)
+    transformation_matrix[:3, 3] = offset
+
+    # Manually apply the transformation to each point and normal
+    transformed_points = []
+    transformed_normals = []
+    for point, normal in zip(coordinate, normal):
+        # Convert to homogeneous coordinate and transform
+        point_homogeneous = np.append(point, 1)
+        transformed_point_homogeneous = np.dot(transformation_matrix, point_homogeneous)
+        transformed_point = transformed_point_homogeneous[:3]
+        transformed_points.append(transformed_point)
+
+        # Transform the normal (only rotation)
+        transformed_normal = np.dot(rotation_matrix, normal)
+        transformed_normals.append(transformed_normal)
 
     pose_transform = np.eye(4)
-    pose_transform[:3, 3] = offset
-    
-    pc.transform(pose_transform)
-    coordinate = np.array(pc.points)
-    normal = np.array(pc.normals)
-    color = np.array(pc.colors)
-    pose = pose @ np.linalg.inv(pose_transform) 
-    
-    return copy.deepcopy(coordinate), copy.deepcopy(normal), copy.deepcopy(color), copy.deepcopy(pose)
+    pose_transform[:3, :3] = np.linalg.inv(rotation_matrix)
+    pose = pose @ pose_transform
+    return np.array(transformed_points), np.array(transformed_normals), copy.deepcopy(color), copy.deepcopy(pose)
 
 if __name__ == "__main__":
     import os
@@ -347,7 +355,7 @@ if __name__ == "__main__":
         add_normals=True,
         is_elastic_distortion=True,
         is_random_distortion=True,
-        volume_augmentations_path=f"{root_dir}/config/volumentations.yaml",
+        volume_augmentations_path=f"{root_dir}/config/va_rotation.yaml",
     )
     dataset.set_mode("train")
 

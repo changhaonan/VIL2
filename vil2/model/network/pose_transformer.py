@@ -102,7 +102,7 @@ class PoseTransformer(nn.Module):
         num_attention_heads: int = 2,
         encoder_num_layers: int = 2,
         encoder_hidden_dim: int = 256,
-        encoder_dropout: float = 0.5,
+        encoder_dropout: float = 0.1,
         encoder_activation: str = "relu",
         fusion_projection_dim: int = 512,
         use_dropout_sampler: bool = False,
