@@ -33,7 +33,9 @@ if __name__ == "__main__":
     dataset_file = os.path.join(
         root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"
     )
-    data_size = 19992
+    with open(dataset_file, "rb") as f:
+        dataset = pickle.load(f)
+        data_size = len(dataset)
     # Select 0.2 for validation
     train_size = int(data_size * 0.8)
     val_size = data_size - train_size
@@ -51,6 +53,7 @@ if __name__ == "__main__":
         is_random_distortion=is_random_distortion,
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
+        volume_augmentations_path=os.path.join(root_path, "config", "volumentations.yaml")
     )
     train_dataset.set_mode("train")
     

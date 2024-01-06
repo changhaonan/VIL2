@@ -77,7 +77,7 @@ MODEL = dict(
         SHUFFLE=False,
         CANONICALIZE=False,
     ),
-    DATASET_CONFIG="s1000-c200-r0.5",  # "s300-c20-r0.5", #"s500-c20-r0.5" #"s1000-c1-r0.5", # "s250-c40-r2", # "s100-c20-r2",
+    DATASET_CONFIG="s300-c20-r0.5", # "s1000-c200-r0.5",  # "s300-c20-r0.5", #"s500-c20-r0.5" #"s1000-c1-r0.5", # "s250-c40-r2", # "s100-c20-r2",
     SAVE_FIG=True,
     VISUALIZE=False,
     MAX_SCENE_SIZE=4,

@@ -14,7 +14,11 @@ import pickle
 from copy import deepcopy
 from random import random, sample, uniform
 import vil2.utils.misc_utils as utils
-
+from yaml import load
+from box import Box
+import copy
+from scipy.spatial.transform import Rotation as R
+import open3d as o3d
 
 class PointCloudDataset(Dataset):
     """Dataset definition for point cloud like data."""
@@ -42,7 +46,7 @@ class PointCloudDataset(Dataset):
         self.random_distortion_rate = random_distortion_rate
         self.random_distortion_mag = random_distortion_mag
         if volume_augmentations_path is not None:
-            self.volume_augmentations = V.load(volume_augmentations_path)
+            self.volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r")))
         else:
             self.volume_augmentations = None
         if image_augmentations_path is not None:
@@ -81,16 +85,43 @@ class PointCloudDataset(Dataset):
         # FIXME: add augmentation
         # label = np.concatenate((label, aug["labels"]))
         if self.is_elastic_distortion:
-            coordinate = elastic_distortion(coordinate, 0.1, 0.1)
+            coordinate = elastic_distortion(copy.deepcopy(coordinate), 0.1, 0.1)
         if self.is_random_distortion:
             coordinate, color, normal, label = random_around_points(
-                coordinate,
-                color,
-                normal,
-                label,
+                copy.deepcopy(coordinate),
+                copy.deepcopy(color),
+                copy.deepcopy(normal),
+                copy.deepcopy(label),
                 rate=self.random_distortion_rate,
                 noise_level=self.random_distortion_mag,
             )
+
+        if self.volume_augmentations is not None:
+            # do the below only with some probability 
+            if random() < self.volume_augmentations.rotation.prob:
+                coordinate, normal, color, pose = rotate_around_axis(
+                    coordinate=copy.deepcopy(coordinate), 
+                    normal=copy.deepcopy(normal), 
+                    pose=copy.deepcopy(pose), 
+                    color=copy.deepcopy(color),
+                    axis=np.random.rand(3,), 
+                    angle=np.random.rand(1) * 2 * np.pi, 
+                    center_point=None)
+            if random() < self.volume_augmentations.translation.prob:
+                random_offset = np.random.rand(1, 3)
+                random_offset[0, 0] = np.random.uniform(self.volume_augmentations.translation.min_x, self.volume_augmentations.translation.max_x, size=(1,))
+                random_offset[0, 1] = np.random.uniform(self.volume_augmentations.translation.min_y, self.volume_augmentations.translation.max_y, size=(1,))
+                random_offset[0, 2] = np.random.uniform(self.volume_augmentations.translation.min_z, self.volume_augmentations.translation.max_z, size=(1,))
+                       
+                coordinate, normal, color, pose = random_translation(
+                    coordinate=coordinate, 
+                    normal=normal, 
+                    pose=pose, 
+                    color=color,
+                    offset_type = "given", 
+                    offset=random_offset
+                )
+            pass
         return coordinate, normal, color, label, pose
 
     def __len__(self):
@@ -123,9 +154,9 @@ class PointCloudDataset(Dataset):
             target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(
                 target_coord, target_normal, target_color, None, target_pose
             )
-            fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
-                fixed_coord, fixed_normal, fixed_color, None, fixed_pose
-            )
+            # fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
+            #     fixed_coord, fixed_normal, fixed_color, None, fixed_pose
+            # )
         target_pose = utils.mat_to_pose9d(fixed_pose @ target_pose)
         fixed_pose = utils.mat_to_pose9d(fixed_pose)
         return {
@@ -233,32 +264,55 @@ def random_around_points(
     return coordinates, color, normals, labels
 
 
-def rotate_around_axis(points, axis, angle, center_point=None):
-    """
-    Note: Code borrowed from volumentations
-    Return the rotation matrix associated with counterclockwise rotation about
-    the given axis by angle in radians.
-    https://stackoverflow.com/questions/6802577/rotation-of-3d-vector
-    """
-    if center_point is None:
-        center_point = points[:, :3].mean(axis=0).astype(points[:, :3].dtype)
-    axis = axis / np.sqrt(np.dot(axis, axis))
-    a = np.cos(angle / 2.0)
-    b, c, d = -axis * np.sin(angle / 2.0)
-    aa, bb, cc, dd = a * a, b * b, c * c, d * d
-    bc, ad, ac, ab, bd, cd = b * c, a * d, a * c, a * b, b * d, c * d
-    rotation_matrix = np.array(
-        [
-            [aa + bb - cc - dd, 2 * (bc + ad), 2 * (bd - ac)],
-            [2 * (bc - ad), aa + cc - bb - dd, 2 * (cd + ab)],
-            [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc],
-        ]
-    )
-    points[:, :3] = points[:, :3] - center_point
-    points[:, :3] = np.dot(points[:, :3], rotation_matrix.T)
-    points[:, :3] = points[:, :3] + center_point
-    return points
+def rotate_around_axis(coordinate, normal, color, pose, axis, angle, center_point=None):
+    # center_point = center_point if center_point is not None else np.mean(coordinate, axis=0)
+    pc = o3d.geometry.PointCloud()
+    pc.points = o3d.utility.Vector3dVector(coordinate)
+    pc.normals = o3d.utility.Vector3dVector(normal)
+    pc.colors = o3d.utility.Vector3dVector(color)
+    # Derive the rotation matrix from axis and angle
+    axis = axis / np.linalg.norm(axis)
+    rotation_matrix = R.from_rotvec(axis * angle).as_matrix()
+    transform = np.eye(4)
+    transform[:3, :3] = rotation_matrix
+    pc.transform(transform)
+    coordinate = np.array(pc.points)
+    normal = np.array(pc.normals)
+    color = np.array(pc.colors)
 
+    pose_transform = np.eye(4)
+    pose_transform[:3, :3] = np.linalg.inv(rotation_matrix)
+    pose = pose @ pose_transform
+
+    # Check
+
+    return copy.deepcopy(coordinate), copy.deepcopy(normal), copy.deepcopy(color), copy.deepcopy(pose)
+
+def random_translation(coordinate, normal, color, pose, offset_type: str = "given", offset=None):
+    """
+    Return the translated coordinates, normals and the pose
+    """
+    if offset_type == "center":
+        offset = coordinate.mean(axis=0).astype(coordinate.dtype)
+        offset = -offset
+    else:
+        assert offset is not None
+    # update the coordinates
+    pc = o3d.geometry.PointCloud()
+    pc.points = o3d.utility.Vector3dVector(coordinate)
+    pc.normals = o3d.utility.Vector3dVector(normal)
+    pc.colors = o3d.utility.Vector3dVector(color)
+
+    pose_transform = np.eye(4)
+    pose_transform[:3, 3] = offset
+    
+    pc.transform(pose_transform)
+    coordinate = np.array(pc.points)
+    normal = np.array(pc.normals)
+    color = np.array(pc.colors)
+    pose = pose @ np.linalg.inv(pose_transform) 
+    
+    return copy.deepcopy(coordinate), copy.deepcopy(normal), copy.deepcopy(color), copy.deepcopy(pose)
 
 if __name__ == "__main__":
     import os
@@ -266,13 +320,15 @@ if __name__ == "__main__":
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # Test data loader
     dataset = PointCloudDataset(
-        data_file=f"{root_dir}/test_data/dmorp_augmented/diffusion_dataset_512_s1000-c200-r0.5.pkl",
+        data_file=f"{root_dir}/test_data/dmorp_augmented/diffusion_dataset_512_s300-c20-r0.5.pkl",
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
         is_elastic_distortion=True,
         is_random_distortion=True,
+        volume_augmentations_path=f"{root_dir}/config/volumentations.yaml",
     )
+    dataset.set_mode("train")
 
     # Test data augmentation
     for i in range(10):
