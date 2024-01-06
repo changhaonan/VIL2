@@ -25,10 +25,10 @@ if __name__ == "__main__":
     cfg = LazyConfig.load(cfg_file)
     retrain = cfg.MODEL.RETRAIN
     pcd_size = cfg.MODEL.PCD_SIZE
-    is_elastic_distortion = cfg.AUGMENTATION.IS_ELASTIC_DISTORTION
-    is_random_distortion = cfg.AUGMENTATION.IS_RANDOM_DISTORTION
-    random_distort_rate = cfg.AUGMENTATION.RANDOM_DISTORT_RATE
-    random_distort_mag = cfg.AUGMENTATION.RANDOM_DISTORT_MAG
+    is_elastic_distortion = cfg.DATALOADER.AUGMENTATION.IS_ELASTIC_DISTORTION
+    is_random_distortion = cfg.DATALOADER.AUGMENTATION.IS_RANDOM_DISTORTION
+    random_distortion_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_RATE
+    random_distortion_mag = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_MAG
     # Load dataset & data loader
     dataset_file = os.path.join(
         root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"
@@ -40,8 +40,8 @@ if __name__ == "__main__":
         add_normals=True,
         is_elastic_distortion=is_elastic_distortion,
         is_random_distortion=is_random_distortion,
-        random_distort_rate=random_distort_rate,
-        random_distort_mag=random_distort_mag,
+        random_distortion_rate=random_distortion_rate,
+        random_distortion_mag=random_distortion_mag,
     )
     train_size = int(cfg.MODEL.TRAIN_TEST_SPLIT * len(dataset))
     val_size = len(dataset) - train_size
@@ -100,6 +100,7 @@ if __name__ == "__main__":
     #     ) as f:
     #         pickle.dump(val_dataset, f)
 
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
     train_data_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
