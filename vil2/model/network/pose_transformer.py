@@ -176,8 +176,12 @@ class PoseTransformer(nn.Module):
     ) -> torch.Tensor:
         """
         Args:
-            pcd1: (B, N, 3)
-            pcd2: (B, M, 3)
+            coord1: (B, N, 3)
+            normal1: (B, N, 3)
+            color1: (B, N, 3)
+            coord2: (B, M, 3)
+            normal2: (B, M, 3)
+            color2: (B, M, 3)
         Returns:
             (B, 3)
         """
