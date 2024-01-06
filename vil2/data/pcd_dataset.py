@@ -23,6 +23,7 @@ class PointCloudDataset(Dataset):
         self,
         data_file: str,
         dataset_name: str,
+        indices: list = None,
         color_mean_std: str = "color_mean_std.yaml",
         add_colors: bool = False,
         add_normals: bool = False,
@@ -49,7 +50,11 @@ class PointCloudDataset(Dataset):
         else:
             self.image_augmentations = None
         # Load data
-        self._data = pickle.load(open(data_file, "rb"))  # A list of (coordinates, color, normals, labels, pose)
+        raw_data = pickle.load(open(data_file, "rb"))  # A list of (coordinates, color, normals, labels, pose)
+        if indices is not None:
+            self._data = [raw_data[i] for i in indices]
+        else:
+            self._data = raw_data
         # Color normalization
         # if Path(str(color_mean_std)).exists():
         #     color_mean_std = self._load_yaml(color_mean_std)

@@ -33,9 +33,18 @@ if __name__ == "__main__":
     dataset_file = os.path.join(
         root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"
     )
-    dataset = PointCloudDataset(
+    data_size = 19992
+    # Select 0.2 for validation
+    train_size = int(data_size * 0.8)
+    val_size = data_size - train_size
+    
+    val_indices = list(range(args.random_index * val_size, (args.random_index + 1) * val_size))
+    train_indices = list(set(range(data_size)) - set(val_indices))
+
+    train_dataset = PointCloudDataset(
         data_file=dataset_file,
         dataset_name="dmorp",
+        indices=train_indices,
         add_colors=True,
         add_normals=True,
         is_elastic_distortion=is_elastic_distortion,
@@ -43,8 +52,19 @@ if __name__ == "__main__":
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
     )
-    train_size = int(cfg.MODEL.TRAIN_TEST_SPLIT * len(dataset))
-    val_size = len(dataset) - train_size
+    train_dataset.set_mode("train")
+    
+    val_dataset = PointCloudDataset(
+        data_file=dataset_file,
+        dataset_name="dmorp",
+        indices=val_indices,
+        add_colors=True,
+        add_normals=True,
+        is_elastic_distortion=is_elastic_distortion,
+        is_random_distortion=is_random_distortion,
+        random_distortion_rate=random_distortion_rate,
+        random_distortion_mag=random_distortion_mag)
+    val_dataset.set_mode("val")
 
     # # Use cached dataset if available
     # if os.path.exists(
@@ -100,20 +120,19 @@ if __name__ == "__main__":
     #     ) as f:
     #         pickle.dump(val_dataset, f)
 
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-    train_dataset.set_mode("train")
-    val_dataset.set_mode("val")
+    # train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
     train_data_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
         shuffle=True,
-        # num_workers=24,
+        num_workers=4,
     )
     val_data_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
         shuffle=False,
-        # num_workers=24,
+        num_workers=4,
     )
 
     # Build model
