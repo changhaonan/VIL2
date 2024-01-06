@@ -101,6 +101,8 @@ if __name__ == "__main__":
     #         pickle.dump(val_dataset, f)
 
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    train_dataset.set_mode("train")
+    val_dataset.set_mode("val")
     train_data_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,

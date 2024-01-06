@@ -59,6 +59,10 @@ class PointCloudDataset(Dataset):
         #     )
         # if add_colors:
         #     self.normalize_color = A.Normalize(mean=color_mean, std=color_std)
+        self.mode = "train"  # train, val, test
+
+    def set_mode(self, mode: str):
+        self.mode = mode
 
     def parse_pcd_data(self, batch_idx):
         """Parse data from the dataset."""
@@ -108,13 +112,15 @@ class PointCloudDataset(Dataset):
             fixed_color = None
         target_pose = utils.pose9d_to_mat(target_pose)
         fixed_pose = np.eye(4)
-        # Augment data
-        target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(
-            target_coord, target_normal, target_color, None, target_pose
-        )
-        fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
-            fixed_coord, fixed_normal, fixed_color, None, fixed_pose
-        )
+
+        if self.mode == "train":
+            # Augment data
+            target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(
+                target_coord, target_normal, target_color, None, target_pose
+            )
+            fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
+                fixed_coord, fixed_normal, fixed_color, None, fixed_pose
+            )
         target_pose = utils.mat_to_pose9d(fixed_pose @ target_pose)
         fixed_pose = utils.mat_to_pose9d(fixed_pose)
         return {
