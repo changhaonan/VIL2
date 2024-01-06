@@ -29,11 +29,17 @@ class PointCloudDataset(Dataset):
         volume_augmentations_path: Optional[str] = None,
         image_augmentations_path: Optional[str] = None,
         is_elastic_distortion: bool = False,
+        is_random_distortion: bool = False,
+        random_distortion_rate: float = 0.2,
+        random_distortion_mag: float = 0.01,
     ):
         # Set parameters
         self.add_colors = add_colors
         self.add_normals = add_normals
         self.is_elastic_distortion = is_elastic_distortion
+        self.is_random_distortion = is_random_distortion
+        self.random_distortion_rate = random_distortion_rate
+        self.random_distortion_mag = random_distortion_mag
         if volume_augmentations_path is not None:
             self.volume_augmentations = V.load(volume_augmentations_path)
         else:
@@ -64,6 +70,18 @@ class PointCloudDataset(Dataset):
 
     def augment_pcd_instance(self, coordinate, normal, color, label, pose):
         # FIXME: add augmentation
+        # label = np.concatenate((label, aug["labels"]))
+        if self.is_elastic_distortion:
+            coordinate = elastic_distortion(coordinate, 0.1, 0.1)
+        if self.is_random_distortion:
+            coordinate, color, normal, label = random_around_points(
+                coordinate,
+                color,
+                normal,
+                label,
+                rate=self.random_distortion_rate,
+                noise_level=self.random_distortion_mag,
+            )
         return coordinate, normal, color, label, pose
 
     def __len__(self):
@@ -194,33 +212,41 @@ def random_around_points(
     normals,
     labels,
     rate=0.2,
-    noise_rate=0,
+    noise_level=0.01,
     ignore_label=255,
 ):
     coord_indexes = sample(list(range(len(coordinates))), k=int(len(coordinates) * rate))
-    noisy_coordinates = deepcopy(coordinates[coord_indexes])
-    noisy_coordinates += np.random.uniform(-0.2 - noise_rate, 0.2 + noise_rate, size=noisy_coordinates.shape)
-
-    if noise_rate > 0:
-        noisy_color = np.random.randint(0, 255, size=noisy_coordinates.shape)
-        noisy_normals = np.random.rand(*noisy_coordinates.shape) * 2 - 1
-        noisy_labels = np.full(labels[coord_indexes].shape, ignore_label)
-
-        coordinates = np.vstack((coordinates, noisy_coordinates))
-        color = np.vstack((color, noisy_color))
-        normals = np.vstack((normals, noisy_normals))
-        labels = np.vstack((labels, noisy_labels))
-    else:
-        noisy_color = deepcopy(color[coord_indexes])
-        noisy_normals = deepcopy(normals[coord_indexes])
-        noisy_labels = deepcopy(labels[coord_indexes])
-
-        coordinates = np.vstack((coordinates, noisy_coordinates))
-        color = np.vstack((color, noisy_color))
-        normals = np.vstack((normals, noisy_normals))
-        labels = np.vstack((labels, noisy_labels))
+    coordinate_noises = np.random.rand(len(coord_indexes), 3) * 2 - 1
+    coordinates[coord_indexes] += coordinate_noises * noise_level
 
     return coordinates, color, normals, labels
+
+
+def rotate_around_axis(points, axis, angle, center_point=None):
+    """
+    Note: Code borrowed from volumentations
+    Return the rotation matrix associated with counterclockwise rotation about
+    the given axis by angle in radians.
+    https://stackoverflow.com/questions/6802577/rotation-of-3d-vector
+    """
+    if center_point is None:
+        center_point = points[:, :3].mean(axis=0).astype(points[:, :3].dtype)
+    axis = axis / np.sqrt(np.dot(axis, axis))
+    a = np.cos(angle / 2.0)
+    b, c, d = -axis * np.sin(angle / 2.0)
+    aa, bb, cc, dd = a * a, b * b, c * c, d * d
+    bc, ad, ac, ab, bd, cd = b * c, a * d, a * c, a * b, b * d, c * d
+    rotation_matrix = np.array(
+        [
+            [aa + bb - cc - dd, 2 * (bc + ad), 2 * (bd - ac)],
+            [2 * (bc - ad), aa + cc - bb - dd, 2 * (cd + ab)],
+            [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc],
+        ]
+    )
+    points[:, :3] = points[:, :3] - center_point
+    points[:, :3] = np.dot(points[:, :3], rotation_matrix.T)
+    points[:, :3] = points[:, :3] + center_point
+    return points
 
 
 if __name__ == "__main__":
@@ -233,6 +259,8 @@ if __name__ == "__main__":
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
+        is_elastic_distortion=True,
+        is_random_distortion=True,
     )
 
     # Test data augmentation
