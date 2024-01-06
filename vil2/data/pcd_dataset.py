@@ -14,6 +14,7 @@ import pickle
 from copy import deepcopy
 from random import random, sample, uniform
 import vil2.utils.misc_utils as utils
+from scipy.spatial.transform import Rotation as R
 
 
 class PointCloudDataset(Dataset):
@@ -91,6 +92,8 @@ class PointCloudDataset(Dataset):
                 rate=self.random_distortion_rate,
                 noise_level=self.random_distortion_mag,
             )
+            # apply random to pose
+            pose = random_on_pose(pose, noise_level=self.random_distortion_mag)
         return coordinate, normal, color, label, pose
 
     def __len__(self):
@@ -226,11 +229,29 @@ def random_around_points(
     noise_level=0.01,
     ignore_label=255,
 ):
+    # coordinate
     coord_indexes = sample(list(range(len(coordinates))), k=int(len(coordinates) * rate))
     coordinate_noises = np.random.rand(len(coord_indexes), 3) * 2 - 1
     coordinates[coord_indexes] += coordinate_noises * noise_level
 
+    # normals
+    if normals is not None:
+        normal_noises = np.random.rand(len(coord_indexes), 3) * 2 - 1
+        normals[coord_indexes] += normal_noises * noise_level
     return coordinates, color, normals, labels
+
+
+def random_on_pose(
+    pose,
+    noise_level=0.01,
+):
+    tran_noise = (np.random.rand(3) * 2 - 1) * noise_level
+    rot_vector = np.random.rand(3) * 2 - 1
+    rot_vector = rot_vector / np.linalg.norm(rot_vector)
+    rot_angle = (np.random.rand(1) * 2 - 1) * np.pi / 2 * noise_level
+    pose[:3, 3] += tran_noise
+    pose[:3, :3] = R.from_rotvec(rot_vector * rot_angle).as_matrix() @ pose[:3, :3]
+    return pose
 
 
 def rotate_around_axis(points, axis, angle, center_point=None):
