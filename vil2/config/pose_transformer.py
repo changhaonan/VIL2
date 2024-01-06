@@ -14,6 +14,7 @@ DATALOADER = dict(
         IS_RANDOM_DISTORTION=True,
         RANDOM_DISTORTION_RATE=0.2,
         RANDOM_DISTORTION_MAG=0.01,
+        VOLUME_AUGMENTATION_FILE="va_rotation.yaml" # None
     ),
 )
 TRAIN = dict(

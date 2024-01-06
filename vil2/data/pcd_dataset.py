@@ -99,29 +99,31 @@ class PointCloudDataset(Dataset):
 
         if self.volume_augmentations is not None:
             # do the below only with some probability 
-            if random() < self.volume_augmentations.rotation.prob:
-                coordinate, normal, color, pose = rotate_around_axis(
-                    coordinate=copy.deepcopy(coordinate), 
-                    normal=copy.deepcopy(normal), 
-                    pose=copy.deepcopy(pose), 
-                    color=copy.deepcopy(color),
-                    axis=np.random.rand(3,), 
-                    angle=np.random.rand(1) * 2 * np.pi, 
-                    center_point=None)
-            if random() < self.volume_augmentations.translation.prob:
-                random_offset = np.random.rand(1, 3)
-                random_offset[0, 0] = np.random.uniform(self.volume_augmentations.translation.min_x, self.volume_augmentations.translation.max_x, size=(1,))
-                random_offset[0, 1] = np.random.uniform(self.volume_augmentations.translation.min_y, self.volume_augmentations.translation.max_y, size=(1,))
-                random_offset[0, 2] = np.random.uniform(self.volume_augmentations.translation.min_z, self.volume_augmentations.translation.max_z, size=(1,))
-                       
-                coordinate, normal, color, pose = random_translation(
-                    coordinate=coordinate, 
-                    normal=normal, 
-                    pose=pose, 
-                    color=color,
-                    offset_type = "given", 
-                    offset=random_offset
-                )
+            if "rotation" in self.volume_augmentations.keys():
+                if random() < self.volume_augmentations.rotation.prob:
+                    coordinate, normal, color, pose = rotate_around_axis(
+                        coordinate=copy.deepcopy(coordinate), 
+                        normal=copy.deepcopy(normal), 
+                        pose=copy.deepcopy(pose), 
+                        color=copy.deepcopy(color),
+                        axis=np.random.rand(3,), 
+                        angle=np.random.rand(1) * 2 * np.pi, 
+                        center_point=None)
+            if "translation" in self.volume_augmentations.keys():    
+                if random() < self.volume_augmentations.translation.prob:
+                    random_offset = np.random.rand(1, 3)
+                    random_offset[0, 0] = np.random.uniform(self.volume_augmentations.translation.min_x, self.volume_augmentations.translation.max_x, size=(1,))
+                    random_offset[0, 1] = np.random.uniform(self.volume_augmentations.translation.min_y, self.volume_augmentations.translation.max_y, size=(1,))
+                    random_offset[0, 2] = np.random.uniform(self.volume_augmentations.translation.min_z, self.volume_augmentations.translation.max_z, size=(1,))
+                        
+                    coordinate, normal, color, pose = random_translation(
+                        coordinate=coordinate, 
+                        normal=normal, 
+                        pose=pose, 
+                        color=color,
+                        offset_type = "given", 
+                        offset=random_offset
+                    )
             pass
         return coordinate, normal, color, label, pose
 

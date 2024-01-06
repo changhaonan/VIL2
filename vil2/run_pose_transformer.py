@@ -13,7 +13,7 @@ from torch.utils.data.dataset import random_split
 
 
 if __name__ == "__main__":
-    torch.set_float32_matmul_precision("medium")
+    torch.set_float32_matmul_precision("high")
     # Parse arguments
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--random_index", type=int, default=0)
@@ -29,6 +29,7 @@ if __name__ == "__main__":
     is_random_distortion = cfg.DATALOADER.AUGMENTATION.IS_RANDOM_DISTORTION
     random_distortion_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_RATE
     random_distortion_mag = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_MAG
+    volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
     # Load dataset & data loader
     dataset_file = os.path.join(
         root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"
@@ -42,7 +43,7 @@ if __name__ == "__main__":
     
     val_indices = list(range(args.random_index * val_size, (args.random_index + 1) * val_size))
     train_indices = list(set(range(data_size)) - set(val_indices))
-
+    volume_augmentations_path=os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     train_dataset = PointCloudDataset(
         data_file=dataset_file,
         dataset_name="dmorp",
@@ -53,7 +54,7 @@ if __name__ == "__main__":
         is_random_distortion=is_random_distortion,
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
-        volume_augmentations_path=os.path.join(root_path, "config", "volumentations.yaml")
+        volume_augmentations_path=volume_augmentations_path
     )
     train_dataset.set_mode("train")
     
@@ -63,8 +64,6 @@ if __name__ == "__main__":
         indices=val_indices,
         add_colors=True,
         add_normals=True,
-        is_elastic_distortion=is_elastic_distortion,
-        is_random_distortion=is_random_distortion,
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag)
     val_dataset.set_mode("val")
