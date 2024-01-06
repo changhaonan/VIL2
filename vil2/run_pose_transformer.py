@@ -25,65 +25,80 @@ if __name__ == "__main__":
     cfg = LazyConfig.load(cfg_file)
     retrain = cfg.MODEL.RETRAIN
     pcd_size = cfg.MODEL.PCD_SIZE
+    is_elastic_distortion = cfg.AUGMENTATION.IS_ELASTIC_DISTORTION
+    is_random_distortion = cfg.AUGMENTATION.IS_RANDOM_DISTORTION
+    random_distort_rate = cfg.AUGMENTATION.RANDOM_DISTORT_RATE
+    random_distort_mag = cfg.AUGMENTATION.RANDOM_DISTORT_MAG
     # Load dataset & data loader
     dataset_file = os.path.join(
         root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"
     )
-    dataset = PointCloudDataset(data_file=dataset_file, dataset_name="dmorp", add_colors=True, add_normals=True)
+    dataset = PointCloudDataset(
+        data_file=dataset_file,
+        dataset_name="dmorp",
+        add_colors=True,
+        add_normals=True,
+        is_elastic_distortion=is_elastic_distortion,
+        is_random_distortion=is_random_distortion,
+        random_distort_rate=random_distort_rate,
+        random_distort_mag=random_distort_mag,
+    )
     train_size = int(cfg.MODEL.TRAIN_TEST_SPLIT * len(dataset))
     val_size = len(dataset) - train_size
-    if os.path.exists(
-        os.path.join(
-            root_path,
-            "test_data",
-            "dmorp_augmented",
-            f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_train.pkl",
-        )
-    ):
-        print("Loading cached dataset....")
-        with open(
-            os.path.join(
-                root_path,
-                "test_data",
-                "dmorp_augmented",
-                f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_train.pkl",
-            ),
-            "rb",
-        ) as f:
-            train_dataset = pickle.load(f)
-        with open(
-            os.path.join(
-                root_path,
-                "test_data",
-                "dmorp_augmented",
-                f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_val.pkl",
-            ),
-            "rb",
-        ) as f:
-            val_dataset = pickle.load(f)
-    else:
-        print("Caching dataset....")
-        train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-        with open(
-            os.path.join(
-                root_path,
-                "test_data",
-                "dmorp_augmented",
-                f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_train.pkl",
-            ),
-            "wb",
-        ) as f:
-            pickle.dump(train_dataset, f)
-        with open(
-            os.path.join(
-                root_path,
-                "test_data",
-                "dmorp_augmented",
-                f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_val.pkl",
-            ),
-            "wb",
-        ) as f:
-            pickle.dump(val_dataset, f)
+
+    # # Use cached dataset if available
+    # if os.path.exists(
+    #     os.path.join(
+    #         root_path,
+    #         "test_data",
+    #         "dmorp_augmented",
+    #         f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_train.pkl",
+    #     )
+    # ):
+    #     print("Loading cached dataset....")
+    #     with open(
+    #         os.path.join(
+    #             root_path,
+    #             "test_data",
+    #             "dmorp_augmented",
+    #             f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_train.pkl",
+    #         ),
+    #         "rb",
+    #     ) as f:
+    #         train_dataset = pickle.load(f)
+    #     with open(
+    #         os.path.join(
+    #             root_path,
+    #             "test_data",
+    #             "dmorp_augmented",
+    #             f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_val.pkl",
+    #         ),
+    #         "rb",
+    #     ) as f:
+    #         val_dataset = pickle.load(f)
+    # else:
+    #     print("Caching dataset....")
+    #     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    #     with open(
+    #         os.path.join(
+    #             root_path,
+    #             "test_data",
+    #             "dmorp_augmented",
+    #             f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_train.pkl",
+    #         ),
+    #         "wb",
+    #     ) as f:
+    #         pickle.dump(train_dataset, f)
+    #     with open(
+    #         os.path.join(
+    #             root_path,
+    #             "test_data",
+    #             "dmorp_augmented",
+    #             f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_val.pkl",
+    #         ),
+    #         "wb",
+    #     ) as f:
+    #         pickle.dump(val_dataset, f)
 
     train_data_loader = torch.utils.data.DataLoader(
         train_dataset,
