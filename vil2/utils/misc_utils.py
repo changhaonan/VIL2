@@ -398,6 +398,7 @@ def visualize_pcd_list(
     normal_list: list[np.ndarray] | None = None,
     color_list: list[np.ndarray] | None = None,
     pose_list: list[np.ndarray] | None = None,
+    point_show_normal: bool = False,
 ):
     """Visualize a list of point cloud"""
     vis_list = []
@@ -413,4 +414,4 @@ def visualize_pcd_list(
         vis_list.append(pcd)
     origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
     vis_list.append(origin)
-    o3d.visualization.draw_geometries(vis_list)
+    o3d.visualization.draw_geometries(vis_list, point_show_normal=point_show_normal)
