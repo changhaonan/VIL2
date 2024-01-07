@@ -30,5 +30,8 @@ analyze.ipynb
 *.exr
 vil2/data_gen/examples/*
 run.sh
-script_rot
-logfile_rot
+script
+logfile
+
+script2
+logfile2
