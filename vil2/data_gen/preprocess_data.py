@@ -55,18 +55,18 @@ def visualize_pcd_with_open3d(
     o3d.visualization.draw_geometries([pcd1, pcd2], point_show_normal=True)
 
 
-class DiffDataset(torch.utils.data.Dataset):
-    def __init__(self, dtset: dict):
-        self.dtset = dtset
-        self.called = 0
+# class DiffDataset(torch.utils.data.Dataset):
+#     def __init__(self, dtset: dict):
+#         self.dtset = dtset
+#         self.called = 0
 
-    def __len__(self):
-        return len(self.dtset)
+#     def __len__(self):
+#         return len(self.dtset)
 
-    def __getitem__(self, idx):
-        dt_entry = copy.deepcopy(self.dtset[idx])
+#     def __getitem__(self, idx):
+#         dt_entry = copy.deepcopy(self.dtset[idx])
 
-        return self.dtset[idx]
+#         return self.dtset[idx]
 
 
 def perform_gram_schmidt_transform(trans_matrix):

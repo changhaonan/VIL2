@@ -293,6 +293,7 @@ if __name__ == "__main__":
         add_normals=True,
         is_elastic_distortion=True,
         is_random_distortion=True,
+        random_distortion_mag=0.0,
     )
 
     # Test data augmentation
@@ -306,6 +307,13 @@ if __name__ == "__main__":
         fixed_normal = data["fixed_normal"]
         fixed_color = data["fixed_color"]
         fixed_pose = data["fixed_pose"]
+
+        utils.visualize_pcd_list(
+            [target_coord, fixed_coord],
+            [target_normal, fixed_normal],
+            [target_color, fixed_color],
+            [np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
+        )
 
         utils.visualize_pcd_list(
             [target_coord, fixed_coord],

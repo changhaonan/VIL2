@@ -46,11 +46,11 @@ MODEL = dict(
                 points_pyramid=[128, 32],
                 num_attention_heads=2,
                 encoder_hidden_dim=512,
-                encoder_dropout=0.1,
+                encoder_dropout=0.5,
                 encoder_activation="relu",
                 encoder_num_layers=2,
                 fusion_projection_dim=256,
-                use_dropout_sampler=False,
+                use_dropout_sampler=True,
             ),
             PARALLELMLP=dict(
                 input_dim=256,
