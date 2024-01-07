@@ -1,0 +1,11 @@
+rotation:
+  prob: 0.5
+translation:
+  prob: 0.5
+  min_x: -0.01
+  max_x: 0.01
+  min_y: -0.01 
+  max_y: 0.01
+  min_z: -0.01
+  max_z: 0.01
+  

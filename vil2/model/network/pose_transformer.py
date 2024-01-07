@@ -102,7 +102,7 @@ class PoseTransformer(nn.Module):
         num_attention_heads: int = 2,
         encoder_num_layers: int = 2,
         encoder_hidden_dim: int = 256,
-        encoder_dropout: float = 0.5,
+        encoder_dropout: float = 0.1,
         encoder_activation: str = "relu",
         fusion_projection_dim: int = 512,
         use_dropout_sampler: bool = False,
@@ -145,13 +145,13 @@ class PoseTransformer(nn.Module):
             init_mode="kaiming_uniform", init_weight=0, init_bias=0
         )  # init the final output layer's weights to zeros
         self.fusion_tail_rot_x = nn.Sequential(
-            nn.Linear(encoder_hidden_dim, fusion_projection_dim),
+            nn.Linear(pcd_output_dim, fusion_projection_dim),
             nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
             nn.ReLU(inplace=True),
             Linear(fusion_projection_dim, 3, **init_zero),
         )
         self.fusion_tail_rot_y = nn.Sequential(
-            nn.Linear(encoder_hidden_dim, fusion_projection_dim),
+            nn.Linear(pcd_output_dim, fusion_projection_dim),
             nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
             nn.ReLU(inplace=True),
             Linear(fusion_projection_dim, 3, **init_zero),
@@ -159,7 +159,7 @@ class PoseTransformer(nn.Module):
 
         """ translation regress head """
         self.fusion_tail_trans = nn.Sequential(
-            nn.Linear(encoder_hidden_dim, fusion_projection_dim),
+            nn.Linear(pcd_output_dim, fusion_projection_dim),
             nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
             nn.ReLU(inplace=True),
             Linear(fusion_projection_dim, 3, **init_zero),

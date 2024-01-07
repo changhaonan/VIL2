@@ -13,6 +13,14 @@
             "justMyCode": false
         },
         {
+            "name": "PoseTF",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/vil2/run_pose_transformer.py",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
             "name": "TestBlender",       
             "type": "python",       
             "request": "attach",   

@@ -95,9 +95,9 @@ class TmorpModel:
         self.cfg = cfg
         # parameters
         # build model
-        self.pose_transformer = LitPoseTransformer(pose_transformer, cfg)
+        self.pose_transformer = LitPoseTransformer(pose_transformer, cfg).to(torch.float32)
 
-    def train(self, num_epochs: int, train_data_loader, val_data_loader, save_path: str, num_gpus: int = 1):
+    def train(self, num_epochs: int, train_data_loader, val_data_loader, save_path: str):
         # Checkpoint callback
         checkpoint_callback = ModelCheckpoint(
             monitor="val_loss",
@@ -107,17 +107,25 @@ class TmorpModel:
             mode="min",
         )
         # Trainer
+        # If not mac, using ddp_find_unused_parameters_true
+        strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
+        accelerator = "cuda" if torch.cuda.is_available() else "cpu"
         trainer = L.Trainer(
             max_epochs=num_epochs,
             logger=WandbLogger(name="Tmorp_model", save_dir=os.path.join(save_path, "logs")),
             callbacks=[checkpoint_callback],
-            strategy="ddp_find_unused_parameters_true",
+            strategy=strategy,
+            log_every_n_steps=5,
+            accelerator=accelerator,
         )
         trainer.fit(self.pose_transformer, train_dataloaders=train_data_loader, val_dataloaders=val_data_loader)
 
-    def test(self, test_data_loader, save_path: str, num_gpus: int = 1):
+    def test(self, test_data_loader, save_path: str):
         # Trainer
+        strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
+        accelerator = "cuda" if torch.cuda.is_available() else "cpu"
         trainer = L.Trainer(
             logger=WandbLogger(name="Tmorp_model", save_dir=os.path.join(save_path, "logs")),
+            strategy=strategy,
         )
-        trainer.test(self.pose_transformer, test_dataloaders=test_data_loader)
+        trainer.test(self.pose_transformer, test_dataloaders=test_data_loader, accelerator=accelerator)
