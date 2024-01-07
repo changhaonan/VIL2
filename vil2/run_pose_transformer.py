@@ -131,13 +131,13 @@ if __name__ == "__main__":
         train_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
         shuffle=True,
-        num_workers=4,
+        num_workers=cfg.DATALOADER.NUM_WORKERS,
     )
     val_data_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
         shuffle=False,
-        num_workers=4,
+        num_workers=cfg.DATALOADER.NUM_WORKERS,
     )
 
     # Build model

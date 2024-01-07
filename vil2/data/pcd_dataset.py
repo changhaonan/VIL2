@@ -7,7 +7,8 @@ from torch.utils.data import Dataset
 import numpy as np
 import scipy
 import albumentations as A
-import volumentations as V
+
+# import volumentations as V
 import yaml
 from pathlib import Path
 import pickle
@@ -20,6 +21,7 @@ from box import Box
 import copy
 from scipy.spatial.transform import Rotation as R
 import open3d as o3d
+
 
 class PointCloudDataset(Dataset):
     """Dataset definition for point cloud like data."""
@@ -47,7 +49,7 @@ class PointCloudDataset(Dataset):
         self.random_distortion_rate = random_distortion_rate
         self.random_distortion_mag = random_distortion_mag
         if volume_augmentations_path is not None:
-            self.volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r")))
+            self.volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r"), Loader=yaml.FullLoader))
         else:
             self.volume_augmentations = None
         if image_augmentations_path is not None:
@@ -98,33 +100,46 @@ class PointCloudDataset(Dataset):
             )
 
         if self.volume_augmentations is not None:
-            # do the below only with some probability 
+            # do the below only with some probability
             if "rotation" in self.volume_augmentations.keys():
                 if random() < self.volume_augmentations.rotation.prob:
                     coordinate, normal, color, pose = rotate_around_axis(
-                        coordinate=copy.deepcopy(coordinate), 
-                        normal=copy.deepcopy(normal), 
-                        pose=copy.deepcopy(pose), 
+                        coordinate=copy.deepcopy(coordinate),
+                        normal=copy.deepcopy(normal),
+                        pose=copy.deepcopy(pose),
                         color=copy.deepcopy(color),
-                        axis=np.random.rand(3,), 
-                        angle=np.random.rand(1) * 2 * np.pi, 
-                        center_point=None)
-            if "translation" in self.volume_augmentations.keys():    
+                        axis=np.random.rand(
+                            3,
+                        ),
+                        angle=np.random.rand(1) * 2 * np.pi,
+                        center_point=None,
+                    )
+            if "translation" in self.volume_augmentations.keys():
                 if random() < self.volume_augmentations.translation.prob:
                     random_offset = np.random.rand(1, 3)
-                    random_offset[0, 0] = np.random.uniform(self.volume_augmentations.translation.min_x, self.volume_augmentations.translation.max_x, size=(1,))
-                    random_offset[0, 1] = np.random.uniform(self.volume_augmentations.translation.min_y, self.volume_augmentations.translation.max_y, size=(1,))
-                    random_offset[0, 2] = np.random.uniform(self.volume_augmentations.translation.min_z, self.volume_augmentations.translation.max_z, size=(1,))
-                        
-                    coordinate, normal, color, pose = random_translation(
-                        coordinate=coordinate, 
-                        normal=normal, 
-                        pose=pose, 
-                        color=color,
-                        offset_type = "given", 
-                        offset=random_offset
+                    random_offset[0, 0] = np.random.uniform(
+                        self.volume_augmentations.translation.min_x,
+                        self.volume_augmentations.translation.max_x,
+                        size=(1,),
                     )
-            pass
+                    random_offset[0, 1] = np.random.uniform(
+                        self.volume_augmentations.translation.min_y,
+                        self.volume_augmentations.translation.max_y,
+                        size=(1,),
+                    )
+                    random_offset[0, 2] = np.random.uniform(
+                        self.volume_augmentations.translation.min_z,
+                        self.volume_augmentations.translation.max_z,
+                        size=(1,),
+                    )
+                    coordinate, normal, color, pose = random_translation(
+                        coordinate=coordinate,
+                        normal=normal,
+                        pose=pose,
+                        color=color,
+                        offset_type="given",
+                        offset=random_offset,
+                    )
         return coordinate, normal, color, label, pose
 
     def __len__(self):
@@ -134,6 +149,11 @@ class PointCloudDataset(Dataset):
         idx = idx % len(self._data)
         # Parse data from the dataset
         target_pcd, fixed_pcd, target_pose = self.parse_pcd_data(idx)
+        # Convert to float32
+        target_pcd = target_pcd.astype(np.float32)
+        fixed_pcd = fixed_pcd.astype(np.float32)
+        target_pose = target_pose.astype(np.float32)
+
         # Prepare data
         target_coord = target_pcd[:, :3]
         fixed_coord = fixed_pcd[:, :3]
@@ -163,14 +183,14 @@ class PointCloudDataset(Dataset):
         target_pose = utils.mat_to_pose9d(fixed_pose @ target_pose)
         fixed_pose = utils.mat_to_pose9d(fixed_pose)
         return {
-            "target_coord": target_coord,
-            "target_normal": target_normal,
-            "target_color": target_color,
-            "target_pose": target_pose,
-            "fixed_coord": fixed_coord,
-            "fixed_normal": fixed_normal,
-            "fixed_color": fixed_color,
-            "fixed_pose": fixed_pose,
+            "target_coord": target_coord.astype(np.float32),
+            "target_normal": target_normal.astype(np.float32),
+            "target_color": target_color.astype(np.float32),
+            "target_pose": target_pose.astype(np.float32),
+            "fixed_coord": fixed_coord.astype(np.float32),
+            "fixed_normal": fixed_normal.astype(np.float32),
+            "fixed_color": fixed_color.astype(np.float32),
+            "fixed_pose": fixed_pose.astype(np.float32),
         }
 
     @staticmethod
@@ -310,6 +330,7 @@ def rotate_around_axis(coordinate, normal, color, pose, axis, angle, center_poin
     pose = pose @ pose_transform
     return np.array(transformed_points), np.array(transformed_normals), copy.deepcopy(color), copy.deepcopy(pose)
 
+
 def random_translation(coordinate, normal, color, pose, offset_type: str = "given", offset=None):
     """
     Return the translated coordinates, normals and the pose
@@ -343,13 +364,15 @@ def random_translation(coordinate, normal, color, pose, offset_type: str = "give
     pose = pose @ pose_transform
     return np.array(transformed_points), np.array(transformed_normals), copy.deepcopy(color), copy.deepcopy(pose)
 
+
 if __name__ == "__main__":
     import os
 
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # Test data loader
     dataset = PointCloudDataset(
-        data_file=f"{root_dir}/test_data/dmorp_augmented/diffusion_dataset_512_s300-c20-r0.5.pkl",
+        # data_file=f"{root_dir}/test_data/dmorp_augmented/diffusion_dataset_512_s300-c20-r0.5.pkl",
+        data_file=f"{root_dir}/test_data/dmorp_augmented/diffusion_dataset_512_s1000-c200-r0.5.pkl",
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
