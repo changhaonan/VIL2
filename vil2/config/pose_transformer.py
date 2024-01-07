@@ -7,7 +7,7 @@ ENV = dict(
 )
 
 DATALOADER = dict(
-    BATCH_SIZE=32,
+    BATCH_SIZE=128,
     NUM_WORKERS=4,
     AUGMENTATION=dict(
         IS_ELASTIC_DISTORTION=True,

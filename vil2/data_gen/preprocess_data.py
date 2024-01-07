@@ -111,75 +111,53 @@ def build_dataset(scene_info_path, camera_info_path, cfg):
             # Read the target and fixed pointcloud
             target_color, target_depth = read_hdf5(os.path.join(h5file_dir, f"{j}.hdf5"))
             fixed_color, fixed_depth = read_hdf5(os.path.join(h5file_dir, f"{j + num_cameras}.hdf5"))
-
+            # Filter depth
             target_depth = target_depth.astype(np.float32)
             target_depth[target_depth > 1000.0] = 0.0
             target_depth = -target_depth
+            fixed_depth = fixed_depth.astype(np.float32)
+            fixed_depth[fixed_depth > 1000.0] = 0.0
+            fixed_depth = -fixed_depth
+
             target_pcd, tpointcloud_size = utils.get_pointcloud(target_color, target_depth, intrinsic)
+            if tpointcloud_size < pcd_size:
+                continue
+            fixed_pcd, fpointcloud_size = utils.get_pointcloud(fixed_color, fixed_depth, intrinsic)
+            if fpointcloud_size < pcd_size:
+                continue
+            # Transform pcd to world frame
+            camera_pose = np.array(camera_pose_json["cam2world"][j])
+            fixed_pcd.transform(camera_pose)
+            target_pcd.transform(camera_pose)
 
-            if tpointcloud_size >= pcd_size:
-                target_pcd = target_pcd.farthest_point_down_sample(pcd_size)
-                target_pcd_arr = np.hstack(
-                    (np.array(target_pcd.points), np.array(target_pcd.normals), np.array(target_pcd.colors))
-                )
+            target_pcd = target_pcd.farthest_point_down_sample(pcd_size)
+            target_pcd_arr = np.hstack(
+                (np.array(target_pcd.points), np.array(target_pcd.normals), np.array(target_pcd.colors))
+            )
+            fixed_pcd = fixed_pcd.farthest_point_down_sample(pcd_size)
+            fixed_pcd_arr = np.hstack(
+                (np.array(fixed_pcd.points), np.array(fixed_pcd.normals), np.array(fixed_pcd.colors))
+            )
 
-                fixed_depth = fixed_depth.astype(np.float32)
-                fixed_depth[fixed_depth > 1000.0] = 0.0
-                fixed_depth = -fixed_depth
-                fixed_pcd, fpointcloud_size = utils.get_pointcloud(fixed_color, fixed_depth, intrinsic)
+            rotation = target_transform_world[:3, :3]
+            v1 = rotation[:, 0]
+            v1_normalized = v1 / np.linalg.norm(v1)
+            v2 = rotation[:, 1]
+            v2_orthogonal = v2 - np.dot(v2, v1_normalized) * v1_normalized
+            v2_normalized = v2_orthogonal / np.linalg.norm(v2_orthogonal)
+            v3 = np.cross(v1_normalized, v2_normalized)
 
-                if fpointcloud_size >= pcd_size:
-                    fixed_pcd = fixed_pcd.farthest_point_down_sample(pcd_size)
-
-                    camera_pose_inv = np.linalg.inv(np.array(camera_pose_json["cam2world"][j]))
-                    camera_pose = np.array(camera_pose_json["cam2world"][j])
-
-                    fixed_pcd_arr = np.hstack(
-                        (np.array(fixed_pcd.points), np.array(fixed_pcd.normals), np.array(fixed_pcd.colors))
-                    )
-                    # Calculate centroid for fixed_pcd
-                    fixed_centroid = np.mean(fixed_pcd_arr, axis=0)
-
-                    target_transform_camera = camera_pose_inv @ target_transform_world @ camera_pose
-                    # visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, target_transform_camera)
-                    translation = target_transform_camera[:3, 3]
-                    rotation = target_transform_camera[:3, :3]
-                    v1 = rotation[:, 0]
-                    v1_normalized = v1 / np.linalg.norm(v1)
-                    v2 = rotation[:, 1]
-                    v2_orthogonal = v2 - np.dot(v2, v1_normalized) * v1_normalized
-                    v2_normalized = v2_orthogonal / np.linalg.norm(v2_orthogonal)
-                    v3 = np.cross(v1_normalized, v2_normalized)
-
-                    target_pcd_shifted = copy.deepcopy(target_pcd_arr)
-                    target_pcd_shifted[:, :3] -= fixed_centroid[:3]
-                    fixed_pcd_shifted = copy.deepcopy(fixed_pcd_arr)
-                    fixed_pcd_shifted[:, :3] -= fixed_centroid[:3]
-
-                    centroid_shift_transform = np.eye(4)
-                    centroid_shift_transform[:3, 3] = -fixed_centroid[:3]
-                    target_transform_camera_shifted = (
-                        centroid_shift_transform @ target_transform_camera @ np.linalg.inv(centroid_shift_transform)
-                    )
-                    # visualize_pcd_with_open3d(target_pcd_shifted, fixed_pcd_shifted, target_transform_camera_shifted)
-                    dtset.append(
-                        {
-                            "original": {
-                                "target": target_pcd_arr,
-                                "fixed": fixed_pcd_arr,
-                                "transform": target_transform_camera,
-                                "9dpose": perform_gram_schmidt_transform(target_transform_camera),
-                                "cam_pose": camera_pose,
-                            },
-                            "shifted": {
-                                "target": target_pcd_shifted,
-                                "fixed": fixed_pcd_shifted,
-                                "transform": target_transform_camera_shifted,
-                                "9dpose": perform_gram_schmidt_transform(target_transform_camera_shifted),
-                                "cam_pose": camera_pose,
-                            },
-                        }
-                    )
+            # visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
+            # visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, target_transform_world)
+            dtset.append(
+                {
+                    "target": target_pcd_arr,
+                    "fixed": fixed_pcd_arr,
+                    "transform": target_transform_world,
+                    "9dpose": perform_gram_schmidt_transform(target_transform_world),
+                    "cam_pose": camera_pose,
+                }
+            )
 
     print("Len of dtset:", len(dtset))
     print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_augmented')}...")

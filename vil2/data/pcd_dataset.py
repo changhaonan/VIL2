@@ -79,9 +79,9 @@ class PointCloudDataset(Dataset):
     def parse_pcd_data(self, batch_idx):
         """Parse data from the dataset."""
         data = self._data[batch_idx]
-        target_pcd = data["shifted"]["target"]
-        fixed_pcd = data["shifted"]["fixed"]
-        pose = data["shifted"]["9dpose"]
+        target_pcd = data["target"]
+        fixed_pcd = data["fixed"]
+        pose = data["9dpose"]
         return target_pcd, fixed_pcd, pose
 
     def augment_pcd_instance(self, coordinate, normal, color, label, pose):

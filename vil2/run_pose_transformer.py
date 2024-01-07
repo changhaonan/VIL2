@@ -3,8 +3,6 @@ import os
 import torch
 import pickle
 import argparse
-import copy
-from vil2.data_gen.preprocess_data import DiffDataset
 from vil2.data.pcd_dataset import PointCloudDataset
 from vil2.model.network.pose_transformer import PoseTransformer
 from vil2.model.tmorp_model import TmorpModel
