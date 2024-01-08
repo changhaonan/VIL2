@@ -79,6 +79,8 @@ if __name__ == "__main__":
     # Read scene info
     with open(os.path.join(scene_path, "scene_info.json"), "r") as f:
         scene_info = json.load(f)
+    semantic_1 = scene_info["semantic_1"]
+    semantic_2 = scene_info["semantic_2"]
     init_pose_1_list = scene_info["init_pose_1_list"][start_idx:end_idx]
     init_pose_2_list = scene_info["init_pose_2_list"][start_idx:end_idx]
     transform_list = scene_info["transform_list"][start_idx:end_idx]
@@ -115,10 +117,11 @@ if __name__ == "__main__":
     # Render
     idx_chunk = 0
     chunk_data = []
-    for scene_idx, (init_pose_1, init_pose_2, transform) in tqdm(
-        enumerate(zip(init_pose_1_list, init_pose_2_list, transform_list)), desc="Generating data", leave=False
-    ):
-        # init_pose_1_t = np.array(transform) @ np.array(init_pose_1)
+    for scene_idx in tqdm(range(len(init_pose_1_list))):
+        init_pose_1 = np.array(init_pose_1_list[scene_idx])
+        init_pose_2 = np.array(init_pose_2_list[scene_idx])
+        transform = np.array(transform_list[scene_idx])
+
         # Update object poses
         scene.set_pose(obj0_node, init_pose_1)
         scene.set_pose(obj1_node, init_pose_2)
@@ -148,6 +151,7 @@ if __name__ == "__main__":
                 "intrinsic": K,
                 "scene_idx": scene_idx,
                 "transform": np.array(transform),  # target object 0
+                "semantic": semantic_1,
             }
             # cv2.imshow("color", color)
             # cv2.waitKey(0)
@@ -162,6 +166,7 @@ if __name__ == "__main__":
                 "intrinsic": K,
                 "scene_idx": scene_idx,
                 "transform": np.eye(4, dtype=np.float32),  # fix object 1
+                "semantic": semantic_2,
             }
             # Set obj0 to be visible
             obj0_node.mesh.is_visible = True

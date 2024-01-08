@@ -10,7 +10,16 @@ import argparse
 class DmorpSceneAugmentor:
     """Scene Augmentor for DMORP dataset"""
 
-    def __init__(self, mesh_1_list, mesh_2_list, pose_1_list, pose_2_list, mesh_type: str = "obj") -> None:
+    def __init__(
+        self,
+        mesh_1_list,
+        mesh_2_list,
+        semantic_1_list,
+        semantic_2_list,
+        pose_1_list,
+        pose_2_list,
+        mesh_type: str = "obj",
+    ) -> None:
         """Dmorp scene is constructed by collecting a series of mesh pairs and their poses.
         Each pose is bounded to their mesh, and the pose is defined as the transformation from the mesh's local frame
         """
@@ -19,8 +28,17 @@ class DmorpSceneAugmentor:
         self.mesh_2_list = mesh_2_list
         self.pose_1_list = pose_1_list
         self.pose_2_list = pose_2_list
+        self.semantic_1_list = semantic_1_list
+        self.semantic_2_list = semantic_2_list
         self.num_data = len(mesh_1_list)
-        assert len(mesh_1_list) == len(mesh_2_list) == len(pose_1_list) == len(pose_2_list)
+        assert (
+            len(mesh_1_list)
+            == len(mesh_2_list)
+            == len(pose_1_list)
+            == len(pose_2_list)
+            == len(semantic_1_list)
+            == len(semantic_2_list)
+        )
 
     def augment(
         self, data_idx: int, num_augment: int, export_dir, random_region: float = 0.5, fix_anchor: bool = False
@@ -32,6 +50,8 @@ class DmorpSceneAugmentor:
         scene_info["random_region"] = random_region
         scene_info["mesh_1"] = self.mesh_1_list[0]
         scene_info["mesh_2"] = self.mesh_2_list[0]
+        scene_info["semantic_1"] = self.semantic_1_list[0]
+        scene_info["semantic_2"] = self.semantic_2_list[0]
         scene_info["pose_1"] = self.pose_1_list[0].tolist()
         scene_info["pose_2"] = self.pose_2_list[0].tolist()
         # Compute relative pose
@@ -113,13 +133,14 @@ class DmorpSceneAugmentor:
 
 
 if __name__ == "__main__":
+    obj_list = ["tea_pot", "tea_mug", "spoon"]
     # Parse arguments
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--seed", type=int, default=0)
-    argparser.add_argument("--data_id", type=int, default=1)
+    argparser.add_argument("--data_id", type=int, default=0)
     argparser.add_argument("--num_samples", type=int, default=10000)
-    argparser.add_argument("--target_object", type=str, default="tea_pot")
-    argparser.add_argument("--anchor_object", type=str, default="tea_mug")
+    argparser.add_argument("--target_object", type=int, default=0)
+    argparser.add_argument("--anchor_object", type=int, default=1)
     argparser.add_argument("--random_region", type=float, default=0.5)
     argparser.add_argument("--fix_anchor", action="store_true")
     argparser.add_argument("--visualize", action="store_true")
@@ -135,18 +156,22 @@ if __name__ == "__main__":
 
     # Prepare data
     root_path = os.path.dirname(os.path.dirname((os.path.abspath(__file__))))
-    mesh_1_file = os.path.join(root_path, "assets", "google_scanned_objects", target_object, "meshes", "model.obj")
-    mesh_2_file = os.path.join(root_path, "assets", "google_scanned_objects", anchor_object, "meshes", "model.obj")
+    mesh_1_file = os.path.join(
+        root_path, "assets", "google_scanned_objects", obj_list[target_object], "meshes", "model.obj"
+    )
+    mesh_2_file = os.path.join(
+        root_path, "assets", "google_scanned_objects", obj_list[anchor_object], "meshes", "model.obj"
+    )
 
     # Goal poses pair
-    if target_object == "tea_pot" and anchor_object == "tea_mug":
+    if target_object == 0 and anchor_object == 1:
         pose_1 = np.eye(4)
         pose_1[:3, 3] = np.array([0.15, 0.15, 0.0])
         pose_1[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi / 3.0]).as_matrix()
         pose_2 = np.eye(4)
         pose_2[:3, 3] = np.array([0.0, 0.0, 0.0])
         pose_2[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi / 2.0]).as_matrix()
-    elif target_object == "spoon" and anchor_object == "tea_mug":
+    elif target_object == 1 and anchor_object == 2:
         pose_1 = np.eye(4)
         pose_1[:3, 3] = np.array([0.2, 0.0, 0.0])
         pose_1[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi / 2.0]).as_matrix()
@@ -157,7 +182,7 @@ if __name__ == "__main__":
     # Set seed
     np.random.seed(args.seed)
 
-    augmentor = DmorpSceneAugmentor([mesh_1_file], [mesh_2_file], [pose_1], [pose_2])
+    augmentor = DmorpSceneAugmentor([mesh_1_file], [mesh_2_file], [target_object], [anchor_object], [pose_1], [pose_2])
     export_dir = os.path.join(root_path, "test_data", "dmorp_augmented")
     augmentor.augment(data_id, num_samples, export_dir, random_region=random_region, fix_anchor=fix_anchor)
 

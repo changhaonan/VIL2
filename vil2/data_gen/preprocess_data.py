@@ -103,8 +103,10 @@ def perform_gram_schmidt_transform(trans_matrix):
 def assemble_tmorp_data(
     fixed_color,
     fixed_depth,
+    fixed_label,
     target_color,
     target_depth,
+    target_label,
     intrinsic,
     camera_pose,
     target_transform_world,
@@ -151,6 +153,8 @@ def assemble_tmorp_data(
     return {
         "target": target_pcd_arr,
         "fixed": fixed_pcd_arr,
+        "target_label": target_label,
+        "fixed_label": fixed_label,
         "transform": target_transform_world,
         "9dpose": perform_gram_schmidt_transform(target_transform_world),
         "cam_pose": camera_pose,
@@ -158,64 +162,64 @@ def assemble_tmorp_data(
     }
 
 
-def build_dataset_blender(scene_info_path, camera_info_path, cfg):
-    """Build the dataset from the given scene and camera info"""
-    # Parse number of scenes and cameras
-    with open(os.path.join(scene_info_path, "scene_info.json"), "r") as f:
-        scene_info = json.load(f)
-    scene_info_list = list(os.listdir(camera_info_path))
-    num_init_scenes = len(scene_info_list)
-    render_file_list = list(os.listdir(os.path.join(camera_info_path, scene_info_list[0])))
-    render_file_list = [f for f in render_file_list if f.endswith(".hdf5")]
-    num_cameras = len(render_file_list) // 2
-    pcd_size = cfg.MODEL.PCD_SIZE
-    print(f"Number of scenes: {num_init_scenes}; Number of cameras: {num_cameras}...")
+# def build_dataset_blender(scene_info_path, camera_info_path, cfg):
+#     """Build the dataset from the given scene and camera info"""
+#     # Parse number of scenes and cameras
+#     with open(os.path.join(scene_info_path, "scene_info.json"), "r") as f:
+#         scene_info = json.load(f)
+#     scene_info_list = list(os.listdir(camera_info_path))
+#     num_init_scenes = len(scene_info_list)
+#     render_file_list = list(os.listdir(os.path.join(camera_info_path, scene_info_list[0])))
+#     render_file_list = [f for f in render_file_list if f.endswith(".hdf5")]
+#     num_cameras = len(render_file_list) // 2
+#     pcd_size = cfg.MODEL.PCD_SIZE
+#     print(f"Number of scenes: {num_init_scenes}; Number of cameras: {num_cameras}...")
 
-    dtset = []
-    for i in tqdm(range(num_init_scenes), desc="Processing scenes"):
-        target_transform_world = np.array(scene_info["transform_list"][i])
-        for j in tqdm(range(num_cameras), desc=f"Processing cameras for scene {i}", leave=False):
-            # Read the target and fixed pointcloud
-            h5file_dir = os.path.join(camera_info_path, f"{i:06d}")
-            intrinsic_file = os.path.join(h5file_dir, "camera.json")
-            camera_pose_file = os.path.join(h5file_dir, "poses.json")
-            target_hdf5 = os.path.join(h5file_dir, f"{j}.hdf5")
-            fixed_hdf5 = os.path.join(h5file_dir, f"{j + num_cameras}.hdf5")
-            target_color, target_depth, fixed_color, fixed_depth, intrinsic = read_scene_hdf5(
-                fixed_hdf5, target_hdf5, intrinsic_file
-            )
-            with open(camera_pose_file, "r") as f:
-                camera_pose_json = json.load(f)
-            camera_pose = np.array(camera_pose_json["cam2world"][j])
+#     dtset = []
+#     for i in tqdm(range(num_init_scenes), desc="Processing scenes"):
+#         target_transform_world = np.array(scene_info["transform_list"][i])
+#         for j in tqdm(range(num_cameras), desc=f"Processing cameras for scene {i}", leave=False):
+#             # Read the target and fixed pointcloud
+#             h5file_dir = os.path.join(camera_info_path, f"{i:06d}")
+#             intrinsic_file = os.path.join(h5file_dir, "camera.json")
+#             camera_pose_file = os.path.join(h5file_dir, "poses.json")
+#             target_hdf5 = os.path.join(h5file_dir, f"{j}.hdf5")
+#             fixed_hdf5 = os.path.join(h5file_dir, f"{j + num_cameras}.hdf5")
+#             target_color, target_depth, fixed_color, fixed_depth, intrinsic = read_scene_hdf5(
+#                 fixed_hdf5, target_hdf5, intrinsic_file
+#             )
+#             with open(camera_pose_file, "r") as f:
+#                 camera_pose_json = json.load(f)
+#             camera_pose = np.array(camera_pose_json["cam2world"][j])
 
-            # Assemble data
-            data = assemble_tmorp_data(
-                fixed_color,
-                fixed_depth,
-                target_color,
-                target_depth,
-                intrinsic,
-                camera_pose,
-                target_transform_world,
-                pcd_size,
-            )
-            if data is None:
-                continue
-            # visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
-            # visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, target_transform_world)
-            dtset.append(data)
+#             # Assemble data
+#             data = assemble_tmorp_data(
+#                 fixed_color,
+#                 fixed_depth,
+#                 target_color,
+#                 target_depth,
+#                 intrinsic,
+#                 camera_pose,
+#                 target_transform_world,
+#                 pcd_size,
+#             )
+#             if data is None:
+#                 continue
+#             # visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
+#             # visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, target_transform_world)
+#             dtset.append(data)
 
-    print("Len of dtset:", len(dtset))
-    print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_augmented')}...")
-    # Save the dtset into a .pkl file
-    with open(
-        os.path.join(
-            root_dir, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"
-        ),
-        "wb",
-    ) as f:
-        pickle.dump(dtset, f)
-    print("Done!")
+#     print("Len of dtset:", len(dtset))
+#     print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_augmented')}...")
+#     # Save the dtset into a .pkl file
+#     with open(
+#         os.path.join(
+#             root_dir, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"
+#         ),
+#         "wb",
+#     ) as f:
+#         pickle.dump(dtset, f)
+#     print("Done!")
 
 
 def build_dataset_pyrender(data_path, cfg, data_id: int = 0):
@@ -234,8 +238,10 @@ def build_dataset_pyrender(data_path, cfg, data_id: int = 0):
             tmorp_data = assemble_tmorp_data(
                 data_1["color"][..., :3],
                 data_1["depth"],
+                data_1["semantic"],
                 data_0["color"][..., :3],
                 data_0["depth"],
+                data_0["semantic"],
                 data_0["intrinsic"],
                 data_0["camera_pose"],
                 data_0["transform"],
@@ -274,7 +280,7 @@ def build_dataset_pyrender(data_path, cfg, data_id: int = 0):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_id", type=int, nargs="+", default=[0])
+    parser.add_argument("--data_id", type=int, nargs="+", default=[1])
     args = parser.parse_args()
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cfg_file = os.path.join(root_dir, "config", "pose_transformer.py")
