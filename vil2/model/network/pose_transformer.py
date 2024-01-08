@@ -133,12 +133,12 @@ class PoseTransformer(nn.Module):
         )
         self.joint_transformer = TransformerEncoder(encoder_layer=self.encoder_layer, num_layers=encoder_num_layers)
 
-        self.final_linear = (
-            nn.Sequential(nn.Linear(encoder_hidden_dim, 9))
-            if not use_dropout_sampler
-            else DropoutSampler(encoder_hidden_dim, 9, dropout_rate=0.0)
-        )
-        self.use_dropout_sampler = use_dropout_sampler
+        # self.final_linear = (
+        #     nn.Sequential(nn.Linear(encoder_hidden_dim, 9))
+        #     if not use_dropout_sampler
+        #     else DropoutSampler(encoder_hidden_dim, 9, dropout_rate=0.0)
+        # )
+        # self.use_dropout_sampler = use_dropout_sampler
 
         """ rotation regress head """
         init_zero = dict(
@@ -202,6 +202,8 @@ class PoseTransformer(nn.Module):
         total_feat = torch.cat((special_token, enc_pcd1, enc_pcd2), dim=1)  # (B, N + M + 1, C)
         encoder_output = self.joint_transformer(total_feat)  # (B, N + M + 1, C)
         encoder_output = encoder_output[:, 0, :]  # (B, C)  # only use the first token
+
+        # Predict pose
         rot_x = self.fusion_tail_rot_x(encoder_output)
         rot_y = self.fusion_tail_rot_y(encoder_output)
         trans = self.fusion_tail_trans(encoder_output)
