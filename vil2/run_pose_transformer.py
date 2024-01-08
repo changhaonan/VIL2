@@ -8,7 +8,7 @@ from vil2.model.network.pose_transformer import PoseTransformer
 from vil2.model.tmorp_model import TmorpModel
 from detectron2.config import LazyConfig
 from torch.utils.data.dataset import random_split
-
+import random
 
 if __name__ == "__main__":
     torch.set_float32_matmul_precision("high")
@@ -38,9 +38,23 @@ if __name__ == "__main__":
     # Select 0.2 for validation
     train_size = int(data_size * 0.8)
     val_size = data_size - train_size
+    val_indices = []
+    train_indices = []
+    val_scenes = random.sample(range(1000), 200)
+    for s in val_scenes:
+        val_indices += range(s * 20, (s+1) * 20)
+    train_scenes = list(set(range(1000)) - set(val_scenes))
+    for s in train_scenes:
+        train_indices += range(s * 20, (s+1) * 20)
+
+    for el in range(data_size, 1000 * 20):
+        if el in val_indices:
+            val_indices.remove(el)
+        if el in train_indices:    
+            train_indices.remove(el)
     
-    val_indices = list(range(args.random_index * val_size, (args.random_index + 1) * val_size))
-    train_indices = list(set(range(data_size)) - set(val_indices))
+    # val_indices = list(range(args.random_index * val_size, (args.random_index + 1) * val_size))
+    # train_indices = list(set(range(data_size)) - set(val_indices))
     volume_augmentations_path=os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     train_dataset = PointCloudDataset(
         data_file=dataset_file,

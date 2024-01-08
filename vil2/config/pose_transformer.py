@@ -7,7 +7,7 @@ ENV = dict(
 )
 
 DATALOADER = dict(
-    BATCH_SIZE=128,
+    BATCH_SIZE=1024,
     NUM_WORKERS=4,
     AUGMENTATION=dict(
         IS_ELASTIC_DISTORTION=True,
@@ -38,7 +38,7 @@ MODEL = dict(
                 encoder_dropout=0.1,
                 encoder_activation="relu",
                 encoder_num_layers=2,
-                fusion_projection_dim=128,
+                fusion_projection_dim=256,
                 use_dropout_sampler=False,
             ),
         ),
