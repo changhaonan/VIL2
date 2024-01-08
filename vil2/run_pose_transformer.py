@@ -159,7 +159,7 @@ if __name__ == "__main__":
     pose_transformer = PoseTransformer(**net_init_args)
     tmorp_model = TmorpModel(cfg, pose_transformer)
 
-    model_name = "tmorp_model"
+    model_name = "Tmorp_model_pod128_na8_ehd256_fpd256"
     noise_net_name = cfg.MODEL.NOISE_NET.NAME
     save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints", noise_net_name)
     save_path = os.path.join(save_dir, model_name)

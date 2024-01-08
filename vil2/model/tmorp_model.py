@@ -131,7 +131,7 @@ class TmorpModel:
         accelerator = "cuda" if torch.cuda.is_available() else "cpu"
         trainer = L.Trainer(
             max_epochs=num_epochs,
-            logger=WandbLogger(name="Tmorp_model", save_dir=os.path.join(save_path, "logs")),
+            logger=WandbLogger(name="Tmorp_model_pod128_na8_ehd256_fpd256", save_dir=os.path.join(save_path, "logs")),
             callbacks=[checkpoint_callback],
             strategy=strategy,
             log_every_n_steps=5,
@@ -144,7 +144,7 @@ class TmorpModel:
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
         accelerator = "cuda" if torch.cuda.is_available() else "cpu"
         trainer = L.Trainer(
-            logger=WandbLogger(name="Tmorp_model", save_dir=os.path.join(save_path, "logs")),
+            logger=WandbLogger(name="Tmorp_model_pod128_na8_ehd256_fpd256", save_dir=os.path.join(save_path, "logs")),
             strategy=strategy,
         )
         trainer.test(self.pose_transformer, test_dataloaders=test_data_loader, accelerator=accelerator)
