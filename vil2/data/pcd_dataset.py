@@ -372,7 +372,7 @@ if __name__ == "__main__":
     # Test data loader
     dataset = PointCloudDataset(
         # data_file=f"{root_dir}/test_data/dmorp_augmented/diffusion_dataset_512_s300-c20-r0.5.pkl",
-        data_file=f"{root_dir}/test_data/dmorp_augmented/diffusion_dataset_512_s1000-c200-r0.5.pkl",
+        data_file=f"{root_dir}/test_data/dmorp_faster/diffusion_dataset_0_512_s1000-c200-r0.5.pkl",
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,

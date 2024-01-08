@@ -88,10 +88,10 @@ class DmorpSceneAugmentor:
         init_pose_2 = scene_info["init_pose_2_list"][sample_idx]
         transform = scene_info["transform_list"][sample_idx]
         # Visualize
+        mesh_1_goal = deepcopy(mesh_1)
         mesh_1.transform(init_pose_1)
         mesh_2.transform(init_pose_2)
-        mesh_1_goal = deepcopy(mesh_1)
-        mesh_1_goal.transform(transform)
+        mesh_1_goal.transform(np.array(transform) @ np.array(init_pose_1))
         mesh_1_goal.paint_uniform_color([0.5, 0.1, 0.1])
         # Draw a transparent unit sphere
         mesh_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=random_region)
@@ -99,12 +99,15 @@ class DmorpSceneAugmentor:
         # Convert to wireframe
         mesh_sphere = o3d.geometry.LineSet.create_from_triangle_mesh(mesh_sphere)
 
+        # Origin
+        origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
         vis = o3d.visualization.Visualizer()
         vis.create_window()
         vis.add_geometry(mesh_1)
         vis.add_geometry(mesh_2)
         vis.add_geometry(mesh_1_goal)
         vis.add_geometry(mesh_sphere)
+        vis.add_geometry(origin)
         vis.run()
         vis.destroy_window()
 
@@ -112,9 +115,10 @@ class DmorpSceneAugmentor:
 if __name__ == "__main__":
     # Parse arguments
     argparser = argparse.ArgumentParser()
+    argparser.add_argument("--seed", type=int, default=0)
     argparser.add_argument("--data_id", type=int, default=1)
-    argparser.add_argument("--num_samples", type=int, default=10)
-    argparser.add_argument("--target_object", type=str, default="spoon")
+    argparser.add_argument("--num_samples", type=int, default=10000)
+    argparser.add_argument("--target_object", type=str, default="tea_pot")
     argparser.add_argument("--anchor_object", type=str, default="tea_mug")
     argparser.add_argument("--random_region", type=float, default=0.5)
     argparser.add_argument("--fix_anchor", action="store_true")
@@ -149,8 +153,11 @@ if __name__ == "__main__":
         pose_2 = np.eye(4)
         pose_2[:3, 3] = np.array([0.0, 0.0, 0.0])
         pose_2[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi / 2.0]).as_matrix()
-    augmentor = DmorpSceneAugmentor([mesh_1_file], [mesh_2_file], [pose_1], [pose_2])
 
+    # Set seed
+    np.random.seed(args.seed)
+
+    augmentor = DmorpSceneAugmentor([mesh_1_file], [mesh_2_file], [pose_1], [pose_2])
     export_dir = os.path.join(root_path, "test_data", "dmorp_augmented")
     augmentor.augment(data_id, num_samples, export_dir, random_region=random_region, fix_anchor=fix_anchor)
 

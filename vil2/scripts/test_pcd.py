@@ -21,7 +21,7 @@ plt.colorbar()
 plt.show()
 
 intrinsic = np.array([[711.0, 0.0, 255.5], [0.0, 711.0, 255.5], [0.0, 0.0, 1.0]])
-pcd = utils.get_pointcloud(depth, intrinsic)
+pcd = utils.get_o3d_pointcloud(depth, intrinsic)
 
 # Remove 0 points
 pcd = pcd[pcd[:, 0] != 0.0, :]

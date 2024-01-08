@@ -290,8 +290,8 @@ def mul_9d_pose(pose_1, pose_2):
 # -----------------------------------------------------------------------------
 
 
-def get_pointcloud(color, depth, intrinsic):
-    """Get 3D pointcloud from perspective depth image and color image.
+def get_o3d_pointcloud(color, depth, intrinsic, flip_x: bool = False, flip_y: bool = False):
+    """Get Open3D pointcloud from perspective depth image and color image.
 
     Args:
       color: HxWx3 uint8 array of RGB images.
@@ -306,6 +306,10 @@ def get_pointcloud(color, depth, intrinsic):
     xlin = np.linspace(0, width - 1, width)
     ylin = np.linspace(0, height - 1, height)
     px, py = np.meshgrid(xlin, ylin)
+    if flip_x:
+        px = width - 1 - px
+    if flip_y:
+        py = height - 1 - py
     px = (px - intrinsic[0, 2]) * (depth / intrinsic[0, 0])
     py = (py - intrinsic[1, 2]) * (depth / intrinsic[1, 1])
     # Stack the coordinates and reshape
@@ -325,20 +329,12 @@ def get_pointcloud(color, depth, intrinsic):
 
     tpcd = o3d.geometry.PointCloud()
     tpcd.points = o3d.utility.Vector3dVector(points)
-
     tpcd.colors = o3d.utility.Vector3dVector(colors / 255.0)
 
     # Estimate normals
     tpcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-
     # Optional: Orient the normals to be consistent
     tpcd.orient_normals_consistent_tangent_plane(k=50)
-
-    # Convert normals to numpy array
-    # normals = np.array(tpcd.normals)
-
-    # Concatenate points with colors
-    # pcd_with_color = np.hstack((points, normals, colors))
 
     # return pcd_with_color
     return tpcd, points.shape[0]
