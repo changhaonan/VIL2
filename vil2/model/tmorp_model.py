@@ -40,7 +40,14 @@ class LitPoseTransformer(L.LightningModule):
             fixed_coord, fixed_normal, fixed_color, target_coord, target_normal, target_color
         )
         # compute loss
-        loss = F.mse_loss(pose9d_pred, pose9d)
+        trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])
+        rx_loss = F.mse_loss(pose9d_pred[:, 3:6], pose9d[:, 3:6])
+        ry_loss = F.mse_loss(pose9d_pred[:, 6:9], pose9d[:, 6:9])
+        loss = trans_loss + rx_loss + ry_loss
+        # log
+        self.log("tr_trans_loss", trans_loss, sync_dist=True)
+        self.log("tr_rx_loss", rx_loss, sync_dist=True)
+        self.log("tr_ry_loss", ry_loss, sync_dist=True)
         # log
         self.log("train_loss", loss, sync_dist=True)
         return loss
@@ -64,9 +71,10 @@ class LitPoseTransformer(L.LightningModule):
         ry_loss = F.mse_loss(pose9d_pred[:, 6:9], pose9d[:, 6:9])
         loss = trans_loss + rx_loss + ry_loss
         # log
-        self.log("trans_loss", trans_loss, sync_dist=True)
-        self.log("rx_loss", rx_loss, sync_dist=True)
-        self.log("ry_loss", ry_loss, sync_dist=True)
+        self.log("te_trans_loss", trans_loss, sync_dist=True)
+        self.log("te_rx_loss", rx_loss, sync_dist=True)
+        self.log("te_ry_loss", ry_loss, sync_dist=True)
+        self.log("test_loss", loss, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -88,9 +96,10 @@ class LitPoseTransformer(L.LightningModule):
         ry_loss = F.mse_loss(pose9d_pred[:, 6:9], pose9d[:, 6:9])
         loss = trans_loss + rx_loss + ry_loss
         # log
-        self.log("trans_loss", trans_loss, sync_dist=True)
-        self.log("rx_loss", rx_loss, sync_dist=True)
-        self.log("ry_loss", ry_loss, sync_dist=True)
+        self.log("v_trans_loss", trans_loss, sync_dist=True)
+        self.log("v_rx_loss", rx_loss, sync_dist=True)
+        self.log("v_ry_loss", ry_loss, sync_dist=True)
+        self.log("val_loss", loss, sync_dist=True)
         return loss
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
@@ -122,7 +131,7 @@ class TmorpModel:
         accelerator = "cuda" if torch.cuda.is_available() else "cpu"
         trainer = L.Trainer(
             max_epochs=num_epochs,
-            logger=WandbLogger(name="Tmorp_model", save_dir=os.path.join(save_path, "logs")),
+            logger=WandbLogger(name="Tmorp_model_pod128_na8_ehd256_fpd256", save_dir=os.path.join(save_path, "logs")),
             callbacks=[checkpoint_callback],
             strategy=strategy,
             log_every_n_steps=5,
@@ -135,7 +144,7 @@ class TmorpModel:
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
         accelerator = "cuda" if torch.cuda.is_available() else "cpu"
         trainer = L.Trainer(
-            logger=WandbLogger(name="Tmorp_model", save_dir=os.path.join(save_path, "logs")),
+            logger=WandbLogger(name="Tmorp_model_pod128_na8_ehd256_fpd256", save_dir=os.path.join(save_path, "logs")),
             strategy=strategy,
         )
         trainer.test(self.pose_transformer, test_dataloaders=test_data_loader, accelerator=accelerator)

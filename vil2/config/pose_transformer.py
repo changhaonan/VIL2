@@ -7,8 +7,8 @@ ENV = dict(
 )
 
 DATALOADER = dict(
-    BATCH_SIZE=128,
-    NUM_WORKERS=4,
+    BATCH_SIZE=512,
+    NUM_WORKERS=0,
     AUGMENTATION=dict(
         IS_ELASTIC_DISTORTION=True,
         IS_RANDOM_DISTORTION=True,
@@ -30,15 +30,15 @@ MODEL = dict(
         INIT_ARGS=dict(
             TRANSFORMER=dict(
                 pcd_input_dim=9,  # 3 + 3 + 3
-                pcd_output_dim=32,  # (16, 32, 64, 128)
+                pcd_output_dim=128,  # (16, 32, 64, 128)
                 use_pcd_mean_center=True,
                 points_pyramid=[128, 32],
-                num_attention_heads=2,
+                num_attention_heads=8,
                 encoder_hidden_dim=256,
                 encoder_dropout=0.1,
                 encoder_activation="relu",
                 encoder_num_layers=2,
-                fusion_projection_dim=128,
+                fusion_projection_dim=256,
                 use_dropout_sampler=False,
             ),
         ),
