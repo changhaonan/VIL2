@@ -23,8 +23,6 @@ TRAIN = dict(
 )
 MODEL = dict(
     DIFFUSION_PROCESS="ddpm",
-    POSE_DIM=256,  # 6d pose/ 3d translation
-    GEOMETRY_FEAT_DIM=1024,
     NUM_DIFFUSION_ITERS=200,
     NOISE_NET=dict(
         NAME="TRANSFORMER",
