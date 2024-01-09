@@ -246,5 +246,5 @@ class DmorpModel:
         pp_str = ""
         for points in init_args.points_pyramid:
             pp_str += str(points) + "-"
-        usl = f"usl{init_args.use_semantic_label}"
+        usl = f"{init_args.use_semantic_label}"
         return f"Dmorp_model_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_usl{usl}"

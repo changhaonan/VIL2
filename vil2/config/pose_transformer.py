@@ -38,7 +38,7 @@ MODEL = dict(
                 encoder_activation="relu",
                 encoder_num_layers=2,
                 fusion_projection_dim=256,
-                use_semantic_label=False,
+                use_semantic_label=True,
             ),
         ),
     ),
