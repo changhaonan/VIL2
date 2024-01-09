@@ -28,7 +28,7 @@ class PointCloudDataset(Dataset):
 
     def __init__(
         self,
-        data_file: str,
+        data_file_list: list[str],
         dataset_name: str,
         indices: list = None,
         color_mean_std: str = "color_mean_std.yaml",
@@ -57,11 +57,14 @@ class PointCloudDataset(Dataset):
         else:
             self.image_augmentations = None
         # Load data
-        raw_data = pickle.load(open(data_file, "rb"))  # A list of (coordinates, color, normals, labels, pose)
-        if indices is not None:
-            self._data = [raw_data[i] for i in indices]
-        else:
-            self._data = raw_data
+        data_list = []
+        for data_file in data_file_list:
+            raw_data = pickle.load(open(data_file, "rb"))  # A list of (coordinates, color, normals, labels, pose)
+            if indices is not None:
+                data_list += [raw_data[i] for i in indices]
+            else:
+                data_list += raw_data
+        self._data = data_list
         # Color normalization
         # if Path(str(color_mean_std)).exists():
         #     color_mean_std = self._load_yaml(color_mean_std)
@@ -157,7 +160,7 @@ class PointCloudDataset(Dataset):
         target_label = np.array([target_label]).astype(np.int64)
         fixed_label = np.array([fixed_label]).astype(np.int64)
         target_pose = pose.astype(np.float32)
-        
+
         # Prepare data
         target_coord = target_pcd[:, :3]
         fixed_coord = fixed_pcd[:, :3]
@@ -378,7 +381,7 @@ if __name__ == "__main__":
     # Test data loader
     dataset = PointCloudDataset(
         # data_file=f"{root_dir}/test_data/dmorp_augmented/diffusion_dataset_512_s300-c20-r0.5.pkl",
-        data_file=f"{root_dir}/test_data/dmorp_faster/diffusion_dataset_0_512_s10000-c1-r0.5.pkl",
+        data_file=[f"{root_dir}/test_data/dmorp_faster/diffusion_dataset_0_512_s10000-c1-r0.5.pkl"],
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,

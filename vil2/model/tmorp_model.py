@@ -30,14 +30,15 @@ class LitPoseTransformer(L.LightningModule):
         target_coord = batch["target_coord"].to(torch.float32)
         target_normal = batch["target_normal"].to(torch.float32)
         target_color = batch["target_color"].to(torch.float32)
-        target_pose = batch["target_pose"].to(torch.float32)
+        target_label = batch["target_label"].to(torch.long)
         fixed_coord = batch["fixed_coord"].to(torch.float32)
         fixed_normal = batch["fixed_normal"].to(torch.float32)
         fixed_color = batch["fixed_color"].to(torch.float32)
+        fixed_label = batch["fixed_label"].to(torch.long)
         pose9d = batch["target_pose"].to(torch.float32)
         # forward
         pose9d_pred = self.pose_transformer(
-            fixed_coord, fixed_normal, fixed_color, target_coord, target_normal, target_color
+            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
         )
         # compute loss
         trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])
@@ -56,14 +57,15 @@ class LitPoseTransformer(L.LightningModule):
         target_coord = batch["target_coord"].to(torch.float32)
         target_normal = batch["target_normal"].to(torch.float32)
         target_color = batch["target_color"].to(torch.float32)
-        target_pose = batch["target_pose"].to(torch.float32)
+        target_label = batch["target_label"].to(torch.long)
         fixed_coord = batch["fixed_coord"].to(torch.float32)
         fixed_normal = batch["fixed_normal"].to(torch.float32)
         fixed_color = batch["fixed_color"].to(torch.float32)
+        fixed_label = batch["fixed_label"].to(torch.long)
         pose9d = batch["target_pose"].to(torch.float32)
         # forward
         pose9d_pred = self.pose_transformer(
-            fixed_coord, fixed_normal, fixed_color, target_coord, target_normal, target_color
+            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
         )
         # compute loss
         trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])
@@ -81,14 +83,15 @@ class LitPoseTransformer(L.LightningModule):
         target_coord = batch["target_coord"].to(torch.float32)
         target_normal = batch["target_normal"].to(torch.float32)
         target_color = batch["target_color"].to(torch.float32)
-        target_pose = batch["target_pose"].to(torch.float32)
+        target_label = batch["target_label"].to(torch.long)
         fixed_coord = batch["fixed_coord"].to(torch.float32)
         fixed_normal = batch["fixed_normal"].to(torch.float32)
         fixed_color = batch["fixed_color"].to(torch.float32)
+        fixed_label = batch["fixed_label"].to(torch.long)
         pose9d = batch["target_pose"].to(torch.float32)
         # forward
         pose9d_pred = self.pose_transformer(
-            fixed_coord, fixed_normal, fixed_color, target_coord, target_normal, target_color
+            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
         )
         # compute loss
         trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])

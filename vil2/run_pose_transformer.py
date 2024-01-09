@@ -14,8 +14,15 @@ if __name__ == "__main__":
     torch.set_float32_matmul_precision("high")
     # Parse arguments
     argparser = argparse.ArgumentParser()
+    argparser.add_argument("--seed", type=int, default=0)
     argparser.add_argument("--random_index", type=int, default=0)
     args = argparser.parse_args()
+    # Set seed
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+    random.seed(args.seed)
+
     # Load config
     task_name = "Dmorp"
     root_path = os.path.dirname((os.path.abspath(__file__)))
@@ -29,59 +36,35 @@ if __name__ == "__main__":
     random_distortion_mag = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_MAG
     volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
     # Load dataset & data loader
-    dataset_file = os.path.join(
-        root_path, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"
-    )
-    with open(dataset_file, "rb") as f:
-        dataset = pickle.load(f)
-        data_size = len(dataset)
-    # Select 0.2 for validation
-    train_size = int(data_size * 0.8)
-    val_size = data_size - train_size
-    val_indices = []
-    train_indices = []
-    val_scenes = random.sample(range(1000), 200)
-    for s in val_scenes:
-        val_indices += range(s * 20, (s+1) * 20)
-    train_scenes = list(set(range(1000)) - set(val_scenes))
-    for s in train_scenes:
-        train_indices += range(s * 20, (s+1) * 20)
+    data_id_list = [0, 1]
+    data_file_list = [
+        os.path.join(
+            root_path,
+            "test_data",
+            "dmorp_faster",
+            f"diffusion_dataset_{data_id}_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl",
+        )
+        for data_id in data_id_list
+    ]
 
-    for el in range(data_size, 1000 * 20):
-        if el in val_indices:
-            val_indices.remove(el)
-        if el in train_indices:    
-            train_indices.remove(el)
-    
-    # val_indices = list(range(args.random_index * val_size, (args.random_index + 1) * val_size))
-    # train_indices = list(set(range(data_size)) - set(val_indices))
-    volume_augmentations_path=os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
-    train_dataset = PointCloudDataset(
-        data_file=dataset_file,
-        dataset_name="dmorp",
-        indices=train_indices,
-        add_colors=True,
-        add_normals=True,
-        is_elastic_distortion=is_elastic_distortion,
-        is_random_distortion=is_random_distortion,
-        random_distortion_rate=random_distortion_rate,
-        random_distortion_mag=random_distortion_mag,
-        volume_augmentations_path=volume_augmentations_path
+    volume_augmentations_path = (
+        os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     )
-    train_dataset.set_mode("train")
-    
-    val_dataset = PointCloudDataset(
-        data_file=dataset_file,
+    dataset = PointCloudDataset(
+        data_file_list=data_file_list,
         dataset_name="dmorp",
-        indices=val_indices,
         add_colors=True,
         add_normals=True,
         is_elastic_distortion=is_elastic_distortion,
         is_random_distortion=is_random_distortion,
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
-        volume_augmentations_path=volume_augmentations_path)
-    val_dataset.set_mode("val")
+        volume_augmentations_path=volume_augmentations_path,
+    )
+    # Split dataset
+    train_size = int(cfg.MODEL.TRAIN_TEST_SPLIT * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
     # # Use cached dataset if available
     # if os.path.exists(

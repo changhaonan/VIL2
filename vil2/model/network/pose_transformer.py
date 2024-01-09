@@ -105,6 +105,7 @@ class PoseTransformer(nn.Module):
         encoder_dropout: float = 0.1,
         encoder_activation: str = "relu",
         fusion_projection_dim: int = 512,
+        max_semantic_size: int = 10,
         use_dropout_sampler: bool = False,
     ) -> None:
         super().__init__()
@@ -120,7 +121,8 @@ class PoseTransformer(nn.Module):
         # Learnable embedding
         self.seg_embedding_1 = nn.Embedding(1, pcd_output_dim)
         self.seg_embedding_2 = nn.Embedding(1, pcd_output_dim)
-        self.special_token_embedding = nn.Embedding(1, pcd_output_dim)
+        # self.special_token_embedding = nn.Embedding(1, pcd_output_dim)
+        self.semantic_embedding = nn.Embedding(max_semantic_size, pcd_output_dim)
 
         self.encoder_layer = TransformerEncoderLayer(
             d_model=pcd_output_dim,
@@ -170,9 +172,11 @@ class PoseTransformer(nn.Module):
         coord1: torch.Tensor,
         normal1: torch.Tensor,
         color1: torch.Tensor,
+        label1: torch.Tensor,
         coord2: torch.Tensor,
         normal2: torch.Tensor,
         color2: torch.Tensor,
+        label2: torch.Tensor,
     ) -> torch.Tensor:
         """
         Args:
@@ -182,6 +186,8 @@ class PoseTransformer(nn.Module):
             coord2: (B, M, 3)
             normal2: (B, M, 3)
             color2: (B, M, 3)
+            label1: (B, 1)
+            label2: (B, 1)
         Returns:
             (B, 3)
         """
@@ -193,12 +199,14 @@ class PoseTransformer(nn.Module):
 
         enc_pcd1 = enc_pcd1.transpose(1, 2)  # (B, N, C)
         enc_pcd2 = enc_pcd2.transpose(1, 2)  # (B, M, C)
+        # Apply segment embedding
         enc_pcd1 += self.seg_embedding_1.weight[None, ...]  # (B, N, C)
         enc_pcd2 += self.seg_embedding_2.weight[None, ...]  # (B, M, C)
 
-        # Add special tokens
+        # Add special tokens as a sum of semantic embedding
         batch_size = enc_pcd1.size(0)
-        special_token = self.special_token_embedding.weight[None, ...].expand(batch_size, 1, -1)
+        special_token = self.semantic_embedding(label1.view(-1)) + self.semantic_embedding(label2.view(-1))
+        special_token = special_token.view(batch_size, 1, -1)
         total_feat = torch.cat((special_token, enc_pcd1, enc_pcd2), dim=1)  # (B, N + M + 1, C)
         encoder_output = self.joint_transformer(total_feat)  # (B, N + M + 1, C)
         encoder_output = encoder_output[:, 0, :]  # (B, C)  # only use the first token

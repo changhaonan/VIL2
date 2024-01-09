@@ -8,7 +8,7 @@ ENV = dict(
 
 DATALOADER = dict(
     BATCH_SIZE=512,
-    NUM_WORKERS=0,
+    NUM_WORKERS=4,  # Set to 0 if using ilab
     AUGMENTATION=dict(
         IS_ELASTIC_DISTORTION=True,
         IS_RANDOM_DISTORTION=True,
