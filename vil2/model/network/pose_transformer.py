@@ -106,24 +106,32 @@ class PoseTransformer(nn.Module):
         encoder_activation: str = "relu",
         fusion_projection_dim: int = 512,
         max_semantic_size: int = 10,
-        use_dropout_sampler: bool = False,
+        use_semantic_label: bool = True,
     ) -> None:
         super().__init__()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+        # Encode pcd features
         self.pcd_encoder = PointTransformerEncoderSmall(
             output_dim=pcd_output_dim,
             input_dim=pcd_input_dim,
             points_pyramid=points_pyramid,
             mean_center=use_pcd_mean_center,
         )
-
+        # Encode position
+        self.position_encoder = nn.Sequential(
+            nn.Linear(3, pcd_output_dim),
+            nn.LayerNorm(pcd_output_dim),
+            nn.ReLU(),
+            nn.Linear(pcd_output_dim, pcd_output_dim),
+            nn.LayerNorm(pcd_output_dim),
+            nn.ReLU(),
+        )
         # Learnable embedding
         self.seg_embedding_1 = nn.Embedding(1, pcd_output_dim)
         self.seg_embedding_2 = nn.Embedding(1, pcd_output_dim)
-        # self.special_token_embedding = nn.Embedding(1, pcd_output_dim)
         self.semantic_embedding = nn.Embedding(max_semantic_size, pcd_output_dim)
-
+        self.use_semantic_label = use_semantic_label
         self.encoder_layer = TransformerEncoderLayer(
             d_model=pcd_output_dim,
             nhead=num_attention_heads,
@@ -134,13 +142,6 @@ class PoseTransformer(nn.Module):
             norm_first=True,
         )
         self.joint_transformer = TransformerEncoder(encoder_layer=self.encoder_layer, num_layers=encoder_num_layers)
-
-        # self.final_linear = (
-        #     nn.Sequential(nn.Linear(encoder_hidden_dim, 9))
-        #     if not use_dropout_sampler
-        #     else DropoutSampler(encoder_hidden_dim, 9, dropout_rate=0.0)
-        # )
-        # self.use_dropout_sampler = use_dropout_sampler
 
         """ rotation regress head """
         init_zero = dict(
@@ -199,14 +200,22 @@ class PoseTransformer(nn.Module):
 
         enc_pcd1 = enc_pcd1.transpose(1, 2)  # (B, N, C)
         enc_pcd2 = enc_pcd2.transpose(1, 2)  # (B, M, C)
+        enc_position1 = self.position_encoder(center1).view(center1.size(0), 1, -1)  # (B, 1, C)
+        enc_position2 = self.position_encoder(center2).view(center2.size(0), 1, -1)  # (B, 1, C)
+        enc_pcd1 = torch.cat((enc_pcd1, enc_position1), dim=1)
+        enc_pcd2 = torch.cat((enc_pcd2, enc_position2), dim=1)
         # Apply segment embedding
         enc_pcd1 += self.seg_embedding_1.weight[None, ...]  # (B, N, C)
         enc_pcd2 += self.seg_embedding_2.weight[None, ...]  # (B, M, C)
 
         # Add special tokens as a sum of semantic embedding
         batch_size = enc_pcd1.size(0)
-        special_token = self.semantic_embedding(label1.view(-1)) + self.semantic_embedding(label2.view(-1))
-        special_token = special_token.view(batch_size, 1, -1)
+        if self.use_semantic_label:
+            special_token = self.semantic_embedding(label1.view(-1)) + self.semantic_embedding(label2.view(-1))
+            special_token = special_token.view(batch_size, 1, -1)
+        else:
+            special_token = self.semantic_embedding(torch.zeros(batch_size, dtype=torch.long, device=self.device))
+            special_token = special_token.view(batch_size, 1, -1)
         total_feat = torch.cat((special_token, enc_pcd1, enc_pcd2), dim=1)  # (B, N + M + 1, C)
         encoder_output = self.joint_transformer(total_feat)  # (B, N + M + 1, C)
         encoder_output = encoder_output[:, 0, :]  # (B, C)  # only use the first token
