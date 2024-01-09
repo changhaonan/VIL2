@@ -17,7 +17,7 @@ class OfflinePolicy:
         # parameters
         self.policy_std = config.get('policy_std', 0.1)
         self.device = torch.device(
-            "cuda:0" if torch.cuda.is_available() else "cpu")
+            "cuda" if torch.cuda.is_available() else "cpu")
         self.log_path = config.get('log_path', None)
         if os.path.exists(os.path.join(self.log_path, "eval.txt")):
             os.remove(os.path.join(self.log_path, "eval.txt"))

@@ -30,7 +30,7 @@ class ReplayMemory(object):
     def __init__(self, capacity):
         self.memory = deque([], maxlen=capacity)
         self.device = torch.device(
-            "cuda:0" if torch.cuda.is_available() else "cpu")
+            "cuda" if torch.cuda.is_available() else "cpu")
 
     def push(self, obs, action, next_obs, reward, terminated):
         """Save a transition"""
@@ -58,7 +58,7 @@ class OQDP:
         v_lr = config.get('v_lr', 1e-3)
         weight_decay = config.get('weight_decay', 0.0)
         self.device = torch.device(
-            "cuda:0" if torch.cuda.is_available() else "cpu")
+            "cuda" if torch.cuda.is_available() else "cpu")
         # parameters to search
         self.action_noise_type = config.get('action_noise_type', 'gaussian')
         self.policy_std = config.get('policy_std', 0.1)

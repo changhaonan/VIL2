@@ -540,7 +540,7 @@ class DmorpModel:
                 pose9d_full = pose9d[random_index].unsqueeze(0).repeat(sample_size, 1).detach().cpu().numpy()
             B, _ = target.shape[0], 1
             # sample noise to add to actions
-            noise_sample = torch.randn((pose9d.shape[0], pose9d.shape[1]), device="cuda:0")
+            noise_sample = torch.randn((pose9d.shape[0], pose9d.shape[1]), device="cuda")
             if consider_only_one_pair:
                 target_random = target[random_index].unsqueeze(0).repeat(sample_size, 1, 1)
                 fixed_random = fixed[random_index].unsqueeze(0).repeat(sample_size, 1, 1)
@@ -550,7 +550,7 @@ class DmorpModel:
                 timesteps = list(range(len(self.noise_scheduler)))[::-1]
                 for _, t in enumerate(tqdm(timesteps, desc="Denoising steps")):
                     t = (
-                        torch.from_numpy(np.repeat(t, noise_sample.shape[0])).long().to("cuda:0")
+                        torch.from_numpy(np.repeat(t, noise_sample.shape[0])).long().to("cuda")
                     )  # num_samples is config.eval.batch_size
                     if consider_only_one_pair:
                         residual = self.nets.noise_pred_net(noise_sample, t, target_random, fixed_random)

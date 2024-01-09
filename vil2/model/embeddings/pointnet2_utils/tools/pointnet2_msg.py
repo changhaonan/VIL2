@@ -95,8 +95,8 @@ class Pointnet2MSG(nn.Module):
         return pred_cls
 
 if __name__ == '__main__':
-    net = Pointnet2MSG(0).cuda(device="cuda:1")
-    pts = torch.randn(2, 1024, 3).cuda(device="cuda:1")
+    net = Pointnet2MSG(0).cuda(device="cuda")
+    pts = torch.randn(2, 1024, 3).cuda(device="cuda")
 
     pre = net(pts)
     print(pre.shape)
