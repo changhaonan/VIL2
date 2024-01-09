@@ -7,8 +7,8 @@ ENV = dict(
 )
 
 DATALOADER = dict(
-    BATCH_SIZE=512,
-    NUM_WORKERS=4,  # Set to 0 if using ilab
+    BATCH_SIZE=256,
+    NUM_WORKERS=0,  # Set to 0 if using ilab
     AUGMENTATION=dict(
         IS_ELASTIC_DISTORTION=True,
         IS_RANDOM_DISTORTION=True,
@@ -33,7 +33,7 @@ MODEL = dict(
                 pcd_input_dim=9,  # 3 + 3 + 3
                 pcd_output_dim=128,  # (16, 32, 64, 128)
                 use_pcd_mean_center=True,
-                points_pyramid=[64, 16],
+                points_pyramid=[16, 8],
                 num_attention_heads=8,
                 encoder_hidden_dim=256,
                 encoder_dropout=0.1,

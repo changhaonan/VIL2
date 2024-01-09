@@ -118,6 +118,18 @@ class TmorpModel:
         # parameters
         # build model
         self.pose_transformer = LitPoseTransformer(pose_transformer, cfg).to(torch.float32)
+        net_name = cfg.MODEL.NOISE_NET.NAME
+        net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
+        self.model_name = "Tmorp_model" 
+        self.model_name += f"_pod{net_init_args.pcd_output_dim}" 
+        self.model_name += f"_na{net_init_args.num_attention_heads}"
+        self.model_name += f"_ehd{net_init_args.encoder_hidden_dim}"
+        self.model_name += f"_fpd{net_init_args.fusion_projection_dim}"
+        pp_str = ""
+        for points in net_init_args.points_pyramid:
+            pp_str += str(points) + "_"
+        self.model_name += f"_pp{pp_str}"
+        self.model_name += f"usl{net_init_args.use_semantic_label}"
 
     def train(self, num_epochs: int, train_data_loader, val_data_loader, save_path: str):
         # Checkpoint callback
@@ -132,9 +144,10 @@ class TmorpModel:
         # If not mac, using ddp_find_unused_parameters_true
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
         accelerator = "cuda" if torch.cuda.is_available() else "cpu"
+        os.makedirs(os.path.join(save_path, "logs"), exist_ok=True)
         trainer = L.Trainer(
             max_epochs=num_epochs,
-            logger=WandbLogger(name="Tmorp_model_pod128_na8_ehd256_fpd256", save_dir=os.path.join(save_path, "logs")),
+            logger=WandbLogger(name=self.model_name, save_dir=os.path.join(save_path, "logs")),
             callbacks=[checkpoint_callback],
             strategy=strategy,
             log_every_n_steps=5,
@@ -146,8 +159,9 @@ class TmorpModel:
         # Trainer
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
         accelerator = "cuda" if torch.cuda.is_available() else "cpu"
+        os.makedirs(os.path.join(save_path, "logs"), exist_ok=True)
         trainer = L.Trainer(
-            logger=WandbLogger(name="Tmorp_model_pod128_na8_ehd256_fpd256", save_dir=os.path.join(save_path, "logs")),
+            logger=WandbLogger(name=self.model_name, save_dir=os.path.join(save_path, "logs")),
             strategy=strategy,
         )
         trainer.test(self.pose_transformer, test_dataloaders=test_data_loader, accelerator=accelerator)
