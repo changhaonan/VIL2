@@ -142,7 +142,17 @@ if __name__ == "__main__":
     pose_transformer = PoseTransformer(**net_init_args)
     tmorp_model = TmorpModel(cfg, pose_transformer)
 
-    model_name = "Tmorp_model_pod128_na8_ehd256_fpd256"
+    model_name = "Tmorp_model" 
+    model_name += f"_pod{net_init_args.pcd_output_dim}" 
+    model_name += f"_na{net_init_args.num_attention_heads}"
+    model_name += f"_ehd{net_init_args.encoder_hidden_dim}"
+    model_name += f"_fpd{net_init_args.fusion_projection_dim}"
+    pp_str = ""
+    for points in net_init_args.points_pyramid:
+        pp_str += str(points) + "_"
+    model_name += f"_pp{pp_str}"
+    model_name += f"usl{net_init_args.use_semantic_label}"
+
     noise_net_name = cfg.MODEL.NOISE_NET.NAME
     save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints", noise_net_name)
     save_path = os.path.join(save_dir, model_name)
