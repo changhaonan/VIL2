@@ -14,7 +14,7 @@ DATALOADER = dict(
         IS_RANDOM_DISTORTION=True,
         RANDOM_DISTORTION_RATE=0.2,
         RANDOM_DISTORTION_MAG=0.01,
-        VOLUME_AUGMENTATION_FILE="va_rotation.yaml" # None
+        VOLUME_AUGMENTATION_FILE="va_rotation.yaml",  # None
     ),
 )
 TRAIN = dict(
@@ -22,6 +22,7 @@ TRAIN = dict(
     LR=1e-4,
 )
 MODEL = dict(
+    DIFFUSION_PROCESS="ddpm",
     POSE_DIM=256,  # 6d pose/ 3d translation
     GEOMETRY_FEAT_DIM=1024,
     NUM_DIFFUSION_ITERS=200,
@@ -54,7 +55,7 @@ MODEL = dict(
         SHUFFLE=False,
         CANONICALIZE=False,
     ),
-    DATASET_CONFIG="s10000-c1-r0.5", # "s1000-c200-r0.5",  # "s300-c20-r0.5", #"s500-c20-r0.5" #"s1000-c1-r0.5", # "s250-c40-r2", # "s100-c20-r2",
+    DATASET_CONFIG="s10000-c1-r0.5",  # "s1000-c200-r0.5",  # "s300-c20-r0.5", #"s500-c20-r0.5" #"s1000-c1-r0.5", # "s250-c40-r2", # "s100-c20-r2",
     SAVE_FIG=True,
     VISUALIZE=False,
     MAX_SCENE_SIZE=4,
@@ -76,5 +77,7 @@ MODEL = dict(
     GUIDE_SEMANTIC_CONSISTENCY=False,
     USE_POSITIONAL_EMBEDDING=True,
 )
-
+LOGGER = dict(
+    PROJECT="tns",
+)
 CUDA_DEVICE = "cuda:0"
