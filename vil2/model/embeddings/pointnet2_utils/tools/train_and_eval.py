@@ -68,8 +68,8 @@ def train_one_epoch(model, train_loader, optimizer, epoch, lr_scheduler, total_i
         optimizer.zero_grad()
 
         pts_input, cls_labels = batch['pts_input'], batch['cls_labels']
-        pts_input = torch.from_numpy(pts_input).cuda(device="cuda:1", non_blocking=True).float()
-        cls_labels = torch.from_numpy(cls_labels).cuda(device="cuda:1", non_blocking=True).long().view(-1)
+        pts_input = torch.from_numpy(pts_input).cuda(device="cuda", non_blocking=True).float()
+        cls_labels = torch.from_numpy(cls_labels).cuda(device="cuda", non_blocking=True).long().view(-1)
 
         pred_cls = model(pts_input)
         pred_cls = pred_cls.view(-1)
@@ -106,8 +106,8 @@ def eval_one_epoch(model, eval_loader, epoch, tb_log=None, log_f=None):
     iou_list = []
     for it, batch in enumerate(eval_loader):
         pts_input, cls_labels = batch['pts_input'], batch['cls_labels']
-        pts_input = torch.from_numpy(pts_input).cuda(device="cuda:1", non_blocking=True).float()
-        cls_labels = torch.from_numpy(cls_labels).cuda(device="cuda:1", non_blocking=True).long().view(-1)
+        pts_input = torch.from_numpy(pts_input).cuda(device="cuda", non_blocking=True).float()
+        cls_labels = torch.from_numpy(cls_labels).cuda(device="cuda", non_blocking=True).long().view(-1)
 
         pred_cls = model(pts_input)
         pred_cls = pred_cls.view(-1)
@@ -155,7 +155,7 @@ def load_checkpoint(model, filename):
 
 
 def train_and_eval(model, train_loader, eval_loader, tb_log, ckpt_dir, log_f):
-    model.cuda(device="cuda:1")
+    model.cuda(device="cuda")
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     def lr_lbmd(cur_epoch):

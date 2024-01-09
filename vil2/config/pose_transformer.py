@@ -39,7 +39,7 @@ MODEL = dict(
                 encoder_activation="relu",
                 encoder_num_layers=2,
                 fusion_projection_dim=256,
-                use_semantic_label=True,
+                use_semantic_label=False,
             ),
         ),
     ),
@@ -77,4 +77,4 @@ MODEL = dict(
     USE_POSITIONAL_EMBEDDING=True,
 )
 
-CUDA_DEVICE = "cuda:0"
+CUDA_DEVICE = "cuda"

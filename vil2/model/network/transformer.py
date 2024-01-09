@@ -26,7 +26,7 @@ class Transformer(nn.Module):
                   use_dropout_sampler: bool = False,
                   ):
         super().__init__()
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.emb_size = input_dim
         self.downsample_pcd_enc = downsample_pcd_enc
         

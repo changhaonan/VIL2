@@ -118,9 +118,9 @@ if __name__ == "__main__":
 
     # Init CLIP model
     if semantic_feat_type == "clip":
-        clip_model, preprocess = clip.load("ViT-B/32", device="cuda:0")
+        clip_model, preprocess = clip.load("ViT-B/32", device="cuda")
         for obj_name, obj_data in obj_dict.items():
-            text_inputs = torch.cat([clip.tokenize(f"A picture of {obj_name}")]).to("cuda:0")
+            text_inputs = torch.cat([clip.tokenize(f"A picture of {obj_name}")]).to("cuda")
             obj_data["semantic_feature"] = clip_model.encode_text(
                 text_inputs).detach().cpu().numpy()[0]
     elif semantic_feat_type == "one_hot":

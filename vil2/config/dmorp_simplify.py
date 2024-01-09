@@ -101,4 +101,4 @@ MODEL = dict(
 
 
 
-CUDA_DEVICE = "cuda:0"
+CUDA_DEVICE = "cuda"

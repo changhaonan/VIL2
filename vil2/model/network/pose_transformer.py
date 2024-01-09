@@ -109,7 +109,7 @@ class PoseTransformer(nn.Module):
         use_semantic_label: bool = True,
     ) -> None:
         super().__init__()
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Encode pcd features
         self.pcd_encoder = PointTransformerEncoderSmall(

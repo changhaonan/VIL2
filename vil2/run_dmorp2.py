@@ -89,7 +89,7 @@ if __name__ == "__main__":
         noise_pred_net=build_noise_pred_net(
             noise_net_name, **noise_net_init_args
         ),
-        device="cuda:0"
+        device="cuda"
     )
     model_name = f"dmorp_model_rel_n{noise_net_name}"
     model_name += f"_ps{pcd_size}"
