@@ -67,6 +67,7 @@ class LitPoseDiffusion(L.LightningModule):
             # predict noise residual
             noise_pred = self.pose_transformer(
                 noisy_pose9d,
+                timesteps,
                 target_coord,
                 target_normal,
                 target_color,
@@ -119,6 +120,7 @@ class LitPoseDiffusion(L.LightningModule):
             # predict noise residual
             noise_pred = self.pose_transformer(
                 noisy_pose9d,
+                timesteps,
                 target_coord,
                 target_normal,
                 target_color,
@@ -160,9 +162,11 @@ class LitPoseDiffusion(L.LightningModule):
             noisy_pose9d = torch.randn((pose9d.shape[0], pose9d.shape[1]), device=self.device)
             pose9d_pred = noisy_pose9d
             for k in self.noise_scheduler.timesteps:
+                timesteps = torch.tensor([k], device=self.device).to(torch.long).repeat(pose9d.shape[0])
                 # predict noise residual
                 noise_pred = self.pose_transformer(
                     noisy_pose9d,
+                    timesteps,
                     target_coord,
                     target_normal,
                     target_color,

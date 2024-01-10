@@ -83,6 +83,7 @@ if __name__ == "__main__":
     # Build model
     net_name = cfg.MODEL.NOISE_NET.NAME
     net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
+    net_init_args["max_timestep"] = cfg.MODEL.NUM_DIFFUSION_ITERS
 
     pose_transformer = PoseTransformerNoiseNet(**net_init_args)
     dmorp_model = DmorpModel(cfg, pose_transformer)

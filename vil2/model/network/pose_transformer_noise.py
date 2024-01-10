@@ -22,6 +22,7 @@ class PoseTransformerNoiseNet(PoseTransformer):
         fusion_projection_dim: int = 512,
         max_semantic_size: int = 10,
         use_semantic_label: bool = True,
+        max_timestep: int = 100,
     ) -> None:
         super().__init__(
             pcd_input_dim,
@@ -47,10 +48,12 @@ class PoseTransformerNoiseNet(PoseTransformer):
             nn.LayerNorm(pcd_output_dim),
             nn.ReLU(),
         )
+        self.time_embedding = nn.Embedding(max_timestep, pcd_output_dim)
 
     def forward(
         self,
         noisy_pose: torch.Tensor,
+        t: torch.Tensor,
         coord1: torch.Tensor,
         normal1: torch.Tensor,
         color1: torch.Tensor,
@@ -63,6 +66,7 @@ class PoseTransformerNoiseNet(PoseTransformer):
         """
         Args:
             noisy_pose: (B, 9)
+            t: (B, 1)
             coord1: (B, N, 3)
             normal1: (B, N, 3)
             color1: (B, N, 3)
@@ -104,9 +108,13 @@ class PoseTransformerNoiseNet(PoseTransformer):
         noisy_pose = noisy_pose.view(batch_size, 1, -1)  # (B, 1, 9)
         enc_noisy_pose = self.noisy_encoder(noisy_pose)  # (B, 1, C)
 
-        # Concatenate noisy input
-        cond_feat = torch.cat((cond_feat, enc_noisy_pose), dim=1)  # (B, N + M + 2, C)
-        encoder_output = self.joint_transformer(cond_feat)  # (B, N + M + 2, C)
+        # Encode time
+        time = t.view(batch_size, 1)
+        enc_time = self.time_embedding(time)  # (B, 1, C)
+
+        # Concatenate noisy input & time
+        total_feat = torch.cat((cond_feat, enc_noisy_pose, enc_time), dim=1)  # (B, N + M + 1 + 1 + 1, C)
+        encoder_output = self.joint_transformer(total_feat)  # (B, N + M + 1 + 1 + 1, C)
         encoder_output = encoder_output[:, 0, :]  # (B, C)  # only use the first token
 
         # Predict pose
