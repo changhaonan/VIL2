@@ -23,13 +23,13 @@ TRAIN = dict(
 )
 MODEL = dict(
     DIFFUSION_PROCESS="ddpm",
-    NUM_DIFFUSION_ITERS=200,
+    NUM_DIFFUSION_ITERS=50,
     NOISE_NET=dict(
         NAME="TRANSFORMER",
         INIT_ARGS=dict(
             TRANSFORMER=dict(
                 pcd_input_dim=9,  # 3 + 3 + 3
-                pcd_output_dim=128,  # (16, 32, 64, 128)
+                pcd_output_dim=512,  # (16, 32, 64, 128)
                 use_pcd_mean_center=True,
                 points_pyramid=[16, 8],
                 num_attention_heads=8,

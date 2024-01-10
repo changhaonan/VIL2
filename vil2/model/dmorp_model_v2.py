@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import math
 import os
+import time
 import torch
 import torch.nn.functional as F
 import lightning as L
@@ -25,6 +26,7 @@ class LitPoseDiffusion(L.LightningModule):
         super().__init__()
         self.pose_transformer = pose_transformer
         self.lr = cfg.TRAIN.LR
+        self.start_time = time.time()
         self.diffusion_process = cfg.MODEL.DIFFUSION_PROCESS
         self.num_diffusion_iters = cfg.MODEL.NUM_DIFFUSION_ITERS
         self.noise_scheduler = DDPMScheduler(
@@ -85,6 +87,8 @@ class LitPoseDiffusion(L.LightningModule):
             self.log("tr_ry_loss", ry_loss, sync_dist=True)
             # log
             self.log("train_loss", loss, sync_dist=True)
+            elapsed_time = (time.time() - self.start_time) / 3600
+            self.log("train_runtime(hrs)", elapsed_time, sync_dist=True)
             return loss
         else:
             raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
@@ -134,6 +138,8 @@ class LitPoseDiffusion(L.LightningModule):
             self.log("v_rx_loss", rx_loss, sync_dist=True)
             self.log("v_ry_loss", ry_loss, sync_dist=True)
             self.log("val_loss", loss, sync_dist=True)
+            elapsed_time = (time.time() - self.start_time) / 3600
+            self.log("val_runtime(hrs)", elapsed_time, sync_dist=True)
             return loss
         else:
             raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
@@ -180,6 +186,8 @@ class LitPoseDiffusion(L.LightningModule):
             self.log("te_rx_loss", rx_loss, sync_dist=True)
             self.log("te_ry_loss", ry_loss, sync_dist=True)
             self.log("test_loss", loss, sync_dist=True)
+            elapsed_time = (time.time() - self.start_time)/3600
+            self.log("test_runtime(hrs)", elapsed_time, sync_dist=True)
             return loss
         else:
             raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
@@ -212,6 +220,7 @@ class DmorpModel:
         # If not mac, using ddp_find_unused_parameters_true
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
         accelerator = "cuda" if torch.cuda.is_available() else "cpu"
+        os.makedirs(os.path.join(save_path, "logs"), exist_ok=True)
         trainer = L.Trainer(
             max_epochs=num_epochs,
             logger=WandbLogger(
@@ -228,6 +237,7 @@ class DmorpModel:
         # Trainer
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
         accelerator = "cuda" if torch.cuda.is_available() else "cpu"
+        os.makedirs(os.path.join(save_path, "logs"), exist_ok=True)
         trainer = L.Trainer(
             logger=WandbLogger(
                 name=self.experiment_name(), project=self.logger_project, save_dir=os.path.join(save_path, "logs")
@@ -243,8 +253,9 @@ class DmorpModel:
         na = init_args["num_attention_heads"]
         ehd = init_args["encoder_hidden_dim"]
         fpd = init_args["fusion_projection_dim"]
+        di = f"{self.cfg.MODEL.NUM_DIFFUSION_ITERS}"
         pp_str = ""
         for points in init_args.points_pyramid:
             pp_str += str(points) + "-"
         usl = f"{init_args.use_semantic_label}"
-        return f"Dmorp_model_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_usl{usl}"
+        return f"Dmorp_model_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_di{di}_usl{usl}"
