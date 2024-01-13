@@ -12,10 +12,10 @@ class DmorpSceneAugmentor:
 
     def __init__(
         self,
-        mesh_1_list,
-        mesh_2_list,
-        semantic_1_list,
-        semantic_2_list,
+        mesh_1,
+        mesh_2,
+        semantic_1,
+        semantic_2,
         pose_1_list,
         pose_2_list,
         mesh_type: str = "obj",
@@ -24,21 +24,12 @@ class DmorpSceneAugmentor:
         Each pose is bounded to their mesh, and the pose is defined as the transformation from the mesh's local frame
         """
         self.mesh_type = mesh_type
-        self.mesh_1_list = mesh_1_list
-        self.mesh_2_list = mesh_2_list
+        self.mesh_1 = mesh_1
+        self.mesh_2 = mesh_2
         self.pose_1_list = pose_1_list
         self.pose_2_list = pose_2_list
-        self.semantic_1_list = semantic_1_list
-        self.semantic_2_list = semantic_2_list
-        self.num_data = len(mesh_1_list)
-        assert (
-            len(mesh_1_list)
-            == len(mesh_2_list)
-            == len(pose_1_list)
-            == len(pose_2_list)
-            == len(semantic_1_list)
-            == len(semantic_2_list)
-        )
+        self.semantic_1 = semantic_1
+        self.semantic_2 = semantic_2
 
     def augment(
         self, data_idx: int, num_augment: int, export_dir, random_region: float = 0.5, fix_anchor: bool = False
@@ -48,21 +39,20 @@ class DmorpSceneAugmentor:
         """
         scene_info = {}
         scene_info["random_region"] = random_region
-        scene_info["mesh_1"] = self.mesh_1_list[0]
-        scene_info["mesh_2"] = self.mesh_2_list[0]
-        scene_info["semantic_1"] = self.semantic_1_list[0]
-        scene_info["semantic_2"] = self.semantic_2_list[0]
-        scene_info["pose_1"] = self.pose_1_list[0].tolist()
-        scene_info["pose_2"] = self.pose_2_list[0].tolist()
-        # Compute relative pose
-        pose_1 = np.array(scene_info["pose_1"])
-        pose_2 = np.array(scene_info["pose_2"])
+        scene_info["mesh_1"] = self.mesh_1
+        scene_info["mesh_2"] = self.mesh_2
+        scene_info["semantic_1"] = self.semantic_1
+        scene_info["semantic_2"] = self.semantic_2
         # Sample a series of random poses within the random region
         init_pose_1_list = []
         init_pose_2_list = []
         target_pose_1_list = []
         transform_list = []
+        num_poses = len(self.pose_1_list)
         for i in range(num_augment):
+            # Sample a goal pose pair
+            pose_1 = np.array(self.pose_1_list[np.random.randint(num_poses)])
+            pose_2 = np.array(self.pose_2_list[np.random.randint(num_poses)])
             # Sample pose for anchor and target
             random_init_pose_1 = np.eye(4)
             random_init_pose_1[:3, 3] = np.random.uniform(-random_region / 2.0, random_region / 2.0, size=3)
@@ -164,29 +154,54 @@ if __name__ == "__main__":
     )
 
     # Goal poses pair
+    pose_1_list = []
+    pose_2_list = []
     if target_object == 0 and anchor_object == 1:
+        # Pose pair 1
         pose_1 = np.eye(4)
         pose_1[:3, 3] = np.array([0.15, 0.15, 0.0])
         pose_1[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi / 3.0]).as_matrix()
         pose_2 = np.eye(4)
         pose_2[:3, 3] = np.array([0.0, 0.0, 0.0])
         pose_2[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi / 2.0]).as_matrix()
+        pose_1_list.append(pose_1)
+        pose_2_list.append(pose_2)
+        # Pose pair 2
+        pose_1 = np.eye(4)
+        pose_1[:3, 3] = np.array([0.15, -0.15, 0.0])
+        pose_1[:3, :3] = R.from_euler("xyz", [0.0, 0.0, -np.pi / 3.0]).as_matrix()
+        pose_2 = np.eye(4)
+        pose_2[:3, 3] = np.array([0.0, 0.0, 0.0])
+        pose_2[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi / 2.0]).as_matrix()
+        pose_1_list.append(pose_1)
+        pose_2_list.append(pose_2)
     elif target_object == 1 and anchor_object == 2:
+        # Pose pair 1
         pose_1 = np.eye(4)
         pose_1[:3, 3] = np.array([0.2, 0.0, 0.0])
         pose_1[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi / 2.0]).as_matrix()
         pose_2 = np.eye(4)
         pose_2[:3, 3] = np.array([0.0, 0.0, 0.0])
         pose_2[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi / 2.0]).as_matrix()
-
+        pose_1_list.append(pose_1)
+        pose_2_list.append(pose_2)
+        # Pose pair 2
+        pose_1 = np.eye(4)
+        pose_1[:3, 3] = np.array([-0.2, 0.0, 0.0])
+        pose_1[:3, :3] = R.from_euler("xyz", [0.0, 0.0, -np.pi / 2.0]).as_matrix()
+        pose_2 = np.eye(4)
+        pose_2[:3, 3] = np.array([0.0, 0.0, 0.0])
+        pose_2[:3, :3] = R.from_euler("xyz", [0.0, 0.0, np.pi / 2.0]).as_matrix()
+        pose_1_list.append(pose_1)
+        pose_2_list.append(pose_2)
     # Set seed
     np.random.seed(args.seed)
 
-    augmentor = DmorpSceneAugmentor([mesh_1_file], [mesh_2_file], [target_object], [anchor_object], [pose_1], [pose_2])
+    augmentor = DmorpSceneAugmentor(mesh_1_file, mesh_2_file, target_object, anchor_object, pose_1_list, pose_2_list)
     export_dir = os.path.join(root_path, "test_data", "dmorp_augmented")
     augmentor.augment(data_id, num_samples, export_dir, random_region=random_region, fix_anchor=fix_anchor)
 
     # Check the result
     if visualize:
-        for i in range(3):
+        for i in range(10):
             augmentor.visualize(data_id, export_dir, sample_idx=i)

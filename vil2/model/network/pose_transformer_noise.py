@@ -54,55 +54,17 @@ class PoseTransformerNoiseNet(PoseTransformer):
         self,
         noisy_pose: torch.Tensor,
         t: torch.Tensor,
-        coord1: torch.Tensor,
-        normal1: torch.Tensor,
-        color1: torch.Tensor,
-        label1: torch.Tensor,
-        coord2: torch.Tensor,
-        normal2: torch.Tensor,
-        color2: torch.Tensor,
-        label2: torch.Tensor,
+        cond_feat: torch.Tensor,
     ) -> torch.Tensor:
         """
         Args:
             noisy_pose: (B, 9)
             t: (B, 1)
-            coord1: (B, N, 3)
-            normal1: (B, N, 3)
-            color1: (B, N, 3)
-            coord2: (B, M, 3)
-            normal2: (B, M, 3)
-            color2: (B, M, 3)
-            label1: (B, 1)
-            label2: (B, 1)
+            cond_feat: (B, N + M + 1, C)
         Returns:
             (B, 3)
         """
-        # Encode geometry1 and geometry2
-        pcd_feat1 = torch.cat((normal1, color1), dim=-1)  # (B, N, 6)
-        pcd_feat2 = torch.cat((normal2, color2), dim=-1)  # (B, M, 6)
-        center1, enc_pcd1 = self.pcd_encoder(coord1, pcd_feat1)
-        center2, enc_pcd2 = self.pcd_encoder(coord2, pcd_feat2)
-
-        enc_pcd1 = enc_pcd1.transpose(1, 2)  # (B, N, C)
-        enc_pcd2 = enc_pcd2.transpose(1, 2)  # (B, M, C)
-        enc_position1 = self.position_encoder(center1).view(center1.size(0), 1, -1)  # (B, 1, C)
-        enc_position2 = self.position_encoder(center2).view(center2.size(0), 1, -1)  # (B, 1, C)
-        enc_pcd1 = torch.cat((enc_pcd1, enc_position1), dim=1)
-        enc_pcd2 = torch.cat((enc_pcd2, enc_position2), dim=1)
-        # Apply segment embedding
-        enc_pcd1 += self.seg_embedding_1.weight[None, ...]  # (B, N, C)
-        enc_pcd2 += self.seg_embedding_2.weight[None, ...]  # (B, M, C)
-
-        # Add special tokens as a sum of semantic embedding
-        batch_size = enc_pcd1.size(0)
-        if self.use_semantic_label:
-            special_token = self.semantic_embedding(label1.view(-1)) + self.semantic_embedding(label2.view(-1))
-            special_token = special_token.view(batch_size, 1, -1)
-        else:
-            special_token = self.semantic_embedding(torch.zeros(batch_size, dtype=torch.long, device=self.device))
-            special_token = special_token.view(batch_size, 1, -1)
-        cond_feat = torch.cat((special_token, enc_pcd1, enc_pcd2), dim=1)  # (B, N + M + 1, C)
+        batch_size = cond_feat.shape[0]
 
         # Encode noisy input
         noisy_pose = noisy_pose.view(batch_size, 1, -1)  # (B, 1, 9)

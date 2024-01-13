@@ -9,89 +9,6 @@ from vil2.model.embeddings.sinusoidal import PositionalEmbedding
 from vil2.model.network.genpose_modules import Linear
 
 
-def combined_fourier_embedding(x_coords, y_coords, z_coords, d_model):
-    """
-    Apply Fourier embeddings to the given 3D coordinates.
-
-    Args:
-    x_coords, y_coords, z_coords (torch.Tensor): Tensors of shape (N,) containing the x, y, and z coordinates.
-    d_model (int): The dimension of the Fourier embedding. It should be divisible by 3.
-
-    Returns:
-    torch.Tensor: A tensor of shape (N, d_model) containing the combined Fourier embeddings for the 3D coordinates.
-    """
-    assert d_model % 3 == 0, "d_model should be divisible by 3."
-
-    # Combine coordinates into a single tensor (N, 3)
-    coords = torch.stack((x_coords, y_coords, z_coords), dim=1)
-
-    # Create a range of frequencies for each dimension
-    freqs = torch.arange(0, d_model, step=3, dtype=torch.float32)
-
-    # Scale the frequencies
-    freqs = 1.0 / (10000 ** (freqs / d_model))
-
-    # Apply sine and cosine functions
-    embeddings = torch.zeros((coords.size(0), d_model), dtype=torch.float32)
-    for i in range(3):
-        embedding += torch.sin(coords[:, i : i + 1] * freqs) + torch.cos(coords[:, i : i + 1] * freqs)
-
-    return embeddings
-
-
-class Symmetric_CA_Layer(nn.Module):
-    """Symmetric Cross attention layer."""
-
-    def __init__(self, channels) -> None:
-        super().__init__()
-        self.qx_conv = nn.Conv1d(channels, channels // 4, 1, bias=False)
-        self.kx_conv = nn.Conv1d(channels, channels // 4, 1, bias=False)
-        self.qx_conv.weight = self.kx_conv.weight  # tie weights
-        self.vx_conv = nn.Conv1d(channels, channels, 1, bias=False)
-        self.transx_conv = nn.Conv1d(channels, channels, 1, bias=False)
-        self.qy_conv = nn.Conv1d(channels, channels // 4, 1, bias=False)
-        self.ky_conv = nn.Conv1d(channels, channels // 4, 1, bias=False)
-        self.qy_conv.weight = self.ky_conv.weight
-        self.vy_conv = nn.Conv1d(channels, channels, 1, bias=False)
-        self.transy_conv = nn.Conv1d(channels, channels, 1, bias=False)
-
-        self.after_norm = nn.BatchNorm1d(channels)
-        self.act = nn.ReLU(inplace=True)
-        self.softmax = nn.Softmax(dim=-1)
-
-    def forward(self, x, y):
-        """Forward pass.
-        Args:
-            x: (B, C, N)
-            y: (B, C, M)
-        Returns:
-            (B, C, N)
-        """
-        # Compute x's attention to y
-        q_x = self.qx_conv(y)
-        k_x = self.kx_conv(x)
-        v_x = self.vx_conv(x)
-        energy_x = torch.bmm(q_x.permute(0, 2, 1), k_x)  # (B, N, M)
-        attention_xy = self.softmax(energy_x)
-        attention_xy = attention_xy / (1e-9 + attention_xy.sum(dim=2, keepdim=True))
-        r_x = torch.bmm(v_x, attention_xy.permute(0, 2, 1))  # (B, C, N)
-        r_x = self.act(self.after_norm(self.transx_conv(r_x)))
-
-        # Compute y's attention to x
-        q_y = self.qy_conv(x)
-        k_y = self.ky_conv(y)
-        v_y = self.vy_conv(y)
-        energy_y = torch.bmm(q_y.permute(0, 2, 1), k_y)
-        attention_yx = self.softmax(energy_y)
-        attention_yx = attention_yx / (1e-9 + attention_yx.sum(dim=2, keepdim=True))
-        r_y = torch.bmm(v_y, attention_yx.permute(0, 2, 1))
-        r_y = self.act(self.after_norm(self.transy_conv(r_y)))
-
-        x = x + r_x
-        y = y + r_y
-        return x, y
-
-
 class PoseTransformer(nn.Module):
     def __init__(
         self,
@@ -168,7 +85,7 @@ class PoseTransformer(nn.Module):
             Linear(fusion_projection_dim, 3, **init_zero),
         )
 
-    def forward(
+    def encode_cond(
         self,
         coord1: torch.Tensor,
         normal1: torch.Tensor,
@@ -178,7 +95,7 @@ class PoseTransformer(nn.Module):
         normal2: torch.Tensor,
         color2: torch.Tensor,
         label2: torch.Tensor,
-    ) -> torch.Tensor:
+    ):
         """
         Args:
             coord1: (B, N, 3)
@@ -190,7 +107,7 @@ class PoseTransformer(nn.Module):
             label1: (B, 1)
             label2: (B, 1)
         Returns:
-            (B, 3)
+            (B, N + M + 1, C)
         """
         # Encode geometry1 and geometry2
         pcd_feat1 = torch.cat((normal1, color1), dim=-1)  # (B, N, 6)
@@ -216,7 +133,34 @@ class PoseTransformer(nn.Module):
         else:
             special_token = self.semantic_embedding(torch.zeros(batch_size, dtype=torch.long, device=self.device))
             special_token = special_token.view(batch_size, 1, -1)
-        total_feat = torch.cat((special_token, enc_pcd1, enc_pcd2), dim=1)  # (B, N + M + 1, C)
+        cond_feat = torch.cat((special_token, enc_pcd1, enc_pcd2), dim=1)  # (B, N + M + 1, C)
+        return cond_feat
+
+    def forward(
+        self,
+        coord1: torch.Tensor,
+        normal1: torch.Tensor,
+        color1: torch.Tensor,
+        label1: torch.Tensor,
+        coord2: torch.Tensor,
+        normal2: torch.Tensor,
+        color2: torch.Tensor,
+        label2: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Args:
+            coord1: (B, N, 3)
+            normal1: (B, N, 3)
+            color1: (B, N, 3)
+            coord2: (B, M, 3)
+            normal2: (B, M, 3)
+            color2: (B, M, 3)
+            label1: (B, 1)
+            label2: (B, 1)
+        Returns:
+            (B, 3)
+        """
+        total_feat = self.encode_cond(coord1, normal1, color1, label1, coord2, normal2, color2, label2)
         encoder_output = self.joint_transformer(total_feat)  # (B, N + M + 1, C)
         encoder_output = encoder_output[:, 0, :]  # (B, C)  # only use the first token
 

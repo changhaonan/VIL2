@@ -51,6 +51,10 @@ class LitPoseDiffusion(L.LightningModule):
         fixed_label = batch["fixed_label"].to(torch.long)
         pose9d = batch["target_pose"].to(torch.float32)
 
+        # Compute conditional features
+        cond_feat = self.pose_transformer.encode_cond(
+            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
+        )
         if self.diffusion_process == "ddpm":
             # sample noise to add to actions
             noise = torch.randn((pose9d.shape[0], pose9d.shape[1]), device=self.device)
@@ -64,18 +68,7 @@ class LitPoseDiffusion(L.LightningModule):
             # add noisy actions
             noisy_pose9d = self.noise_scheduler.add_noise(pose9d, noise, timesteps)
             # predict noise residual
-            noise_pred = self.pose_transformer(
-                noisy_pose9d,
-                timesteps,
-                target_coord,
-                target_normal,
-                target_color,
-                target_label,
-                fixed_coord,
-                fixed_normal,
-                fixed_color,
-                fixed_label,
-            )
+            noise_pred = self.pose_transformer(noisy_pose9d, timesteps, cond_feat)
             # compute loss
             trans_loss = F.mse_loss(noise_pred[:, :3], noise[:, :3])
             rx_loss = F.mse_loss(noise_pred[:, 3:6], noise[:, 3:6])
@@ -118,6 +111,11 @@ class LitPoseDiffusion(L.LightningModule):
         fixed_color = batch["fixed_color"].to(torch.float32)
         fixed_label = batch["fixed_label"].to(torch.long)
         pose9d = batch["target_pose"].to(torch.float32)
+
+        # Compute conditional features
+        cond_feat = self.pose_transformer.encode_cond(
+            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
+        )
         if self.diffusion_process == "ddpm":
             # initialize action from Guassian noise
             pose9d_pred = torch.randn((pose9d.shape[0], pose9d.shape[1]), device=self.device)
@@ -125,18 +123,7 @@ class LitPoseDiffusion(L.LightningModule):
                 timesteps = torch.tensor([k], device=self.device).to(torch.long).repeat(pose9d.shape[0])
                 # predict noise residual
 
-                noise_pred = self.pose_transformer(
-                    pose9d_pred,
-                    timesteps,
-                    target_coord,
-                    target_normal,
-                    target_color,
-                    target_label,
-                    fixed_coord,
-                    fixed_normal,
-                    fixed_color,
-                    fixed_label,
-                )
+                noise_pred = self.pose_transformer(pose9d_pred, timesteps, cond_feat)
                 # inverse diffusion step (remove noise)
                 pose9d_pred = self.noise_scheduler.step(
                     model_output=noise_pred, timestep=k, sample=pose9d_pred

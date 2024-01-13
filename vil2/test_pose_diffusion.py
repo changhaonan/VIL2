@@ -62,16 +62,21 @@ if __name__ == "__main__":
         random_distortion_mag=random_distortion_mag,
         volume_augmentations_path=volume_augmentations_path,
     )
-    # Split dataset
-    train_size = int(cfg.MODEL.TRAIN_TEST_SPLIT * len(dataset))
-    test_size = len(dataset) - train_size
-    _, test_dataset = random_split(dataset, [train_size, test_size])
-
+    # Load test data
+    test_dataset_file = os.path.join(
+        root_path,
+        "test_data",
+        "dmorp_faster",
+        f"diffusion_dataset_test_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl",
+    )
+    with open(test_dataset_file, "rb") as f:
+        test_dataset = pickle.load(f)
     test_data_loader = torch.utils.data.DataLoader(
         test_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
         shuffle=False,
         num_workers=cfg.DATALOADER.NUM_WORKERS,
+        drop_last=False,
     )
 
     # Build model

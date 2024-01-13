@@ -63,9 +63,21 @@ if __name__ == "__main__":
         volume_augmentations_path=volume_augmentations_path,
     )
     # Split dataset
-    train_size = int(cfg.MODEL.TRAIN_TEST_SPLIT * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    train_size = int(cfg.MODEL.TRAIN_SPLIT * len(dataset))
+    val_size = int(cfg.MODEL.VAL_SPLIT * len(dataset))
+    test_size = len(dataset) - train_size - val_size
+    train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
+
+    # Save test dataset to pickle
+    test_dataset_file = os.path.join(
+        root_path,
+        "test_data",
+        "dmorp_faster",
+        f"diffusion_dataset_test_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl",
+    )
+    if not os.path.exists(test_dataset_file):
+        with open(test_dataset_file, "wb") as f:
+            pickle.dump(test_dataset, f)
 
     train_data_loader = torch.utils.data.DataLoader(
         train_dataset,
