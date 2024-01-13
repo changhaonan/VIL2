@@ -64,17 +64,11 @@ if __name__ == "__main__":
     )
     # Split dataset
     train_size = int(cfg.MODEL.TRAIN_TEST_SPLIT * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    test_size = len(dataset) - train_size
+    _, test_dataset = random_split(dataset, [train_size, test_size])
 
-    train_data_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=cfg.DATALOADER.BATCH_SIZE,
-        shuffle=True,
-        num_workers=cfg.DATALOADER.NUM_WORKERS,
-    )
-    val_data_loader = torch.utils.data.DataLoader(
-        val_dataset,
+    test_data_loader = torch.utils.data.DataLoader(
+        test_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
         shuffle=False,
         num_workers=cfg.DATALOADER.NUM_WORKERS,
@@ -94,9 +88,9 @@ if __name__ == "__main__":
     save_path = os.path.join(save_dir, model_name)
     os.makedirs(save_dir, exist_ok=True)
 
-    dmorp_model.train(
-        num_epochs=cfg.TRAIN.NUM_EPOCHS,
-        train_data_loader=train_data_loader,
-        val_data_loader=val_data_loader,
+    dmorp_model.test(
+        test_data_loader=test_data_loader,
         save_path=save_path,
     )
+
+

@@ -14,9 +14,8 @@ import torch.nn.functional as F
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
-
+import time
 from vil2.model.network.pose_transformer import PoseTransformer
-
 
 class LitPoseTransformer(L.LightningModule):
     """Lightning module for Pose Transformer"""
@@ -25,6 +24,7 @@ class LitPoseTransformer(L.LightningModule):
         super().__init__()
         self.pose_transformer = pose_transformer
         self.lr = cfg.TRAIN.LR
+        self.start_time = time.time()
 
     def training_step(self, batch, batch_idx):
         target_coord = batch["target_coord"].to(torch.float32)
@@ -51,6 +51,8 @@ class LitPoseTransformer(L.LightningModule):
         self.log("tr_ry_loss", ry_loss, sync_dist=True)
         # log
         self.log("train_loss", loss, sync_dist=True)
+        elapsed_time = time.time() - self.start_time
+        self.log("train_runtime", elapsed_time, sync_dist=True)
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -76,7 +78,9 @@ class LitPoseTransformer(L.LightningModule):
         self.log("te_trans_loss", trans_loss, sync_dist=True)
         self.log("te_rx_loss", rx_loss, sync_dist=True)
         self.log("te_ry_loss", ry_loss, sync_dist=True)
-        self.log("test_loss", loss, sync_dist=True)
+        self.log("test_loss", loss, sync_dist=True)        
+        elapsed_time = time.time() - self.start_time
+        self.log("test_runtime", elapsed_time, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -103,6 +107,8 @@ class LitPoseTransformer(L.LightningModule):
         self.log("v_rx_loss", rx_loss, sync_dist=True)
         self.log("v_ry_loss", ry_loss, sync_dist=True)
         self.log("val_loss", loss, sync_dist=True)
+        elapsed_time = time.time() - self.start_time
+        self.log("val_runtime", elapsed_time, sync_dist=True)
         return loss
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
@@ -164,5 +170,5 @@ class TmorpModel:
         pp_str = ""
         for points in init_args.points_pyramid:
             pp_str += str(points) + "-"
-        usl = f"usl{init_args.use_semantic_label}"
+        usl = f"{init_args.use_semantic_label}"
         return f"Dmorp_model_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_usl{usl}"

@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import math
 import os
+import time
 import torch
 import torch.nn.functional as F
 import lightning as L
@@ -25,6 +26,7 @@ class LitPoseDiffusion(L.LightningModule):
         super().__init__()
         self.pose_transformer = pose_transformer
         self.lr = cfg.TRAIN.LR
+        self.start_time = time.time()
         self.diffusion_process = cfg.MODEL.DIFFUSION_PROCESS
         self.num_diffusion_iters = cfg.MODEL.NUM_DIFFUSION_ITERS
         self.noise_scheduler = DDPMScheduler(
@@ -37,106 +39,73 @@ class LitPoseDiffusion(L.LightningModule):
             # our network predicts noise (instead of denoised action)
             prediction_type="epsilon",
         )
+    def _common_step(self, batch):
+        target_coord = batch["target_coord"].to(torch.float32)
+        target_normal = batch["target_normal"].to(torch.float32)
+        target_color = batch["target_color"].to(torch.float32)
+        target_label = batch["target_label"].to(torch.long)
+        fixed_coord = batch["fixed_coord"].to(torch.float32)
+        fixed_normal = batch["fixed_normal"].to(torch.float32)
+        fixed_color = batch["fixed_color"].to(torch.float32)
+        fixed_label = batch["fixed_label"].to(torch.long)
+        pose9d = batch["target_pose"].to(torch.float32)
 
+        if self.diffusion_process == "ddpm":
+            # sample noise to add to actions
+            noise = torch.randn((pose9d.shape[0], pose9d.shape[1]), device=self.device)
+            # sample a diffusion iteration for each data point
+            timesteps = torch.randint(
+                low=0,
+                high=self.noise_scheduler.config.num_train_timesteps,
+                size=(pose9d.shape[0],),
+                device=self.device,
+            ).long()
+            # add noisy actions
+            noisy_pose9d = self.noise_scheduler.add_noise(pose9d, noise, timesteps)
+            # predict noise residual
+            noise_pred = self.pose_transformer(
+                noisy_pose9d,
+                timesteps,
+                target_coord,
+                target_normal,
+                target_color,
+                target_label,
+                fixed_coord,
+                fixed_normal,
+                fixed_color,
+                fixed_label,
+            )
+            # compute loss
+            trans_loss = F.mse_loss(noise_pred[:, :3], noise[:, :3])
+            rx_loss = F.mse_loss(noise_pred[:, 3:6], noise[:, 3:6])
+            ry_loss = F.mse_loss(noise_pred[:, 6:9], noise[:, 6:9])
+            loss = F.mse_loss(noise_pred, noise)
+            return trans_loss, rx_loss, ry_loss, loss
+        else:
+            raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
+        
     def training_step(self, batch, batch_idx):
         """Training step; DDPM loss"""
-        target_coord = batch["target_coord"].to(torch.float32)
-        target_normal = batch["target_normal"].to(torch.float32)
-        target_color = batch["target_color"].to(torch.float32)
-        target_label = batch["target_label"].to(torch.long)
-        fixed_coord = batch["fixed_coord"].to(torch.float32)
-        fixed_normal = batch["fixed_normal"].to(torch.float32)
-        fixed_color = batch["fixed_color"].to(torch.float32)
-        fixed_label = batch["fixed_label"].to(torch.long)
-        pose9d = batch["target_pose"].to(torch.float32)
-
-        if self.diffusion_process == "ddpm":
-            # sample noise to add to actions
-            noise = torch.randn((pose9d.shape[0], pose9d.shape[1]), device=self.device)
-            # sample a diffusion iteration for each data point
-            timesteps = torch.randint(
-                low=0,
-                high=self.noise_scheduler.config.num_train_timesteps,
-                size=(pose9d.shape[0],),
-                device=self.device,
-            ).long()
-            # add noisy actions
-            noisy_pose9d = self.noise_scheduler.add_noise(pose9d, noise, timesteps)
-            # predict noise residual
-            noise_pred = self.pose_transformer(
-                noisy_pose9d,
-                target_coord,
-                target_normal,
-                target_color,
-                target_label,
-                fixed_coord,
-                fixed_normal,
-                fixed_color,
-                fixed_label,
-            )
-            # compute loss
-            trans_loss = F.mse_loss(noise_pred[:, :3], noise[:, :3])
-            rx_loss = F.mse_loss(noise_pred[:, 3:6], noise[:, 3:6])
-            ry_loss = F.mse_loss(noise_pred[:, 6:9], noise[:, 6:9])
-            loss = trans_loss + rx_loss + ry_loss
+        trans_loss, rx_loss, ry_loss, loss = self._common_step(batch)
             # log
-            self.log("tr_trans_loss", trans_loss, sync_dist=True)
-            self.log("tr_rx_loss", rx_loss, sync_dist=True)
-            self.log("tr_ry_loss", ry_loss, sync_dist=True)
-            # log
-            self.log("train_loss", loss, sync_dist=True)
-            return loss
-        else:
-            raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
+        self.log("tr_trans_loss", trans_loss, sync_dist=True)
+        self.log("tr_rx_loss", rx_loss, sync_dist=True)
+        self.log("tr_ry_loss", ry_loss, sync_dist=True)
+        # log
+        self.log("train_loss", loss, sync_dist=True)
+        elapsed_time = (time.time() - self.start_time) / 3600
+        self.log("train_runtime(hrs)", elapsed_time, sync_dist=True)
+        return loss
 
     def validation_step(self, batch, batch_idx):
-        target_coord = batch["target_coord"].to(torch.float32)
-        target_normal = batch["target_normal"].to(torch.float32)
-        target_color = batch["target_color"].to(torch.float32)
-        target_label = batch["target_label"].to(torch.long)
-        fixed_coord = batch["fixed_coord"].to(torch.float32)
-        fixed_normal = batch["fixed_normal"].to(torch.float32)
-        fixed_color = batch["fixed_color"].to(torch.float32)
-        fixed_label = batch["fixed_label"].to(torch.long)
-        pose9d = batch["target_pose"].to(torch.float32)
-
-        if self.diffusion_process == "ddpm":
-            # sample noise to add to actions
-            noise = torch.randn((pose9d.shape[0], pose9d.shape[1]), device=self.device)
-            # sample a diffusion iteration for each data point
-            timesteps = torch.randint(
-                low=0,
-                high=self.noise_scheduler.config.num_train_timesteps,
-                size=(pose9d.shape[0],),
-                device=self.device,
-            ).long()
-            # add noisy actions
-            noisy_pose9d = self.noise_scheduler.add_noise(pose9d, noise, timesteps)
-            # predict noise residual
-            noise_pred = self.pose_transformer(
-                noisy_pose9d,
-                target_coord,
-                target_normal,
-                target_color,
-                target_label,
-                fixed_coord,
-                fixed_normal,
-                fixed_color,
-                fixed_label,
-            )
-            # compute loss
-            trans_loss = F.mse_loss(noise_pred[:, :3], noise[:, :3])
-            rx_loss = F.mse_loss(noise_pred[:, 3:6], noise[:, 3:6])
-            ry_loss = F.mse_loss(noise_pred[:, 6:9], noise[:, 6:9])
-            loss = trans_loss + rx_loss + ry_loss
-            # log
-            self.log("v_trans_loss", trans_loss, sync_dist=True)
-            self.log("v_rx_loss", rx_loss, sync_dist=True)
-            self.log("v_ry_loss", ry_loss, sync_dist=True)
-            self.log("val_loss", loss, sync_dist=True)
-            return loss
-        else:
-            raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
+        trans_loss, rx_loss, ry_loss, loss = self._common_step(batch)
+        self.log("v_trans_loss", trans_loss, sync_dist=True)
+        self.log("v_rx_loss", rx_loss, sync_dist=True)
+        self.log("v_ry_loss", ry_loss, sync_dist=True)
+        self.log("val_loss", loss, sync_dist=True)
+        elapsed_time = (time.time() - self.start_time) / 3600
+        self.log("val_runtime(hrs)", elapsed_time, sync_dist=True)
+        return loss
 
     def test_step(self, batch, batch_idx):
         target_coord = batch["target_coord"].to(torch.float32)
@@ -148,15 +117,17 @@ class LitPoseDiffusion(L.LightningModule):
         fixed_color = batch["fixed_color"].to(torch.float32)
         fixed_label = batch["fixed_label"].to(torch.long)
         pose9d = batch["target_pose"].to(torch.float32)
-
         if self.diffusion_process == "ddpm":
             # initialize action from Guassian noise
-            noisy_pose9d = torch.randn((pose9d.shape[0], pose9d.shape[1]), device=self.device)
-            pose9d_pred = noisy_pose9d
+            pose9d_pred = torch.randn((pose9d.shape[0], pose9d.shape[1]), device=self.device)
+            
             for k in self.noise_scheduler.timesteps:
+                timesteps = torch.tensor([k], device=self.device).to(torch.long).repeat(pose9d.shape[0])
                 # predict noise residual
+
                 noise_pred = self.pose_transformer(
                     pose9d_pred,
+                    timesteps,
                     target_coord,
                     target_normal,
                     target_color,
@@ -174,12 +145,14 @@ class LitPoseDiffusion(L.LightningModule):
             trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])
             rx_loss = F.mse_loss(pose9d_pred[:, 3:6], pose9d[:, 3:6])
             ry_loss = F.mse_loss(pose9d_pred[:, 6:9], pose9d[:, 6:9])
-            loss = trans_loss + rx_loss + ry_loss
+            loss = F.mse_loss(pose9d_pred, pose9d)
             # log
             self.log("te_trans_loss", trans_loss, sync_dist=True)
             self.log("te_rx_loss", rx_loss, sync_dist=True)
             self.log("te_ry_loss", ry_loss, sync_dist=True)
             self.log("test_loss", loss, sync_dist=True)
+            elapsed_time = (time.time() - self.start_time)/3600
+            self.log("test_runtime(hrs)", elapsed_time, sync_dist=True)
             return loss
         else:
             raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
@@ -197,7 +170,8 @@ class DmorpModel:
         # parameters
         self.logger_project = cfg.LOGGER.PROJECT
         # build model
-        self.pose_transformer = LitPoseDiffusion(pose_transformer, cfg).to(torch.float32)
+        self.pose_transformer = pose_transformer
+        self.lightning_pose_transformer = LitPoseDiffusion(pose_transformer, cfg).to(torch.float32)
 
     def train(self, num_epochs: int, train_data_loader, val_data_loader, save_path: str):
         # Checkpoint callback
@@ -212,6 +186,7 @@ class DmorpModel:
         # If not mac, using ddp_find_unused_parameters_true
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
         accelerator = "cuda" if torch.cuda.is_available() else "cpu"
+        os.makedirs(os.path.join(save_path, "logs"), exist_ok=True)
         trainer = L.Trainer(
             max_epochs=num_epochs,
             logger=WandbLogger(
@@ -222,19 +197,19 @@ class DmorpModel:
             log_every_n_steps=5,
             accelerator=accelerator,
         )
-        trainer.fit(self.pose_transformer, train_dataloaders=train_data_loader, val_dataloaders=val_data_loader)
+        trainer.fit(self.lightning_pose_transformer, train_dataloaders=train_data_loader, val_dataloaders=val_data_loader)
 
     def test(self, test_data_loader, save_path: str):
-        # Trainer
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
-        accelerator = "cuda" if torch.cuda.is_available() else "cpu"
+        os.makedirs(os.path.join(save_path, "logs"), exist_ok=True)
         trainer = L.Trainer(
             logger=WandbLogger(
                 name=self.experiment_name(), project=self.logger_project, save_dir=os.path.join(save_path, "logs")
             ),
             strategy=strategy,
         )
-        trainer.test(self.pose_transformer, test_dataloaders=test_data_loader, accelerator=accelerator)
+        checkpoint_path = f"{save_path}/checkpoints/Dmorp_model-epoch=5115-val_loss=0.08.ckpt"
+        trainer.test(self.lightning_pose_transformer.__class__.load_from_checkpoint(checkpoint_path, pose_transformer=self.pose_transformer, cfg=self.cfg), dataloaders=test_data_loader)
 
     def experiment_name(self):
         noise_net_name = self.cfg.MODEL.NOISE_NET.NAME
@@ -243,8 +218,9 @@ class DmorpModel:
         na = init_args["num_attention_heads"]
         ehd = init_args["encoder_hidden_dim"]
         fpd = init_args["fusion_projection_dim"]
+        di = f"{self.cfg.MODEL.NUM_DIFFUSION_ITERS}"
         pp_str = ""
         for points in init_args.points_pyramid:
             pp_str += str(points) + "-"
-        usl = f"usl{init_args.use_semantic_label}"
-        return f"Dmorp_model_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_usl{usl}"
+        usl = f"{init_args.use_semantic_label}"
+        return f"Dmorp_model_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_di{di}_usl{usl}"
