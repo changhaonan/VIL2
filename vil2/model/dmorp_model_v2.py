@@ -156,7 +156,7 @@ class LitPoseDiffusion(L.LightningModule):
             for k in self.noise_scheduler.timesteps:
                 # predict noise residual
                 noise_pred = self.pose_transformer(
-                    noisy_pose9d,
+                    pose9d_pred,
                     target_coord,
                     target_normal,
                     target_color,
