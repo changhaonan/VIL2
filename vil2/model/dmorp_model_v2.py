@@ -39,7 +39,8 @@ class LitPoseDiffusion(L.LightningModule):
             # our network predicts noise (instead of denoised action)
             prediction_type="epsilon",
         )
-    def _common_step(self, batch):
+
+    def criterion(self, batch):
         target_coord = batch["target_coord"].to(torch.float32)
         target_normal = batch["target_normal"].to(torch.float32)
         target_color = batch["target_color"].to(torch.float32)
@@ -79,15 +80,15 @@ class LitPoseDiffusion(L.LightningModule):
             trans_loss = F.mse_loss(noise_pred[:, :3], noise[:, :3])
             rx_loss = F.mse_loss(noise_pred[:, 3:6], noise[:, 3:6])
             ry_loss = F.mse_loss(noise_pred[:, 6:9], noise[:, 6:9])
-            loss = F.mse_loss(noise_pred, noise)
+            loss = rx_loss + ry_loss + trans_loss
             return trans_loss, rx_loss, ry_loss, loss
         else:
             raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
-        
+
     def training_step(self, batch, batch_idx):
         """Training step; DDPM loss"""
-        trans_loss, rx_loss, ry_loss, loss = self._common_step(batch)
-            # log
+        trans_loss, rx_loss, ry_loss, loss = self.criterion(batch)
+        # log
         self.log("tr_trans_loss", trans_loss, sync_dist=True)
         self.log("tr_rx_loss", rx_loss, sync_dist=True)
         self.log("tr_ry_loss", ry_loss, sync_dist=True)
@@ -98,7 +99,7 @@ class LitPoseDiffusion(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        trans_loss, rx_loss, ry_loss, loss = self._common_step(batch)
+        trans_loss, rx_loss, ry_loss, loss = self.criterion(batch)
         self.log("v_trans_loss", trans_loss, sync_dist=True)
         self.log("v_rx_loss", rx_loss, sync_dist=True)
         self.log("v_ry_loss", ry_loss, sync_dist=True)
@@ -120,7 +121,6 @@ class LitPoseDiffusion(L.LightningModule):
         if self.diffusion_process == "ddpm":
             # initialize action from Guassian noise
             pose9d_pred = torch.randn((pose9d.shape[0], pose9d.shape[1]), device=self.device)
-            
             for k in self.noise_scheduler.timesteps:
                 timesteps = torch.tensor([k], device=self.device).to(torch.long).repeat(pose9d.shape[0])
                 # predict noise residual
@@ -151,7 +151,7 @@ class LitPoseDiffusion(L.LightningModule):
             self.log("te_rx_loss", rx_loss, sync_dist=True)
             self.log("te_ry_loss", ry_loss, sync_dist=True)
             self.log("test_loss", loss, sync_dist=True)
-            elapsed_time = (time.time() - self.start_time)/3600
+            elapsed_time = (time.time() - self.start_time) / 3600
             self.log("test_runtime(hrs)", elapsed_time, sync_dist=True)
             return loss
         else:
@@ -197,7 +197,9 @@ class DmorpModel:
             log_every_n_steps=5,
             accelerator=accelerator,
         )
-        trainer.fit(self.lightning_pose_transformer, train_dataloaders=train_data_loader, val_dataloaders=val_data_loader)
+        trainer.fit(
+            self.lightning_pose_transformer, train_dataloaders=train_data_loader, val_dataloaders=val_data_loader
+        )
 
     def test(self, test_data_loader, save_path: str):
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
@@ -209,7 +211,12 @@ class DmorpModel:
             strategy=strategy,
         )
         checkpoint_path = f"{save_path}/checkpoints/Dmorp_model-epoch=5115-val_loss=0.08.ckpt"
-        trainer.test(self.lightning_pose_transformer.__class__.load_from_checkpoint(checkpoint_path, pose_transformer=self.pose_transformer, cfg=self.cfg), dataloaders=test_data_loader)
+        trainer.test(
+            self.lightning_pose_transformer.__class__.load_from_checkpoint(
+                checkpoint_path, pose_transformer=self.pose_transformer, cfg=self.cfg
+            ),
+            dataloaders=test_data_loader,
+        )
 
     def experiment_name(self):
         noise_net_name = self.cfg.MODEL.NOISE_NET.NAME
