@@ -23,7 +23,7 @@ TRAIN = dict(
 )
 MODEL = dict(
     DIFFUSION_PROCESS="ddpm",
-    NUM_DIFFUSION_ITERS=50,
+    NUM_DIFFUSION_ITERS=100,
     NOISE_NET=dict(
         NAME="TRANSFORMER",
         INIT_ARGS=dict(
