@@ -214,8 +214,9 @@ class DmorpModel:
         fpd = init_args["fusion_projection_dim"]
         di = f"{self.cfg.MODEL.NUM_DIFFUSION_ITERS}"
         goal_type = f"{self.cfg.ENV.GOAL_TYPE}"
+        lr = f"{self.TRAIN.LR}"
         pp_str = ""
         for points in init_args.points_pyramid:
             pp_str += str(points) + "-"
         usl = f"{init_args.use_semantic_label}"
-        return f"Dmorp_{goal_type}_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_di{di}_usl{usl}"
+        return f"Dmorp_{goal_type}_lr{lr}_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_di{di}_usl{usl}"
