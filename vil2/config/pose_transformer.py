@@ -20,7 +20,7 @@ DATALOADER = dict(
 )
 TRAIN = dict(
     NUM_EPOCHS=10000,
-    LR=1e-4,
+    LR=1e-2,
 )
 MODEL = dict(
     DIFFUSION_PROCESS="ddpm",
