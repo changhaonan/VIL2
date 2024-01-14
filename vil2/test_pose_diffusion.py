@@ -38,11 +38,15 @@ if __name__ == "__main__":
     volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
     # Load dataset & data loader
     data_id_list = [0, 1]
+    if cfg.ENV.GOAL_TYPE == "multimodal":
+        dataset_folder = "dmorp_multimodal"
+    else:
+        dataset_folder = "dmorp_faster"
     data_file_list = [
         os.path.join(
             root_path,
             "test_data",
-            "dmorp_faster",
+            dataset_folder,
             f"diffusion_dataset_{data_id}_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl",
         )
         for data_id in data_id_list
@@ -63,10 +67,14 @@ if __name__ == "__main__":
         volume_augmentations_path=volume_augmentations_path,
     )
     # Load test data
+    if cfg.ENV.GOAL_TYPE == "multimodal":
+        dataset_folder = "dmorp_multimodal"
+    else:
+        dataset_folder = "dmorp_faster"
     test_dataset_file = os.path.join(
         root_path,
         "test_data",
-        "dmorp_faster",
+        dataset_folder,
         f"diffusion_dataset_test_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl",
     )
     with open(test_dataset_file, "rb") as f:

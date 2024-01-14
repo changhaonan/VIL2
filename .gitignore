@@ -31,6 +31,6 @@ analyze.ipynb
 vil2/data_gen/examples/*
 run.sh
 script_*
-logfile_*
+multimodal*
 
 logfile

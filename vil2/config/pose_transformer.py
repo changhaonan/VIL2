@@ -4,6 +4,7 @@ ENV = dict(
     NUM_STRUCTURE=4,
     SEMANTIC_FEAT_DIM=10,
     SEMANTIC_FEAT_TYPE="one_hot",  # random, clip, one_hot
+    GOAL_TYPE="multimodal"
 )
 
 DATALOADER = dict(
