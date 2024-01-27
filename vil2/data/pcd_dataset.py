@@ -187,7 +187,7 @@ class PointCloudDataset(Dataset):
             fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
                 fixed_coord, fixed_normal, fixed_color, None, fixed_pose
             )
-        
+
         target_pose = utils.mat_to_pose9d(np.linalg.inv(fixed_pose) @ target_pose)
         fixed_pose = utils.mat_to_pose9d(fixed_pose)
         return {
