@@ -90,15 +90,6 @@ class PointCloudDataset(Dataset):
         target_label = data["target_label"]
         fixed_label = data["fixed_label"]
         return target_pcd, fixed_pcd, target_label, fixed_label, pose
-    
-    def is_inside_sphere(point, center, radius):
-        """ Check if a point is inside a given sphere """
-        return np.linalg.norm(point - center) < radius
-    
-    def remove_points_in_sphere(point_cloud, center, radius):
-        """ Remove points that are inside the sphere """
-        return np.array([point for point in point_cloud if not self.is_inside_sphere(point, center, radius)])
-    
 
     def augment_pcd_instance(self, coordinate, normal, color, label, pose):
         # FIXME: add augmentation
@@ -167,8 +158,6 @@ class PointCloudDataset(Dataset):
                     )
 
         return coordinate, normal, color, label, pose
-    
-
 
     def __len__(self):
         return len(self._data)
@@ -441,7 +430,7 @@ if __name__ == "__main__":
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # Test data loader
     dataset = PointCloudDataset(
-        data_file_list=[f"{root_dir}/test_data/dmorp_real/diffusion_dataset_0_512_s10000-c1-r0.5.pkl"],
+        data_file_list=[f"{root_dir}/test_data/dmorp_real/diffusion_dataset_0_512_s25000-c1-r0.5.pkl"],
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
@@ -453,7 +442,8 @@ if __name__ == "__main__":
 
     # Test data augmentation
     for i in range(10):
-        data = dataset[i]
+        random_idx = np.random.randint(0, len(dataset))
+        data = dataset[random_idx]
         target_coord = data["target_coord"]
         target_normal = data["target_normal"]
         target_color = data["target_color"]
