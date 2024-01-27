@@ -184,10 +184,11 @@ class PointCloudDataset(Dataset):
             target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(
                 target_coord, target_normal, target_color, None, target_pose
             )
-            # fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
-            #     fixed_coord, fixed_normal, fixed_color, None, fixed_pose
-            # )
-        target_pose = utils.mat_to_pose9d(fixed_pose @ target_pose)
+            fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
+                fixed_coord, fixed_normal, fixed_color, None, fixed_pose
+            )
+        
+        target_pose = utils.mat_to_pose9d(np.linalg.inv(fixed_pose) @ target_pose)
         fixed_pose = utils.mat_to_pose9d(fixed_pose)
         return {
             "target_coord": target_coord.astype(np.float32),
@@ -370,6 +371,7 @@ def random_translation(coordinate, normal, color, pose, offset_type: str = "give
 
     pose_transform = np.eye(4)
     pose_transform[:3, :3] = np.linalg.inv(rotation_matrix)
+    pose_transform[:3, 3] = -offset
     pose = pose @ pose_transform
     return np.array(transformed_points), np.array(transformed_normals), copy.deepcopy(color), copy.deepcopy(pose)
 
@@ -380,8 +382,7 @@ if __name__ == "__main__":
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # Test data loader
     dataset = PointCloudDataset(
-        # data_file=f"{root_dir}/test_data/dmorp_augmented/diffusion_dataset_512_s300-c20-r0.5.pkl",
-        data_file=[f"{root_dir}/test_data/dmorp_faster/diffusion_dataset_0_512_s10000-c1-r0.5.pkl"],
+        data_file_list=[f"{root_dir}/test_data/dmorp_real/diffusion_dataset_0_512_s10000-c1-r0.5.pkl"],
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
@@ -414,5 +415,5 @@ if __name__ == "__main__":
             [target_coord, fixed_coord],
             [target_normal, fixed_normal],
             [target_color, fixed_color],
-            [utils.pose9d_to_mat(target_pose), utils.pose9d_to_mat(fixed_pose)],
+            [utils.pose9d_to_mat(target_pose), np.eye(4, dtype=np.float32)],
         )
