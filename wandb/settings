@@ -1,5 +1,5 @@
 [default]
-entity = diffusion_robotics
 project = tns
+entity = diffusion_robotics
 base_url = https://api.wandb.ai
 

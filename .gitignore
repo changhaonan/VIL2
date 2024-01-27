@@ -23,6 +23,7 @@ checkpoint/*
 vil2/scripts/data_augmentation.py
 vil2/scripts/relative_transform.py 
 dummy.py
+segment_pcd.py
 dummy-hist2.py 
 analyze.ipynb 
 
@@ -30,7 +31,9 @@ analyze.ipynb
 *.exr
 vil2/data_gen/examples/*
 run.sh
+
 script_*
 multimodal*
 
 logfile
+

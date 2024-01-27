@@ -58,7 +58,8 @@ def visualize_pcd_with_open3d(
     pcd1.normals = o3d.utility.Vector3dVector(pcd_with_color1[:, 3:6])
 
     # Assuming the colors are in the range [0, 255], normalize them to [0, 1]
-    pcd1.colors = o3d.utility.Vector3dVector(pcd_with_color1[:, 6:9] / 255.0)
+    color_scale = 1.0 if pcd_with_color1[:, 6:9].max() <= 1.0 else 255.0
+    pcd1.colors = o3d.utility.Vector3dVector(pcd_with_color1[:, 6:9] / color_scale)
 
     # Create an Open3D point cloud object
     pcd2 = o3d.geometry.PointCloud()
@@ -70,7 +71,7 @@ def visualize_pcd_with_open3d(
     pcd2.normals = o3d.utility.Vector3dVector(pcd_with_color2[:, 3:6])
 
     # Assuming the colors are in the range [0, 255], normalize them to [0, 1]
-    pcd2.colors = o3d.utility.Vector3dVector(pcd_with_color2[:, 6:9] / 255.0)
+    pcd2.colors = o3d.utility.Vector3dVector(pcd_with_color2[:, 6:9] / color_scale)
 
     if shift_transform is not None:
         pcd1.transform(shift_transform)
@@ -222,7 +223,7 @@ def assemble_tmorp_data(
 #     print("Done!")
 
 
-def build_dataset_pyrender(data_path, cfg, data_id: int = 0):
+def build_dataset_pyrender(data_path, cfg, data_id: int = 0, vis: bool = False):
     """Build the dataset from the pyrender render engine"""
     data_file_list = os.listdir(data_path)
     data_file_list = [f for f in data_file_list if f.endswith(".npz")]
@@ -251,16 +252,20 @@ def build_dataset_pyrender(data_path, cfg, data_id: int = 0):
             )
             if tmorp_data is None:
                 continue
-            # Visualize & Check
-            # visualize_pcd_with_open3d(
-            #     tmorp_data["target"],
-            #     tmorp_data["fixed"],
-            #     np.eye(4, dtype=np.float32),
-            #     camera_pose=tmorp_data["cam_pose"],
-            # )
-            # visualize_pcd_with_open3d(
-            #     tmorp_data["target"], tmorp_data["fixed"], tmorp_data["transform"], camera_pose=tmorp_data["cam_pose"]
-            # )
+            if vis:
+                # Visualize & Check
+                visualize_pcd_with_open3d(
+                    tmorp_data["target"],
+                    tmorp_data["fixed"],
+                    np.eye(4, dtype=np.float32),
+                    camera_pose=tmorp_data["cam_pose"],
+                )
+                visualize_pcd_with_open3d(
+                    tmorp_data["target"],
+                    tmorp_data["fixed"],
+                    tmorp_data["transform"],
+                    camera_pose=tmorp_data["cam_pose"],
+                )
             dtset.append(tmorp_data)
     print("Len of dtset:", len(dtset))
     print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_faster')}...")
@@ -278,22 +283,93 @@ def build_dataset_pyrender(data_path, cfg, data_id: int = 0):
     print("Done!")
 
 
+def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False):
+    """Build the dataset from the real data"""
+    data_file_list = os.listdir(data_path)
+    data_file_list = [f for f in data_file_list if f.endswith(".pkl")]
+    dtset = []
+    for data_file in tqdm(data_file_list, desc="Processing data"):
+        # Load data
+        pcd_dict = pickle.load(open(os.path.join(data_path, data_file), "rb"))
+        data_len = len(pcd_dict["object_0"])
+        for i in tqdm(range(data_len), desc="Processing frames", leave=False):
+            # Assemble data
+            target_pcd_arr = pcd_dict["object_0"][i]
+            fixed_pcd_arr = pcd_dict["object_1"][i]
+            target_label = pcd_dict["object_0_semantic"][i]
+            fixed_label = pcd_dict["object_1_semantic"][i]
+
+            data_id = data_id
+            # Shift all points to the origin
+            target_pcd_center = np.mean(target_pcd_arr[:, :3], axis=0)
+            fixed_pcd_center = np.mean(fixed_pcd_arr[:, :3], axis=0)
+            target_pcd_arr[:, :3] -= target_pcd_center
+            fixed_pcd_arr[:, :3] -= fixed_pcd_center
+            shift_transform = np.eye(4, dtype=np.float32)
+            shift_transform[:3, 3] = target_pcd_center - fixed_pcd_center
+            pose_9d = perform_gram_schmidt_transform(shift_transform)
+            tmorp_data = {
+                "target": target_pcd_arr,
+                "fixed": fixed_pcd_arr,
+                "target_label": target_label,
+                "fixed_label": fixed_label,
+                "transform": shift_transform,
+                "9dpose": pose_9d,
+                "cam_pose": np.eye(4, dtype=np.float32),
+                "data_id": data_id,
+            }
+            # Visualize & Check
+            if vis:
+                visualize_pcd_with_open3d(
+                    tmorp_data["target"],
+                    tmorp_data["fixed"],
+                    np.eye(4, dtype=np.float32),
+                    camera_pose=tmorp_data["cam_pose"],
+                )
+                visualize_pcd_with_open3d(
+                    tmorp_data["target"],
+                    tmorp_data["fixed"],
+                    tmorp_data["transform"],
+                    camera_pose=tmorp_data["cam_pose"],
+                )
+            dtset.append(tmorp_data)
+    print("Len of dtset:", len(dtset))
+    print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_real')}...")
+    # Save the dtset into a .pkl file
+    with open(
+        os.path.join(
+            root_dir,
+            "test_data",
+            "dmorp_real",
+            f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}.pkl",
+        ),
+        "wb",
+    ) as f:
+        pickle.dump(dtset, f)
+    print("Done!")
+
+
 if __name__ == "__main__":
+    # Parse arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_id", type=int, nargs="+", default=[1])
+    parser.add_argument("--data_id", type=int, nargs="+", default=[0])
+    parser.add_argument("--data_type", type=str, default="real")
+    parser.add_argument("--vis", action="store_true")
     args = parser.parse_args()
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cfg_file = os.path.join(root_dir, "config", "pose_transformer.py")
     cfg = LazyConfig.load(cfg_file)
     data_id = args.data_id
+    vis = args.vis
+
     dtset = []
     for did in data_id:
         print(f"Processing data {did}...")
-        # scene_info_path = os.path.join(
-        #     root_dir, "test_data", "dmorp_augmented", f"{did:06d}-{cfg.MODEL.DATASET_CONFIG}"
-        # )
-        # camera_info_path = os.path.join(root_dir, "test_data", "dmorp", f"{did:06d}-{cfg.MODEL.DATASET_CONFIG}")
-        # build_dataset_blender(scene_info_path, camera_info_path, cfg)
-
-        data_path = os.path.join(root_dir, "test_data", "dmorp_faster", f"{did:06d}")
-        build_dataset_pyrender(data_path, cfg, data_id=did)
+        if args.data_type == "pyrender":
+            data_path = os.path.join(root_dir, "test_data", "dmorp_faster", f"{did:06d}")
+            build_dataset_pyrender(data_path, cfg, data_id=did, vis=vis)
+        elif args.data_type == "real":
+            data_path = os.path.join(root_dir, "test_data", "dmorp_real", f"{did:06d}")
+            build_dataset_real(data_path, cfg, data_id=did, vis=vis)
+        else:
+            raise NotImplementedError

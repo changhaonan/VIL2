@@ -4,7 +4,7 @@ ENV = dict(
     NUM_STRUCTURE=4,
     SEMANTIC_FEAT_DIM=10,
     SEMANTIC_FEAT_TYPE="one_hot",  # random, clip, one_hot
-    GOAL_TYPE="multimodal"
+    GOAL_TYPE="multimodal-m5"
 )
 
 DATALOADER = dict(
@@ -20,7 +20,7 @@ DATALOADER = dict(
 )
 TRAIN = dict(
     NUM_EPOCHS=10000,
-    LR=1e-2,
+    LR=1e-4,
 )
 MODEL = dict(
     DIFFUSION_PROCESS="ddpm",
@@ -30,15 +30,15 @@ MODEL = dict(
         INIT_ARGS=dict(
             TRANSFORMER=dict(
                 pcd_input_dim=9,  # 3 + 3 + 3
-                pcd_output_dim=512,  # (16, 32, 64, 128)
+                pcd_output_dim=1024,  # (16, 32, 64, 128)
                 use_pcd_mean_center=True,
                 points_pyramid=[16, 8],
                 num_attention_heads=8,
-                encoder_hidden_dim=256,
+                encoder_hidden_dim=512,
                 encoder_dropout=0.1,
                 encoder_activation="relu",
                 encoder_num_layers=2,
-                fusion_projection_dim=256,
+                fusion_projection_dim=512,
                 use_semantic_label=True,
             ),
         ),
@@ -56,7 +56,7 @@ MODEL = dict(
         SHUFFLE=False,
         CANONICALIZE=False,
     ),
-    DATASET_CONFIG="s10000-c1-r0.5",  # "s1000-c200-r0.5",  # "s300-c20-r0.5", #"s500-c20-r0.5" #"s1000-c1-r0.5", # "s250-c40-r2", # "s100-c20-r2",
+    DATASET_CONFIG="s25000-c1-r0.5",  # "s1000-c200-r0.5",  # "s300-c20-r0.5", #"s500-c20-r0.5" #"s1000-c1-r0.5", # "s250-c40-r2", # "s100-c20-r2",
     SAVE_FIG=True,
     VISUALIZE=False,
     MAX_SCENE_SIZE=4,
@@ -77,6 +77,9 @@ MODEL = dict(
     GUIDE_DATA_CONSISTENCY=True,
     GUIDE_SEMANTIC_CONSISTENCY=False,
     USE_POSITIONAL_EMBEDDING=True,
+    GMM=dict(
+        N_COMPONENTS=5,
+    ),
 )
 LOGGER = dict(
     PROJECT="tns",
