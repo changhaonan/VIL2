@@ -9,3 +9,6 @@ shapely
 scikit-image
 lightning
 wandb
+open3d
+torch
+torchvision
