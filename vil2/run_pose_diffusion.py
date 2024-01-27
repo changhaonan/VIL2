@@ -36,10 +36,13 @@ if __name__ == "__main__":
     random_distortion_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_RATE
     random_distortion_mag = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_MAG
     volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
+    random_segment_drop_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_SEGMENT_DROP_RATE
     # Load dataset & data loader
-    data_id_list = [0, 1]
+    data_id_list = [0] # [0, 1]
     if cfg.ENV.GOAL_TYPE == "multimodal":
         dataset_folder = "dmorp_multimodal"
+    if "real" in cfg.ENV.GOAL_TYPE:
+        dataset_folder = "dmorp_real"
     else:
         dataset_folder = "dmorp_faster"
     data_file_list = [
@@ -65,6 +68,7 @@ if __name__ == "__main__":
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
         volume_augmentations_path=volume_augmentations_path,
+        random_segment_drop_rate=random_segment_drop_rate
     )
     # Split dataset
     train_size = int(cfg.MODEL.TRAIN_SPLIT * len(dataset))

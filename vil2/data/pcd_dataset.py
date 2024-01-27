@@ -399,12 +399,6 @@ def random_translation(coordinate, normal, color, pose, offset_type: str = "give
     return np.array(transformed_points), np.array(transformed_normals), copy.deepcopy(color), copy.deepcopy(pose)
 
 def random_segment_drop(coordinate, normal, color, pose, random_segment_drop_rate: float=0.15):
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(coordinate)
-    pcd.normals = o3d.utility.Vector3dVector(normal)
-    pcd.colors = o3d.utility.Vector3dVector(color)
-    print(f"Before segment drop with {coordinate.shape[0]} points")
-    o3d.visualization.draw_geometries([pcd])
     # Heuristic: center of the sphere is the mean of the points
     center = coordinate.mean(axis=0)
     # randomly shift the center but keep it inside the point cloud
@@ -431,22 +425,15 @@ def random_segment_drop(coordinate, normal, color, pose, random_segment_drop_rat
         print("Masking inside points instead")
     # Create a new point cloud without the points inside the sphere
     new_points = coordinate[mask]
-    print(f"After segment drop with {new_points.shape[0]} points")
+    new_normals = normal[mask]
     # Duplicate points to make up for the dropped points
     num_points_to_add = total_points - len(new_points)
     indices_to_duplicate = np.random.choice(len(new_points), num_points_to_add)
     duplicated_points = new_points[indices_to_duplicate]
+    duplicated_normals = new_normals[indices_to_duplicate]
     coordinate =  copy.deepcopy(np.concatenate((new_points, duplicated_points)))
-    # Load it to open3d pcd object and recomputes normals
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(coordinate)
-    pcd.estimate_normals()
-    normal = copy.deepcopy(np.asarray(pcd.normals))
-    pcd.colors = o3d.utility.Vector3dVector(color)
-    print(f"After duplication with {coordinate.shape[0]} points")
-    o3d.visualization.draw_geometries([pcd])
+    normal = copy.deepcopy(np.concatenate((new_normals, duplicated_normals)))
     return coordinate, normal, copy.deepcopy(color), copy.deepcopy(pose)
-
 
 if __name__ == "__main__":
     import os
