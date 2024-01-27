@@ -9,5 +9,5 @@ translation:
   min_z: -0.1
   max_z: 0.1
 segment_drop:
-  prob: 0.5 
+  prob: 1.0
   
