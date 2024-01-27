@@ -298,7 +298,7 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False):
             fixed_pcd_arr = pcd_dict["object_1"][i]
             target_label = pcd_dict["object_0_semantic"][i]
             fixed_label = pcd_dict["object_1_semantic"][i]
-                
+
             data_id = data_id
             # Shift all points to the origin
             target_pcd_center = np.mean(target_pcd_arr[:, :3], axis=0)
@@ -350,6 +350,7 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False):
 
 
 if __name__ == "__main__":
+    # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_id", type=int, nargs="+", default=[0])
     parser.add_argument("--data_type", type=str, default="real")
@@ -361,6 +362,7 @@ if __name__ == "__main__":
     data_id = args.data_id
     # vis = args.vis
     vis = True
+
     dtset = []
     for did in data_id:
         print(f"Processing data {did}...")
