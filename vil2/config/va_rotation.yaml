@@ -8,4 +8,6 @@ translation:
   max_y: 0.01
   min_z: -0.01
   max_z: 0.01
+segment_drop:
+  prob: 0.5 
   

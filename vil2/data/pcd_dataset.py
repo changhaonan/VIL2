@@ -40,6 +40,7 @@ class PointCloudDataset(Dataset):
         is_random_distortion: bool = False,
         random_distortion_rate: float = 0.2,
         random_distortion_mag: float = 0.01,
+        random_segment_drop_rate: float = 0.15,
     ):
         # Set parameters
         self.add_colors = add_colors
@@ -48,6 +49,7 @@ class PointCloudDataset(Dataset):
         self.is_random_distortion = is_random_distortion
         self.random_distortion_rate = random_distortion_rate
         self.random_distortion_mag = random_distortion_mag
+        self.random_segment_drop_rate = random_segment_drop_rate
         if volume_augmentations_path is not None:
             self.volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r"), Loader=yaml.FullLoader))
         else:
@@ -88,6 +90,15 @@ class PointCloudDataset(Dataset):
         target_label = data["target_label"]
         fixed_label = data["fixed_label"]
         return target_pcd, fixed_pcd, target_label, fixed_label, pose
+    
+    def is_inside_sphere(point, center, radius):
+        """ Check if a point is inside a given sphere """
+        return np.linalg.norm(point - center) < radius
+    
+    def remove_points_in_sphere(point_cloud, center, radius):
+        """ Remove points that are inside the sphere """
+        return np.array([point for point in point_cloud if not self.is_inside_sphere(point, center, radius)])
+    
 
     def augment_pcd_instance(self, coordinate, normal, color, label, pose):
         # FIXME: add augmentation
@@ -145,7 +156,15 @@ class PointCloudDataset(Dataset):
                         offset_type="given",
                         offset=random_offset,
                     )
+            if "segment_drop" in self.volume_augmentations.keys():
+                if random() < self.volume_augmentations.segment_drop.prob:
+                    
+                    # Duplicate points
+                    final_point_cloud = duplicate_random_points(point_cloud_after_removal, points_to_add)
+
         return coordinate, normal, color, label, pose
+    
+
 
     def __len__(self):
         return len(self._data)
@@ -381,7 +400,7 @@ if __name__ == "__main__":
     # Test data loader
     dataset = PointCloudDataset(
         # data_file=f"{root_dir}/test_data/dmorp_augmented/diffusion_dataset_512_s300-c20-r0.5.pkl",
-        data_file=[f"{root_dir}/test_data/dmorp_faster/diffusion_dataset_0_512_s10000-c1-r0.5.pkl"],
+        data_file_list=[f"{root_dir}/test_data/dmorp_faster/diffusion_dataset_0_512_s10000-c1-r0.5.pkl"],
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
