@@ -4,7 +4,7 @@ ENV = dict(
     NUM_STRUCTURE=4,
     SEMANTIC_FEAT_DIM=10,
     SEMANTIC_FEAT_TYPE="one_hot",  # random, clip, one_hot
-    GOAL_TYPE="real-m2-p1"
+    GOAL_TYPE="multimodal-m5"
 )
 
 DATALOADER = dict(
@@ -16,7 +16,6 @@ DATALOADER = dict(
         RANDOM_DISTORTION_RATE=0.2,
         RANDOM_DISTORTION_MAG=0.01,
         VOLUME_AUGMENTATION_FILE="va_rotation.yaml",  # None
-        RANDOM_SEGMENT_DROP_RATE=0.15
     ),
 )
 TRAIN = dict(
@@ -31,16 +30,15 @@ MODEL = dict(
         INIT_ARGS=dict(
             TRANSFORMER=dict(
                 pcd_input_dim=9,  # 3 + 3 + 3
-                pcd_output_dim=512,  # (16, 32, 64, 128)
+                pcd_output_dim=256,  # (16, 32, 64, 128)
                 use_pcd_mean_center=True,
-                points_pyramid=[16, 8],
                 num_attention_heads=8,
-                encoder_hidden_dim=256,
-                encoder_dropout=0.1,
-                encoder_activation="relu",
-                encoder_num_layers=2,
-                fusion_projection_dim=256,
-                use_semantic_label=True,
+                encoder_hidden_dim=512,
+                encoder_dropout=0.0,
+                structure_dropout=0.5,
+                encoder_num_layers=8,
+                theta_loss_divide=3,
+                obj_dropout=0.1,
             ),
         ),
     ),
@@ -78,9 +76,6 @@ MODEL = dict(
     GUIDE_DATA_CONSISTENCY=True,
     GUIDE_SEMANTIC_CONSISTENCY=False,
     USE_POSITIONAL_EMBEDDING=True,
-    GMM=dict(
-        N_COMPONENTS=5,
-    ),
 )
 LOGGER = dict(
     PROJECT="tns",

@@ -318,7 +318,70 @@ class PointTransformerEncoderSmall(nn.Module):
         x = self.conv_fuse(x)
         return x
 
+class StructPointTransformerEncoderSmall(nn.Module):
 
+    def __init__(self, output_dim=256, input_dim=6, mean_center=True):
+        super(StructPointTransformerEncoderSmall, self).__init__()
+
+        self.mean_center = mean_center
+
+        # map the second dim of the input from input_dim to 64
+        self.conv1 = nn.Conv1d(input_dim, 64, kernel_size=1, bias=False)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.gather_local_0 = Local_op(in_channels=128, out_channels=64)
+        self.gather_local_1 = Local_op(in_channels=128, out_channels=64)
+        self.pt_last = StackedAttention(channels=64)
+
+        self.relu = nn.ReLU()
+        self.conv_fuse = nn.Sequential(nn.Conv1d(192, 256, kernel_size=1, bias=False),
+                                       nn.BatchNorm1d(256),
+                                       nn.LeakyReLU(negative_slope=0.2))
+
+        self.linear1 = nn.Linear(256, 256, bias=False)
+        self.bn6 = nn.BatchNorm1d(256)
+        self.dp1 = nn.Dropout(p=0.5)
+        self.linear2 = nn.Linear(256, 256)
+
+    def forward(self, xyz, f=None):
+        # xyz: B, N, 3
+        # f: B, N, D
+        center = torch.mean(xyz, dim=1)
+        if self.mean_center:
+            xyz = xyz - center.view(-1, 1, 3).repeat(1, xyz.shape[1], 1)
+        if f is None:
+            x = self.pct(xyz)
+        else:
+            x = self.pct(torch.cat([xyz, f], dim=2))  # B, output_dim
+
+        return center, x
+
+    def pct(self, x):
+
+        # x: B, N, D
+        xyz = x[..., :3]
+        x = x.permute(0, 2, 1)
+        batch_size, _, _ = x.size()
+        x = self.relu(self.bn1(self.conv1(x)))  # B, D, N
+        x = x.permute(0, 2, 1)
+        new_xyz, new_feature = sample_and_group(npoint=128, nsample=32, xyz=xyz, points=x)
+        feature_0 = self.gather_local_0(new_feature)
+        feature = feature_0.permute(0, 2, 1)  # B, nsamples, D
+        new_xyz, new_feature = sample_and_group(npoint=32, nsample=16, xyz=new_xyz, points=feature)
+        feature_1 = self.gather_local_1(new_feature)  # B, D, nsamples
+
+        x = self.pt_last(feature_1)  # B, D * 2, nsamples
+        x = torch.cat([x, feature_1], dim=1)  # B, D * 3, nsamples
+        x = self.conv_fuse(x)
+        x = torch.max(x, 2)[0]
+        x = x.view(batch_size, -1)
+
+        x = self.relu(self.bn6(self.linear1(x)))
+        x = self.dp1(x)
+        x = self.linear2(x)
+
+        return x
+    
+    
 class EncoderMLP(torch.nn.Module):
     def __init__(self, in_dim, out_dim, pt_dim=3, uses_pt=True):
         super(EncoderMLP, self).__init__()

@@ -4,12 +4,11 @@ import torch
 import pickle
 import argparse
 from vil2.data.pcd_dataset import PointCloudDataset
-from vil2.model.network.pose_transformer_noise import PoseTransformerNoiseNet
-from vil2.model.dmorp_model_v2 import DmorpModel
+from vil2.model.network.pose_transformer import PoseTransformer
+from vil2.model.structmorp_model import StructmorpModel
 from detectron2.config import LazyConfig
 from torch.utils.data.dataset import random_split
 import random
-
 
 if __name__ == "__main__":
     torch.set_float32_matmul_precision("high")
@@ -27,7 +26,7 @@ if __name__ == "__main__":
     # Load config
     task_name = "Dmorp"
     root_path = os.path.dirname((os.path.abspath(__file__)))
-    cfg_file = os.path.join(root_path, "config", "pose_transformer.py")
+    cfg_file = os.path.join(root_path, "config", "struct_transformer.py")
     cfg = LazyConfig.load(cfg_file)
     retrain = cfg.MODEL.RETRAIN
     pcd_size = cfg.MODEL.PCD_SIZE
@@ -36,13 +35,10 @@ if __name__ == "__main__":
     random_distortion_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_RATE
     random_distortion_mag = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_MAG
     volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
-    random_segment_drop_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_SEGMENT_DROP_RATE
     # Load dataset & data loader
-    data_id_list = [0] # [0, 1]
+    data_id_list = [0, 1]
     if cfg.ENV.GOAL_TYPE == "multimodal":
         dataset_folder = "dmorp_multimodal"
-    if "real" in cfg.ENV.GOAL_TYPE:
-        dataset_folder = "dmorp_real"
     else:
         dataset_folder = "dmorp_faster"
     data_file_list = [
@@ -68,24 +64,11 @@ if __name__ == "__main__":
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
         volume_augmentations_path=volume_augmentations_path,
-        random_segment_drop_rate=random_segment_drop_rate
     )
     # Split dataset
-    train_size = int(cfg.MODEL.TRAIN_SPLIT * len(dataset))
-    val_size = int(cfg.MODEL.VAL_SPLIT * len(dataset))
-    test_size = len(dataset) - train_size - val_size
-    train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
-
-    # Save test dataset to pickle
-    test_dataset_file = os.path.join(
-        root_path,
-        "test_data",
-        "dmorp_real",
-        f"diffusion_dataset_test_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl",
-    )
-    if not os.path.exists(test_dataset_file):
-        with open(test_dataset_file, "wb") as f:
-            pickle.dump(test_dataset, f)
+    train_size = int(cfg.MODEL.TRAIN_TEST_SPLIT * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
     train_data_loader = torch.utils.data.DataLoader(
         train_dataset,
@@ -103,18 +86,27 @@ if __name__ == "__main__":
     # Build model
     net_name = cfg.MODEL.NOISE_NET.NAME
     net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
-    net_init_args["max_timestep"] = cfg.MODEL.NUM_DIFFUSION_ITERS
 
-    pose_transformer = PoseTransformerNoiseNet(**net_init_args)
-    dmorp_model = DmorpModel(cfg, pose_transformer)
+    pose_transformer = PoseTransformer(**net_init_args)
+    tmorp_model = StructmorpModel(cfg, pose_transformer)
 
-    model_name = dmorp_model.experiment_name()
+    model_name = "Structmorp_model" 
+    model_name += f"_pod{net_init_args.pcd_output_dim}" 
+    model_name += f"_na{net_init_args.num_attention_heads}"
+    model_name += f"_ehd{net_init_args.encoder_hidden_dim}"
+    model_name += f"_fpd{net_init_args.fusion_projection_dim}"
+    pp_str = ""
+    for points in net_init_args.points_pyramid:
+        pp_str += str(points) + "_"
+    model_name += f"_pp{pp_str}"
+    model_name += f"usl{net_init_args.use_semantic_label}"
+
     noise_net_name = cfg.MODEL.NOISE_NET.NAME
     save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints", noise_net_name)
     save_path = os.path.join(save_dir, model_name)
     os.makedirs(save_dir, exist_ok=True)
 
-    dmorp_model.train(
+    tmorp_model.train(
         num_epochs=cfg.TRAIN.NUM_EPOCHS,
         train_data_loader=train_data_loader,
         val_data_loader=val_data_loader,
