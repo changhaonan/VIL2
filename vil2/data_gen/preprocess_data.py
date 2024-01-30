@@ -334,7 +334,7 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False):
                 )
             dtset.append(tmorp_data)
     print("Len of dtset:", len(dtset))
-    print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_faster')}...")
+    print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_real')}...")
     # Save the dtset into a .pkl file
     with open(
         os.path.join(
@@ -360,8 +360,7 @@ if __name__ == "__main__":
     cfg_file = os.path.join(root_dir, "config", "pose_transformer.py")
     cfg = LazyConfig.load(cfg_file)
     data_id = args.data_id
-    # vis = args.vis
-    vis = True
+    vis = args.vis
 
     dtset = []
     for did in data_id:

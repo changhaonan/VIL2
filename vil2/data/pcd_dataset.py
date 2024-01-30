@@ -90,15 +90,6 @@ class PointCloudDataset(Dataset):
         target_label = data["target_label"]
         fixed_label = data["fixed_label"]
         return target_pcd, fixed_pcd, target_label, fixed_label, pose
-    
-    def is_inside_sphere(point, center, radius):
-        """ Check if a point is inside a given sphere """
-        return np.linalg.norm(point - center) < radius
-    
-    def remove_points_in_sphere(point_cloud, center, radius):
-        """ Remove points that are inside the sphere """
-        return np.array([point for point in point_cloud if not self.is_inside_sphere(point, center, radius)])
-    
 
     def augment_pcd_instance(self, coordinate, normal, color, label, pose):
         # FIXME: add augmentation
@@ -167,8 +158,6 @@ class PointCloudDataset(Dataset):
                     )
 
         return coordinate, normal, color, label, pose
-    
-
 
     def __len__(self):
         return len(self._data)
@@ -399,12 +388,6 @@ def random_translation(coordinate, normal, color, pose, offset_type: str = "give
     return np.array(transformed_points), np.array(transformed_normals), copy.deepcopy(color), copy.deepcopy(pose)
 
 def random_segment_drop(coordinate, normal, color, pose, random_segment_drop_rate: float=0.15):
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(coordinate)
-    pcd.normals = o3d.utility.Vector3dVector(normal)
-    pcd.colors = o3d.utility.Vector3dVector(color)
-    print(f"Before segment drop with {coordinate.shape[0]} points")
-    o3d.visualization.draw_geometries([pcd])
     # Heuristic: center of the sphere is the mean of the points
     center = coordinate.mean(axis=0)
     # randomly shift the center but keep it inside the point cloud
@@ -431,22 +414,15 @@ def random_segment_drop(coordinate, normal, color, pose, random_segment_drop_rat
         print("Masking inside points instead")
     # Create a new point cloud without the points inside the sphere
     new_points = coordinate[mask]
-    print(f"After segment drop with {new_points.shape[0]} points")
+    new_normals = normal[mask]
     # Duplicate points to make up for the dropped points
     num_points_to_add = total_points - len(new_points)
     indices_to_duplicate = np.random.choice(len(new_points), num_points_to_add)
     duplicated_points = new_points[indices_to_duplicate]
+    duplicated_normals = new_normals[indices_to_duplicate]
     coordinate =  copy.deepcopy(np.concatenate((new_points, duplicated_points)))
-    # Load it to open3d pcd object and recomputes normals
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(coordinate)
-    pcd.estimate_normals()
-    normal = copy.deepcopy(np.asarray(pcd.normals))
-    pcd.colors = o3d.utility.Vector3dVector(color)
-    print(f"After duplication with {coordinate.shape[0]} points")
-    o3d.visualization.draw_geometries([pcd])
+    normal = copy.deepcopy(np.concatenate((new_normals, duplicated_normals)))
     return coordinate, normal, copy.deepcopy(color), copy.deepcopy(pose)
-
 
 if __name__ == "__main__":
     import os
@@ -454,7 +430,7 @@ if __name__ == "__main__":
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     # Test data loader
     dataset = PointCloudDataset(
-        data_file_list=[f"{root_dir}/test_data/dmorp_real/diffusion_dataset_0_512_s10000-c1-r0.5.pkl"],
+        data_file_list=[f"{root_dir}/test_data/dmorp_real/diffusion_dataset_0_512_s25000-c1-r0.5.pkl"],
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
@@ -466,7 +442,8 @@ if __name__ == "__main__":
 
     # Test data augmentation
     for i in range(10):
-        data = dataset[i]
+        random_idx = np.random.randint(0, len(dataset))
+        data = dataset[random_idx]
         target_coord = data["target_coord"]
         target_normal = data["target_normal"]
         target_color = data["target_color"]

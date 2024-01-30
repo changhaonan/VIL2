@@ -206,17 +206,19 @@ class DmorpModel:
         )
 
     def experiment_name(self):
+        dataset_name = self.cfg.MODEL.DATASET_CONFIG
         noise_net_name = self.cfg.MODEL.NOISE_NET.NAME
         init_args = self.cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name]
+        rsdr = self.cfg.DATALOADER.AUGMENTATION.RANDOM_SEGMENT_DROP_RATE
         pod = init_args["pcd_output_dim"]
         na = init_args["num_attention_heads"]
         ehd = init_args["encoder_hidden_dim"]
         fpd = init_args["fusion_projection_dim"]
         di = f"{self.cfg.MODEL.NUM_DIFFUSION_ITERS}"
         goal_type = f"{self.cfg.ENV.GOAL_TYPE}"
-        lr = f"{self.TRAIN.LR}"
+        lr = f"{self.cfg.TRAIN.LR}"
         pp_str = ""
         for points in init_args.points_pyramid:
             pp_str += str(points) + "-"
         usl = f"{init_args.use_semantic_label}"
-        return f"Dmorp_{goal_type}_lr{lr}_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_di{di}_usl{usl}"
+        return f"Dmorp_{goal_type}_rsdr{rsdr}_lr{lr}_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_di{di}_usl{usl}_dc{dataset_name}"
