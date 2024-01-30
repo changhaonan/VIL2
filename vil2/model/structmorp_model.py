@@ -38,7 +38,7 @@ class LitStructPoseTransformer(L.LightningModule):
         pose9d = batch["target_pose"].to(torch.float32)
         # forward
         pose9d_pred = self.pose_transformer(
-            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
+            target_coord, target_color, fixed_coord, fixed_color
         )
         # compute loss
         trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])
@@ -67,7 +67,7 @@ class LitStructPoseTransformer(L.LightningModule):
         pose9d = batch["target_pose"].to(torch.float32)
         # forward
         pose9d_pred = self.pose_transformer(
-            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
+            target_coord, target_color, fixed_coord, fixed_color
         )
         # compute loss
         trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])
@@ -95,7 +95,7 @@ class LitStructPoseTransformer(L.LightningModule):
         pose9d = batch["target_pose"].to(torch.float32)
         # forward
         pose9d_pred = self.pose_transformer(
-            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
+            target_coord, target_color, fixed_coord, fixed_color
         )
         # compute loss
         trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])
@@ -166,9 +166,4 @@ class StructmorpModel:
         pod = init_args["pcd_output_dim"]
         na = init_args["num_attention_heads"]
         ehd = init_args["encoder_hidden_dim"]
-        fpd = init_args["fusion_projection_dim"]
-        pp_str = ""
-        for points in init_args.points_pyramid:
-            pp_str += str(points) + "-"
-        usl = f"{init_args.use_semantic_label}"
-        return f"Dmorp_model_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_usl{usl}"
+        return f"Structmorp_model_pod{pod}_na{na}_ehd{ehd}"

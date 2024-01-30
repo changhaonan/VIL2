@@ -4,7 +4,7 @@ ENV = dict(
     NUM_STRUCTURE=4,
     SEMANTIC_FEAT_DIM=10,
     SEMANTIC_FEAT_TYPE="one_hot",  # random, clip, one_hot
-    GOAL_TYPE="multimodal-m5"
+    GOAL_TYPE="struct-m2-p1"
 )
 
 DATALOADER = dict(
@@ -23,8 +23,6 @@ TRAIN = dict(
     LR=1e-4,
 )
 MODEL = dict(
-    DIFFUSION_PROCESS="ddpm",
-    NUM_DIFFUSION_ITERS=100,
     NOISE_NET=dict(
         NAME="TRANSFORMER",
         INIT_ARGS=dict(
@@ -35,9 +33,7 @@ MODEL = dict(
                 num_attention_heads=8,
                 encoder_hidden_dim=512,
                 encoder_dropout=0.0,
-                structure_dropout=0.5,
                 encoder_num_layers=8,
-                theta_loss_divide=3,
                 obj_dropout=0.1,
             ),
         ),
@@ -48,34 +44,7 @@ MODEL = dict(
     TRAIN_SPLIT=0.7,
     VAL_SPLIT=0.2,
     TEST_SPLIT=0.1,
-    INFERENCE=dict(
-        SAMPLE_SIZE=-1,
-        CONSIDER_ONLY_ONE_PAIR=False,
-        VISUALIZE=False,
-        SHUFFLE=False,
-        CANONICALIZE=False,
-    ),
     DATASET_CONFIG="s25000-c1-r0.5",  # "s1000-c200-r0.5",  # "s300-c20-r0.5", #"s500-c20-r0.5" #"s1000-c1-r0.5", # "s250-c40-r2", # "s100-c20-r2",
-    SAVE_FIG=True,
-    VISUALIZE=False,
-    MAX_SCENE_SIZE=4,
-    ACTION_DIM=3 + 1,  # 6d pose/ 3d translation + time stamp
-    VISION_ENCODER=dict(
-        NAME="resnet18",
-        PRETRAINED=True,
-    ),
-    SEMANTIC_FEAT_DIM=10,
-    AGGREGATE_TYPE="sum",  # mean, max, sum
-    AGGREGATE_LIST=["POSE"],
-    SEMANTIC_FEAT_TYPE="one_hot",  # random, clip, one_hot,
-    RECON_DATA_STAMP=False,  # reconstruct data stamp
-    RECON_SEMANTIC_FEATURE=False,  # reconstruct semantic feature
-    RECON_POSE=True,  # reconstruct pose
-    COND_GEOMETRY_FEATURE=True,
-    COND_SEMANTIC_FEATURE=False,
-    GUIDE_DATA_CONSISTENCY=True,
-    GUIDE_SEMANTIC_CONSISTENCY=False,
-    USE_POSITIONAL_EMBEDDING=True,
 )
 LOGGER = dict(
     PROJECT="tns",
