@@ -1,6 +1,7 @@
 """Test pose transformer."""
 import os
 import torch
+import numpy as np
 import pickle
 import argparse
 from vil2.data.pcd_dataset import PointCloudDataset
@@ -106,7 +107,21 @@ if __name__ == "__main__":
     save_path = os.path.join(save_dir, model_name)
     os.makedirs(save_dir, exist_ok=True)
 
-    tmorp_model.test(
-        test_data_loader=test_data_loader,
-        save_path=save_path,
-    )
+    # Do test
+    # tmorp_model.test(
+    #     test_data_loader=test_data_loader,
+    #     save_path=save_path,
+    # )
+
+    # Do prediction
+    test_idx = np.random.randint(len(test_dataset))
+
+    # Load the best checkpoint
+    checkpoint_path = save_path + "/checkpoints"
+    checkpoints = os.listdir(checkpoint_path)
+    sorted_checkpoints = sorted(checkpoints, key=lambda x: float(x.split("=")[-1].split(".ckpt")[0]))
+    checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
+    tmorp_model.load(checkpoint_file)
+    for test_batch in test_data_loader:
+        prediction = tmorp_model.predict(test_batch)
+        pass

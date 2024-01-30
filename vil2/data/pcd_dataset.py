@@ -8,6 +8,7 @@ import numpy as np
 import scipy
 import albumentations as A
 import random
+
 # import volumentations as V
 import yaml
 from pathlib import Path
@@ -387,7 +388,8 @@ def random_translation(coordinate, normal, color, pose, offset_type: str = "give
     pose = pose @ pose_transform
     return np.array(transformed_points), np.array(transformed_normals), color, pose
 
-def random_segment_drop(coordinate, normal, color, pose, random_segment_drop_rate: float=0.15):
+
+def random_segment_drop(coordinate, normal, color, pose, random_segment_drop_rate: float = 0.15):
     # Heuristic: center of the sphere is the mean of the points
     center = coordinate.mean(axis=0)
     # randomly shift the center but keep it inside the point cloud
@@ -412,9 +414,10 @@ def random_segment_drop(coordinate, normal, color, pose, random_segment_drop_rat
         indices_to_duplicate = np.random.choice(len(new_points), num_points_to_add)
         duplicated_points = new_points[indices_to_duplicate]
         duplicated_normals = new_normals[indices_to_duplicate]
-        coordinate =  np.concatenate((new_points, duplicated_points))
+        coordinate = np.concatenate((new_points, duplicated_points))
         normal = np.concatenate((new_normals, duplicated_normals))
     return coordinate, normal, color, pose
+
 
 if __name__ == "__main__":
     import os

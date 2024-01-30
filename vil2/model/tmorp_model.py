@@ -112,6 +112,20 @@ class LitPoseTransformer(L.LightningModule):
         self.log("train_runtime(hrs)", elapsed_time, sync_dist=True)
         return loss
 
+    def forward(self, batch) -> Any:
+        target_coord = batch["target_coord"].to(torch.float32)
+        target_normal = batch["target_normal"].to(torch.float32)
+        target_color = batch["target_color"].to(torch.float32)
+        target_label = batch["target_label"].to(torch.long)
+        fixed_coord = batch["fixed_coord"].to(torch.float32)
+        fixed_normal = batch["fixed_normal"].to(torch.float32)
+        fixed_color = batch["fixed_color"].to(torch.float32)
+        fixed_label = batch["fixed_label"].to(torch.long)
+        pose9d_pred = self.pose_transformer(
+            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
+        )
+        return pose9d_pred
+
     def configure_optimizers(self) -> OptimizerLRScheduler:
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
@@ -176,6 +190,15 @@ class TmorpModel:
             ),
             dataloaders=test_data_loader,
         )
+
+    def predict(self, batch) -> Any:
+        return self.lightning_pose_transformer(batch)
+
+    def load(self, checkpoint_path: str) -> None:
+        self.lightning_pose_transformer.load_state_dict(torch.load(checkpoint_path)["state_dict"])
+
+    def save(self, save_path: str) -> None:
+        torch.save(self.lightning_pose_transformer.state_dict(), save_path)
 
     def experiment_name(self):
         noise_net_name = self.cfg.MODEL.NOISE_NET.NAME
