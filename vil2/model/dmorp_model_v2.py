@@ -17,7 +17,8 @@ from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from vil2.model.network.pose_transformer_noise import PoseTransformerNoiseNet
-
+from box import Box
+import yaml
 
 class LitPoseDiffusion(L.LightningModule):
     """Lightning module for Pose Diffusion"""
@@ -206,10 +207,17 @@ class DmorpModel:
         )
 
     def experiment_name(self):
+        root_path = os.path.dirname(os.path.dirname((os.path.abspath(__file__))))
         dataset_name = self.cfg.MODEL.DATASET_CONFIG
         noise_net_name = self.cfg.MODEL.NOISE_NET.NAME
         init_args = self.cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name]
         rsdr = self.cfg.DATALOADER.AUGMENTATION.RANDOM_SEGMENT_DROP_RATE
+        volume_augmentation_file = self.cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
+        volume_augmentations_path = (
+            os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
+        )
+        volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r"), Loader=yaml.FullLoader))
+        sdp = volume_augmentations.segment_drop.prob
         pod = init_args["pcd_output_dim"]
         na = init_args["num_attention_heads"]
         ehd = init_args["encoder_hidden_dim"]
@@ -221,4 +229,4 @@ class DmorpModel:
         for points in init_args.points_pyramid:
             pp_str += str(points) + "-"
         usl = f"{init_args.use_semantic_label}"
-        return f"Dmorp_{goal_type}_rsdr{rsdr}_lr{lr}_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_di{di}_usl{usl}_dc{dataset_name}"
+        return f"Dmorp_{goal_type}_sdp{sdp}_rsdr{rsdr}_lr{lr}_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_di{di}_usl{usl}_dc{dataset_name}"

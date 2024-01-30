@@ -80,7 +80,7 @@ if __name__ == "__main__":
     test_dataset_file = os.path.join(
         root_path,
         "test_data",
-        "dmorp_faster",
+        "dmorp_real",
         f"diffusion_dataset_test_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl",
     )
     if not os.path.exists(test_dataset_file):

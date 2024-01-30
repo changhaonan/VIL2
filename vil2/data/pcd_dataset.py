@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 import numpy as np
 import scipy
 import albumentations as A
-
+import random
 # import volumentations as V
 import yaml
 from pathlib import Path
@@ -95,13 +95,13 @@ class PointCloudDataset(Dataset):
         # FIXME: add augmentation
         # label = np.concatenate((label, aug["labels"]))
         if self.is_elastic_distortion:
-            coordinate = elastic_distortion(copy.deepcopy(coordinate), 0.1, 0.1)
+            coordinate = elastic_distortion(coordinate, 0.1, 0.1)
         if self.is_random_distortion:
             coordinate, color, normal, label = random_around_points(
-                copy.deepcopy(coordinate),
-                copy.deepcopy(color),
-                copy.deepcopy(normal),
-                copy.deepcopy(label),
+                coordinate,
+                color,
+                normal,
+                label,
                 rate=self.random_distortion_rate,
                 noise_level=self.random_distortion_mag,
             )
@@ -111,10 +111,10 @@ class PointCloudDataset(Dataset):
             if "rotation" in self.volume_augmentations.keys():
                 if random() < self.volume_augmentations.rotation.prob:
                     coordinate, normal, color, pose = rotate_around_axis(
-                        coordinate=copy.deepcopy(coordinate),
-                        normal=copy.deepcopy(normal),
-                        pose=copy.deepcopy(pose),
-                        color=copy.deepcopy(color),
+                        coordinate=coordinate,
+                        normal=normal,
+                        pose=pose,
+                        color=color,
                         axis=np.random.rand(
                             3,
                         ),
@@ -350,7 +350,7 @@ def rotate_around_axis(coordinate, normal, color, pose, axis, angle, center_poin
     pose_transform = np.eye(4)
     pose_transform[:3, :3] = np.linalg.inv(rotation_matrix)
     pose = pose @ pose_transform
-    return np.array(transformed_points), np.array(transformed_normals), copy.deepcopy(color), copy.deepcopy(pose)
+    return np.array(transformed_points), np.array(transformed_normals), color, pose
 
 
 def random_translation(coordinate, normal, color, pose, offset_type: str = "given", offset=None):
@@ -385,7 +385,7 @@ def random_translation(coordinate, normal, color, pose, offset_type: str = "give
     pose_transform[:3, :3] = np.linalg.inv(rotation_matrix)
     pose_transform[:3, 3] = -offset
     pose = pose @ pose_transform
-    return np.array(transformed_points), np.array(transformed_normals), copy.deepcopy(color), copy.deepcopy(pose)
+    return np.array(transformed_points), np.array(transformed_normals), color, pose
 
 def random_segment_drop(coordinate, normal, color, pose, random_segment_drop_rate: float=0.15):
     # Heuristic: center of the sphere is the mean of the points
@@ -395,34 +395,26 @@ def random_segment_drop(coordinate, normal, color, pose, random_segment_drop_rat
     # Heuristic: start with a small sphere and increase until k% of points are inside
     total_points = len(coordinate)
     target_points = total_points * (random_segment_drop_rate)
-    radius = 0.02  # initial radius
-    while True:
-        # Calculate distances from the center
-        distances = np.linalg.norm(coordinate - center, axis=1)
-        # Count points inside the sphere
-        inside_count = np.sum(distances < radius)
-        if inside_count >= target_points:
-            break
-        else:
-            radius += 0.02
-
-    # Create a mask for points outside the sphere
-    mask = distances >= radius
-    assert mask.sum() > 0, "No points outside the sphere"
-    if mask.sum() < target_points:
-        mask = distances < radius
-        print("Masking inside points instead")
-    # Create a new point cloud without the points inside the sphere
-    new_points = coordinate[mask]
-    new_normals = normal[mask]
-    # Duplicate points to make up for the dropped points
-    num_points_to_add = total_points - len(new_points)
-    indices_to_duplicate = np.random.choice(len(new_points), num_points_to_add)
-    duplicated_points = new_points[indices_to_duplicate]
-    duplicated_normals = new_normals[indices_to_duplicate]
-    coordinate =  copy.deepcopy(np.concatenate((new_points, duplicated_points)))
-    normal = copy.deepcopy(np.concatenate((new_normals, duplicated_normals)))
-    return coordinate, normal, copy.deepcopy(color), copy.deepcopy(pose)
+    radius = round(np.random.uniform(low=0.02, high=0.10), 2)
+    distances = np.linalg.norm(coordinate - center, axis=1)
+    # Count points inside the sphere
+    inside_count = np.sum(distances < radius)
+    if inside_count >= target_points:
+        mask = distances >= radius
+        assert mask.sum() > 0, "No points outside the sphere"
+        if mask.sum() < target_points:
+            mask = distances < radius
+        # Create a new point cloud without the points inside the sphere
+        new_points = coordinate[mask]
+        new_normals = normal[mask]
+        # Duplicate points to make up for the dropped points
+        num_points_to_add = total_points - len(new_points)
+        indices_to_duplicate = np.random.choice(len(new_points), num_points_to_add)
+        duplicated_points = new_points[indices_to_duplicate]
+        duplicated_normals = new_normals[indices_to_duplicate]
+        coordinate =  np.concatenate((new_points, duplicated_points))
+        normal = np.concatenate((new_normals, duplicated_normals))
+    return coordinate, normal, color, pose
 
 if __name__ == "__main__":
     import os

@@ -98,7 +98,7 @@ def perform_gram_schmidt_transform(trans_matrix):
     v2 = rotation[:, 1]
     v2_orthogonal = v2 - np.dot(v2, v1_normalized) * v1_normalized
     v2_normalized = v2_orthogonal / np.linalg.norm(v2_orthogonal)
-    return copy.deepcopy(np.concatenate((translation, v1_normalized, v2_normalized)))
+    return np.concatenate((translation, v1_normalized, v2_normalized))
 
 
 def assemble_tmorp_data(
