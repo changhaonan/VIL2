@@ -41,8 +41,10 @@ if __name__ == "__main__":
     data_id_list = [0] # [0, 1]
     if cfg.ENV.GOAL_TYPE == "multimodal":
         dataset_folder = "dmorp_multimodal"
-    if "real" in cfg.ENV.GOAL_TYPE:
+    elif "real" in cfg.ENV.GOAL_TYPE:
         dataset_folder = "dmorp_real"
+    elif "struct" in cfg.ENV.GOAL_TYPE:
+        dataset_folder = "dmorp_struct"
     else:
         dataset_folder = "dmorp_faster"
     data_file_list = [

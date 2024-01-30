@@ -4,7 +4,7 @@ import torch
 import pickle
 import argparse
 from vil2.data.pcd_dataset import PointCloudDataset
-from vil2.model.network.pose_transformer import PoseTransformer
+from vil2.model.network.struct_transformer import StructTransformer
 from vil2.model.structmorp_model import StructmorpModel
 from detectron2.config import LazyConfig
 from torch.utils.data.dataset import random_split
@@ -36,9 +36,13 @@ if __name__ == "__main__":
     random_distortion_mag = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_MAG
     volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
     # Load dataset & data loader
-    data_id_list = [0, 1]
+    data_id_list = [0]
     if cfg.ENV.GOAL_TYPE == "multimodal":
         dataset_folder = "dmorp_multimodal"
+    elif "real" in cfg.ENV.GOAL_TYPE:
+        dataset_folder = "dmorp_real"
+    elif "struct" in cfg.ENV.GOAL_TYPE:
+        dataset_folder = "dmorp_struct"
     else:
         dataset_folder = "dmorp_faster"
     data_file_list = [
@@ -66,10 +70,17 @@ if __name__ == "__main__":
         volume_augmentations_path=volume_augmentations_path,
     )
     # Split dataset
-    train_size = int(cfg.MODEL.TRAIN_TEST_SPLIT * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-
+    train_size = int(cfg.MODEL.TRAIN_SPLIT * len(dataset))
+    val_size = int(cfg.MODEL.VAL_SPLIT * len(dataset))
+    test_size = len(dataset) - train_size - val_size
+    train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
+    # Save test dataset to pickle
+    test_dataset_file = os.path.join(
+        root_path,
+        "test_data",
+        "dmorp_struct",
+        f"diffusion_dataset_test_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl",
+    )
     train_data_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
@@ -87,26 +98,19 @@ if __name__ == "__main__":
     net_name = cfg.MODEL.NOISE_NET.NAME
     net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
 
-    pose_transformer = PoseTransformer(**net_init_args)
-    tmorp_model = StructmorpModel(cfg, pose_transformer)
+    pose_transformer = StructTransformer(**net_init_args)
+    structmorp_model = StructmorpModel(cfg, pose_transformer)
 
     model_name = "Structmorp_model" 
     model_name += f"_pod{net_init_args.pcd_output_dim}" 
     model_name += f"_na{net_init_args.num_attention_heads}"
     model_name += f"_ehd{net_init_args.encoder_hidden_dim}"
-    model_name += f"_fpd{net_init_args.fusion_projection_dim}"
-    pp_str = ""
-    for points in net_init_args.points_pyramid:
-        pp_str += str(points) + "_"
-    model_name += f"_pp{pp_str}"
-    model_name += f"usl{net_init_args.use_semantic_label}"
-
     noise_net_name = cfg.MODEL.NOISE_NET.NAME
     save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints", noise_net_name)
     save_path = os.path.join(save_dir, model_name)
     os.makedirs(save_dir, exist_ok=True)
 
-    tmorp_model.train(
+    structmorp_model.train(
         num_epochs=cfg.TRAIN.NUM_EPOCHS,
         train_data_loader=train_data_loader,
         val_data_loader=val_data_loader,

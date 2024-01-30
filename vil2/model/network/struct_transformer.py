@@ -3,20 +3,21 @@ from __future__ import annotations
 import math
 import torch
 import torch.nn as nn
-from torch.nn import Transformer
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from vil2.model.embeddings.pct import StructPointTransformerEncoderSmall, EncoderMLP, DropoutSampler
 
 
 class StructTransformer(nn.Module):
     def __init__(
         self,
-        pcd_input_dim,
         pcd_output_dim,
         use_pcd_mean_center: bool,
         num_attention_heads: int = 2,
         encoder_num_layers: int = 2,
         encoder_hidden_dim: int = 256,
-        encoder_dropout: float = 0.1
+        encoder_dropout: float = 0.1,
+        obj_dropout: float = 0.1,
+        encoder_activation: str = "relu",
     ) -> None:
         super().__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -24,20 +25,19 @@ class StructTransformer(nn.Module):
         # Encode pcd features
         self.object_encoder = StructPointTransformerEncoderSmall(
             output_dim=pcd_output_dim,
-            input_dim=pcd_input_dim,
+            input_dim=6,
             mean_center=use_pcd_mean_center,
         )
         # Encode position
         self.position_encoder = nn.Sequential(nn.Linear(3 + 3 * 3, 120))
-        self.transformer = Transformer(
-            d_model=pcd_output_dim,
-            nhead=num_attention_heads,
-            num_encoder_layers=encoder_num_layers,
-            dim_feedforward=encoder_hidden_dim,
-            dropout=encoder_dropout,
+        encoder_layers = TransformerEncoderLayer(2*240, num_attention_heads,
+                                                 encoder_hidden_dim, encoder_dropout, encoder_activation)
+        self.transformer = TransformerEncoder(
+            encoder_layers, encoder_num_layers
         )
+        # self.encoder = TransformerEncoder(encoder_layers, encoder_num_layers)
         self.mlp = EncoderMLP(pcd_output_dim, 240, uses_pt=True)
-        self.obj_dist = DropoutSampler(pcd_output_dim, 3 + 6, dropout_rate=0.1)
+        self.obj_dist = DropoutSampler(2*240, 3 + 6, dropout_rate=obj_dropout)
 
     def encode_cond(
         self,
@@ -86,5 +86,5 @@ class StructTransformer(nn.Module):
         """
         total_feat = self.encode_cond(coord1, color1, coord2, color2)
         encoder_output = self.transformer(total_feat)  # (B, N + M, C)
-        x = self.obj_dist(encoder_output)  # (B, 3)
+        x = self.obj_dist(encoder_output)  # (B, 9)
         return x
