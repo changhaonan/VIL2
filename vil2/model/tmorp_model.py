@@ -17,6 +17,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 import time
 from vil2.model.network.pose_transformer import PoseTransformer
 
+
 class LitPoseTransformer(L.LightningModule):
     """Lightning module for Pose Transformer"""
 
@@ -51,8 +52,8 @@ class LitPoseTransformer(L.LightningModule):
         self.log("tr_ry_loss", ry_loss, sync_dist=True)
         # log
         self.log("train_loss", loss, sync_dist=True)
-        elapsed_time = time.time() - self.start_time
-        self.log("train_runtime", elapsed_time, sync_dist=True)
+        elapsed_time = (time.time() - self.start_time) / 3600
+        self.log("train_runtime(hrs)", elapsed_time, sync_dist=True)
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -78,9 +79,9 @@ class LitPoseTransformer(L.LightningModule):
         self.log("te_trans_loss", trans_loss, sync_dist=True)
         self.log("te_rx_loss", rx_loss, sync_dist=True)
         self.log("te_ry_loss", ry_loss, sync_dist=True)
-        self.log("test_loss", loss, sync_dist=True)        
-        elapsed_time = time.time() - self.start_time
-        self.log("test_runtime", elapsed_time, sync_dist=True)
+        self.log("test_loss", loss, sync_dist=True)
+        elapsed_time = (time.time() - self.start_time) / 3600
+        self.log("train_runtime(hrs)", elapsed_time, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -107,8 +108,8 @@ class LitPoseTransformer(L.LightningModule):
         self.log("v_rx_loss", rx_loss, sync_dist=True)
         self.log("v_ry_loss", ry_loss, sync_dist=True)
         self.log("val_loss", loss, sync_dist=True)
-        elapsed_time = time.time() - self.start_time
-        self.log("val_runtime", elapsed_time, sync_dist=True)
+        elapsed_time = (time.time() - self.start_time) / 3600
+        self.log("train_runtime(hrs)", elapsed_time, sync_dist=True)
         return loss
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
@@ -123,7 +124,10 @@ class TmorpModel:
         self.cfg = cfg
         # parameters
         # build model
-        self.pose_transformer = LitPoseTransformer(pose_transformer, cfg).to(torch.float32)
+        self.pose_transformer = pose_transformer
+        self.lightning_pose_transformer = LitPoseTransformer(pose_transformer, cfg).to(torch.float32)
+        # parameters
+        self.logger_project = cfg.LOGGER.PROJECT
 
     def train(self, num_epochs: int, train_data_loader, val_data_loader, save_path: str):
         # Checkpoint callback
@@ -147,18 +151,31 @@ class TmorpModel:
             log_every_n_steps=5,
             accelerator=accelerator,
         )
-        trainer.fit(self.pose_transformer, train_dataloaders=train_data_loader, val_dataloaders=val_data_loader)
+        trainer.fit(
+            self.lightning_pose_transformer, train_dataloaders=train_data_loader, val_dataloaders=val_data_loader
+        )
 
     def test(self, test_data_loader, save_path: str):
         # Trainer
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
-        accelerator = "cuda" if torch.cuda.is_available() else "cpu"
         os.makedirs(os.path.join(save_path, "logs"), exist_ok=True)
         trainer = L.Trainer(
-            logger=WandbLogger(name=self.experiment_name(), save_dir=os.path.join(save_path, "logs")),
+            logger=WandbLogger(
+                name=self.experiment_name(), project=self.logger_project, save_dir=os.path.join(save_path, "logs")
+            ),
             strategy=strategy,
         )
-        trainer.test(self.pose_transformer, test_dataloaders=test_data_loader, accelerator=accelerator)
+        checkpoint_path = f"{save_path}/checkpoints"
+        # Select the best checkpoint
+        checkpoints = os.listdir(checkpoint_path)
+        sorted_checkpoints = sorted(checkpoints, key=lambda x: float(x.split("=")[-1].split(".ckpt")[0]))
+        checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
+        trainer.test(
+            self.lightning_pose_transformer.__class__.load_from_checkpoint(
+                checkpoint_file, pose_transformer=self.pose_transformer, cfg=self.cfg
+            ),
+            dataloaders=test_data_loader,
+        )
 
     def experiment_name(self):
         noise_net_name = self.cfg.MODEL.NOISE_NET.NAME
@@ -171,4 +188,4 @@ class TmorpModel:
         for points in init_args.points_pyramid:
             pp_str += str(points) + "-"
         usl = f"{init_args.use_semantic_label}"
-        return f"Dmorp_model_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_usl{usl}"
+        return f"Tmorp_model_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_usl{usl}"

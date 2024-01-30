@@ -1,4 +1,4 @@
-"""Run pose transformer."""
+"""Test pose transformer."""
 import os
 import torch
 import pickle
@@ -9,6 +9,7 @@ from vil2.model.tmorp_model import TmorpModel
 from detectron2.config import LazyConfig
 from torch.utils.data.dataset import random_split
 import random
+
 
 if __name__ == "__main__":
     torch.set_float32_matmul_precision("high")
@@ -69,23 +70,27 @@ if __name__ == "__main__":
         volume_augmentations_path=volume_augmentations_path,
         random_segment_drop_rate=random_segment_drop_rate,
     )
+    # Load test data
+    data_id_list = [0]
+    if cfg.ENV.GOAL_TYPE == "multimodal":
+        dataset_folder = "dmorp_multimodal"
+    if "real" in cfg.ENV.GOAL_TYPE:
+        dataset_folder = "dmorp_real"
+    else:
+        dataset_folder = "dmorp_faster"
+
     # Split dataset
     train_size = int(cfg.MODEL.TRAIN_SPLIT * len(dataset))
     val_size = int(cfg.MODEL.VAL_SPLIT * len(dataset))
     test_size = len(dataset) - train_size - val_size
     train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
 
-    train_data_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=cfg.DATALOADER.BATCH_SIZE,
-        shuffle=True,
-        num_workers=cfg.DATALOADER.NUM_WORKERS,
-    )
-    val_data_loader = torch.utils.data.DataLoader(
-        val_dataset,
+    test_data_loader = torch.utils.data.DataLoader(
+        test_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
         shuffle=False,
         num_workers=cfg.DATALOADER.NUM_WORKERS,
+        drop_last=False,
     )
 
     # Build model
@@ -101,9 +106,7 @@ if __name__ == "__main__":
     save_path = os.path.join(save_dir, model_name)
     os.makedirs(save_dir, exist_ok=True)
 
-    tmorp_model.train(
-        num_epochs=cfg.TRAIN.NUM_EPOCHS,
-        train_data_loader=train_data_loader,
-        val_data_loader=val_data_loader,
+    tmorp_model.test(
+        test_data_loader=test_data_loader,
         save_path=save_path,
     )

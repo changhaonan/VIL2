@@ -24,6 +24,7 @@ class PoseTransformer(nn.Module):
         fusion_projection_dim: int = 512,
         max_semantic_size: int = 10,
         use_semantic_label: bool = True,
+        **kwargs,
     ) -> None:
         super().__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
