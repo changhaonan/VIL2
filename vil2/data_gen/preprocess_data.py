@@ -89,18 +89,6 @@ def visualize_pcd_with_open3d(
         o3d.visualization.draw_geometries([pcd1, pcd2, origin])
 
 
-def perform_gram_schmidt_transform(trans_matrix):
-    trans_matrix = copy.deepcopy(trans_matrix)
-    translation = trans_matrix[:3, 3]
-    rotation = trans_matrix[:3, :3]
-    v1 = rotation[:, 0]
-    v1_normalized = v1 / np.linalg.norm(v1)
-    v2 = rotation[:, 1]
-    v2_orthogonal = v2 - np.dot(v2, v1_normalized) * v1_normalized
-    v2_normalized = v2_orthogonal / np.linalg.norm(v2_orthogonal)
-    return np.concatenate((translation, v1_normalized, v2_normalized))
-
-
 def assemble_tmorp_data(
     fixed_color,
     fixed_depth,
@@ -157,7 +145,7 @@ def assemble_tmorp_data(
         "target_label": target_label,
         "fixed_label": fixed_label,
         "transform": target_transform_world,
-        "9dpose": perform_gram_schmidt_transform(target_transform_world),
+        "9dpose": utils.perform_gram_schmidt_transform(target_transform_world),
         "cam_pose": camera_pose,
         "data_id": data_id,
     }
@@ -307,7 +295,7 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False):
             fixed_pcd_arr[:, :3] -= fixed_pcd_center
             shift_transform = np.eye(4, dtype=np.float32)
             shift_transform[:3, 3] = target_pcd_center - fixed_pcd_center
-            pose_9d = perform_gram_schmidt_transform(shift_transform)
+            pose_9d = utils.perform_gram_schmidt_transform(shift_transform)
             tmorp_data = {
                 "target": target_pcd_arr,
                 "fixed": fixed_pcd_arr,

@@ -1,9 +1,11 @@
 """Test pose transformer."""
 import os
+import open3d as o3d
 import torch
 import numpy as np
 import pickle
 import argparse
+import vil2.utils.misc_utils as utils
 from vil2.data.pcd_dataset import PointCloudDataset
 from vil2.model.network.pose_transformer import PoseTransformer
 from vil2.model.tmorp_model import TmorpModel
@@ -117,11 +119,48 @@ if __name__ == "__main__":
     test_idx = np.random.randint(len(test_dataset))
 
     # Load the best checkpoint
-    checkpoint_path = save_path + "/checkpoints"
+    checkpoint_path = f"{save_path}/checkpoints"
+    # Select the best checkpoint
     checkpoints = os.listdir(checkpoint_path)
     sorted_checkpoints = sorted(checkpoints, key=lambda x: float(x.split("=")[-1].split(".ckpt")[0]))
     checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
     tmorp_model.load(checkpoint_file)
-    for test_batch in test_data_loader:
-        prediction = tmorp_model.predict(test_batch)
-        pass
+
+    test_data = test_dataset[test_idx]
+    target_coord = test_data["target_coord"]
+    target_normal = test_data["target_normal"]
+    target_color = test_data["target_color"]
+    target_label = test_data["target_label"]
+    fixed_coord = test_data["fixed_coord"]
+    fixed_normal = test_data["fixed_normal"]
+    fixed_color = test_data["fixed_color"]
+    fixed_label = test_data["fixed_label"]
+    target_pcd_arr = np.concatenate([target_coord, target_normal, target_color], axis=-1)
+    fixed_pcd_arr = np.concatenate([fixed_coord, fixed_normal, fixed_color], axis=-1)
+    target_label = test_data["target_label"]
+    fixed_label = test_data["fixed_label"]
+    target_pose = test_data["target_pose"]
+
+    # Do prediction
+    pred_pose_mat = tmorp_model.predict(
+        target_pcd_arr=target_pcd_arr,
+        fixed_pcd_arr=fixed_pcd_arr,
+        target_label=target_label,
+        fixed_label=fixed_label,
+        target_pose=target_pose,
+    )
+
+    # Check the prediction
+    utils.visualize_pcd_list(
+        [target_coord, fixed_coord],
+        [target_normal, fixed_normal],
+        [target_color, fixed_color],
+        [np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
+    )
+
+    utils.visualize_pcd_list(
+        [target_coord, fixed_coord],
+        [target_normal, fixed_normal],
+        [target_color, fixed_color],
+        [pred_pose_mat, np.eye(4, dtype=np.float32)],
+    )

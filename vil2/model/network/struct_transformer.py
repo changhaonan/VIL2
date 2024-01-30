@@ -30,14 +30,13 @@ class StructTransformer(nn.Module):
         )
         # Encode position
         self.position_encoder = nn.Sequential(nn.Linear(3 + 3 * 3, 120))
-        encoder_layers = TransformerEncoderLayer(2*240, num_attention_heads,
-                                                 encoder_hidden_dim, encoder_dropout, encoder_activation)
-        self.transformer = TransformerEncoder(
-            encoder_layers, encoder_num_layers
+        encoder_layers = TransformerEncoderLayer(
+            2 * 240, num_attention_heads, encoder_hidden_dim, encoder_dropout, encoder_activation
         )
+        self.transformer = TransformerEncoder(encoder_layers, encoder_num_layers)
         # self.encoder = TransformerEncoder(encoder_layers, encoder_num_layers)
         self.mlp = EncoderMLP(pcd_output_dim, 240, uses_pt=True)
-        self.obj_dist = DropoutSampler(2*240, 3 + 6, dropout_rate=obj_dropout)
+        self.obj_dist = DropoutSampler(2 * 240, 3 + 6, dropout_rate=obj_dropout)
 
     def encode_cond(
         self,

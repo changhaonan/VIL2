@@ -16,6 +16,7 @@ from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import time
 from vil2.model.network.pose_transformer import PoseTransformer
+import vil2.utils.misc_utils as utils
 
 
 class LitPoseTransformer(L.LightningModule):
@@ -191,8 +192,49 @@ class TmorpModel:
             dataloaders=test_data_loader,
         )
 
-    def predict(self, batch) -> Any:
-        return self.lightning_pose_transformer(batch)
+    def predict(
+        self,
+        target_pcd_arr: np.ndarray,
+        fixed_pcd_arr: np.ndarray,
+        target_label: int,
+        fixed_label: int,
+        target_pose=None,
+    ) -> Any:
+        self.lightning_pose_transformer.eval()
+        # Assemble batch
+        assert target_pcd_arr.shape[0] == fixed_pcd_arr.shape[0]
+        assert target_pcd_arr.shape[1] == fixed_pcd_arr.shape[1] == 9
+        batch = {
+            "target_coord": target_pcd_arr[None, :, :3],
+            "target_normal": target_pcd_arr[None, :, 3:6],
+            "target_color": target_pcd_arr[None, :, 6:],
+            "target_label": target_label[None, :],
+            "fixed_coord": fixed_pcd_arr[None, :, :3],
+            "fixed_normal": fixed_pcd_arr[None, :, 3:6],
+            "fixed_color": fixed_pcd_arr[None, :, 6:],
+            "fixed_label": fixed_label[None, :],
+        }
+        # Put to torch
+        for key in batch.keys():
+            batch[key] = torch.from_numpy(batch[key]).to(torch.float32)
+        pred_pose9d = self.lightning_pose_transformer(batch)
+        pred_pose9d = pred_pose9d.detach().cpu().numpy()[0]
+
+        print(f"Pred pose: {pred_pose9d}")
+        if target_pose is not None:
+            print(f"Gt pose: {target_pose}")
+            trans_loss = np.mean(np.square(pred_pose9d[:3] - target_pose[:3]))
+            rx_loss = np.mean(np.square(pred_pose9d[3:6] - target_pose[3:6]))
+            ry_loss = np.mean(np.square(pred_pose9d[6:9] - target_pose[6:9]))
+            print(f"trans_loss: {trans_loss}, rx_loss: {rx_loss}, ry_loss: {ry_loss}")
+        # Convert pose9d to matrix
+        pred_pose9d = utils.perform_gram_schmidt_transform(pred_pose9d)
+        pred_pose_mat = np.eye(4, dtype=np.float32)
+        pred_pose_mat[:3, 0] = pred_pose9d[3:6]
+        pred_pose_mat[:3, 1] = pred_pose9d[6:9]
+        pred_pose_mat[:3, 2] = np.cross(pred_pose9d[3:6], pred_pose9d[6:9])
+        pred_pose_mat[:3, 3] = pred_pose9d[:3]
+        return pred_pose_mat
 
     def load(self, checkpoint_path: str) -> None:
         self.lightning_pose_transformer.load_state_dict(torch.load(checkpoint_path)["state_dict"])

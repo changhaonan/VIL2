@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import cv2
 import os
+import copy
 from scipy.spatial.transform import Rotation as R
 import open3d as o3d
 
@@ -367,6 +368,28 @@ def farthest_point_sampling_with_color(pcd, n_points):
         shortest_distances = np.minimum(shortest_distances, distances_to_new_point)
 
     return farthest_points
+
+
+def perform_gram_schmidt_transform(transform):
+    """Perform Gram-Schmidt normalization on transform matrix or 9d pose."""
+    if transform.shape == (4, 4):
+        transform = copy.deepcopy(transform)
+        translation = transform[:3, 3]
+        rotation = transform[:3, :3]
+        v1 = rotation[:, 0]
+        v1_normalized = v1 / np.linalg.norm(v1)
+        v2 = rotation[:, 1]
+        v2_orthogonal = v2 - np.dot(v2, v1_normalized) * v1_normalized
+        v2_normalized = v2_orthogonal / np.linalg.norm(v2_orthogonal)
+    elif transform.shape == (9,):
+        transform = copy.deepcopy(transform)
+        translation = transform[:3]
+        v1 = transform[3:6]
+        v1_normalized = v1 / np.linalg.norm(v1)
+        v2 = transform[6:9]
+        v2_orthogonal = v2 - np.dot(v2, v1_normalized) * v1_normalized
+        v2_normalized = v2_orthogonal / np.linalg.norm(v2_orthogonal)
+    return np.concatenate((translation, v1_normalized, v2_normalized))
 
 
 def visualize_pcd(
