@@ -36,6 +36,7 @@ if __name__ == "__main__":
     random_distortion_mag = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_MAG
     volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
     random_segment_drop_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_SEGMENT_DROP_RATE
+    max_converge_step = cfg.DATALOADER.AUGMENTATION.MAX_CONVERGE_STEP
     # Load dataset & data loader
     data_id_list = [0]
     if cfg.ENV.GOAL_TYPE == "multimodal":
@@ -68,6 +69,7 @@ if __name__ == "__main__":
         random_distortion_mag=random_distortion_mag,
         volume_augmentations_path=volume_augmentations_path,
         random_segment_drop_rate=random_segment_drop_rate,
+        max_converge_step=max_converge_step,
     )
     # Split dataset
     train_size = int(cfg.MODEL.TRAIN_SPLIT * len(dataset))
@@ -91,7 +93,7 @@ if __name__ == "__main__":
     # Build model
     net_name = cfg.MODEL.NOISE_NET.NAME
     net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
-
+    net_init_args["max_converge_step"] = cfg.DATALOADER.AUGMENTATION.MAX_CONVERGE_STEP
     pose_transformer = PoseTransformer(**net_init_args)
     tmorp_model = TmorpModel(cfg, pose_transformer)
 

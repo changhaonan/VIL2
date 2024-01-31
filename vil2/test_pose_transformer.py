@@ -40,6 +40,7 @@ if __name__ == "__main__":
     random_distortion_mag = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_MAG
     volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
     random_segment_drop_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_SEGMENT_DROP_RATE
+    max_converge_step = cfg.DATALOADER.AUGMENTATION.MAX_CONVERGE_STEP
     # Load dataset & data loader
     data_id_list = [0]
     if cfg.ENV.GOAL_TYPE == "multimodal":
@@ -72,6 +73,7 @@ if __name__ == "__main__":
         random_distortion_mag=random_distortion_mag,
         volume_augmentations_path=volume_augmentations_path,
         random_segment_drop_rate=random_segment_drop_rate,
+        max_converge_step=max_converge_step,
     )
     # Load test data
     data_id_list = [0]
@@ -99,7 +101,7 @@ if __name__ == "__main__":
     # Build model
     net_name = cfg.MODEL.NOISE_NET.NAME
     net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
-
+    net_init_args["max_converge_step"] = cfg.DATALOADER.AUGMENTATION.MAX_CONVERGE_STEP
     pose_transformer = PoseTransformer(**net_init_args)
     tmorp_model = TmorpModel(cfg, pose_transformer)
 
@@ -140,15 +142,26 @@ if __name__ == "__main__":
     target_label = test_data["target_label"]
     fixed_label = test_data["fixed_label"]
     target_pose = test_data["target_pose"]
+    converge_step = test_data["converge_step"]
 
     # Do prediction
-    pred_pose_mat = tmorp_model.predict(
-        target_pcd_arr=target_pcd_arr,
-        fixed_pcd_arr=fixed_pcd_arr,
-        target_label=target_label,
-        fixed_label=fixed_label,
-        target_pose=target_pose,
-    )
+    pred_pose_mat = np.eye(4, dtype=np.float32)
+    for i in range(1, 4):
+        print(f"---------- Converge step {i} ----------")
+        # Move the pcd accordingly
+        target_pcd_arr[:, :3] = (pred_pose_mat[:3, :3] @ target_pcd_arr[:, :3].T + pred_pose_mat[:3, 3:4]).T  # coord
+        target_pcd_arr[:, 3:6] = (pred_pose_mat[:3, :3] @ target_pcd_arr[:, 3:6].T).T  # normal
+        # Move both back to center
+        target_pcd_arr[:, :3] -= np.mean(target_pcd_arr[:, :3], axis=0)
+        fixed_pcd_arr[:, :3] -= np.mean(fixed_pcd_arr[:, :3], axis=0)
+        pred_pose_mat = tmorp_model.predict(
+            target_pcd_arr=target_pcd_arr,
+            fixed_pcd_arr=fixed_pcd_arr,
+            target_label=target_label,
+            fixed_label=fixed_label,
+            converge_step=np.array([i]),
+            target_pose=target_pose,
+        )
 
     # Check the prediction
     utils.visualize_pcd_list(

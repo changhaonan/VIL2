@@ -209,8 +209,9 @@ class TmorpModel:
         self,
         target_pcd_arr: np.ndarray,
         fixed_pcd_arr: np.ndarray,
-        target_label: int,
-        fixed_label: int,
+        target_label: np.ndarray,
+        fixed_label: np.ndarray,
+        converge_step: np.ndarray,
         target_pose=None,
     ) -> Any:
         self.lightning_pose_transformer.eval()
@@ -226,6 +227,7 @@ class TmorpModel:
             "fixed_normal": fixed_pcd_arr[None, :, 3:6],
             "fixed_color": fixed_pcd_arr[None, :, 6:],
             "fixed_label": fixed_label[None, :],
+            "converge_step": converge_step[None, :],
         }
         # Put to torch
         for key in batch.keys():

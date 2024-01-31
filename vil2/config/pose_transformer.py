@@ -4,7 +4,7 @@ ENV = dict(
     NUM_STRUCTURE=4,
     SEMANTIC_FEAT_DIM=10,
     SEMANTIC_FEAT_TYPE="one_hot",  # random, clip, one_hot
-    GOAL_TYPE="real-m2-p1"
+    GOAL_TYPE="real-m2-p1",
 )
 
 DATALOADER = dict(
@@ -16,7 +16,8 @@ DATALOADER = dict(
         RANDOM_DISTORTION_RATE=0.2,
         RANDOM_DISTORTION_MAG=0.01,
         VOLUME_AUGMENTATION_FILE="va_rotation.yaml",  # None
-        RANDOM_SEGMENT_DROP_RATE=0.15
+        RANDOM_SEGMENT_DROP_RATE=0.15,
+        MAX_CONVERGE_STEP=10,
     ),
 )
 TRAIN = dict(

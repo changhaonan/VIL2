@@ -42,7 +42,7 @@ class PointCloudDataset(Dataset):
         random_distortion_rate: float = 0.2,
         random_distortion_mag: float = 0.01,
         random_segment_drop_rate: float = 0.15,
-        num_converge_step: int = 3,
+        max_converge_step: int = 3,
     ):
         # Set parameters
         self.add_colors = add_colors
@@ -52,7 +52,7 @@ class PointCloudDataset(Dataset):
         self.random_distortion_rate = random_distortion_rate
         self.random_distortion_mag = random_distortion_mag
         self.random_segment_drop_rate = random_segment_drop_rate
-        self.num_converge_step = num_converge_step  # number of noise levels
+        self.max_converge_step = max_converge_step  # number of noise levels
         if volume_augmentations_path is not None:
             self.volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r"), Loader=yaml.FullLoader))
         else:
@@ -96,7 +96,7 @@ class PointCloudDataset(Dataset):
 
     def augment_pcd_instance(self, coordinate, normal, color, label, pose):
         # FIXME: add augmentation
-        converge_step = np.random.randint(1, self.num_converge_step + 1)
+        converge_step = np.random.randint(1, self.max_converge_step + 1)
         # Converge step is used to represent augmentation level
         # label = np.concatenate((label, aug["labels"]))
         if self.is_elastic_distortion:
@@ -440,7 +440,7 @@ if __name__ == "__main__":
         is_elastic_distortion=True,
         is_random_distortion=True,
         volume_augmentations_path=f"{root_dir}/config/va_rotation.yaml",
-        num_converge_step=10,
+        max_converge_step=10,
     )
     dataset.set_mode("train")
 
