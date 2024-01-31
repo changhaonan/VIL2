@@ -276,6 +276,7 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False):
     data_file_list = os.listdir(data_path)
     data_file_list = [f for f in data_file_list if f.endswith(".pkl")]
     dtset = []
+    pcd_size = cfg.MODEL.PCD_SIZE
     for data_file in tqdm(data_file_list, desc="Processing data"):
         # Load data
         pcd_dict = pickle.load(open(os.path.join(data_path, data_file), "rb"))
@@ -286,6 +287,8 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False):
             fixed_pcd_arr = pcd_dict["object_1"][i]
             target_label = pcd_dict["object_0_semantic"][i]
             fixed_label = pcd_dict["object_1_semantic"][i]
+            if target_pcd_arr.shape[0] < pcd_size or fixed_pcd_arr.shape[0] < pcd_size:
+                continue
 
             data_id = data_id
             # Shift all points to the origin

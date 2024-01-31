@@ -24,6 +24,7 @@ class PoseTransformer(nn.Module):
         fusion_projection_dim: int = 512,
         max_semantic_size: int = 10,
         use_semantic_label: bool = True,
+        max_converge_step: int = 10,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -59,6 +60,7 @@ class PoseTransformer(nn.Module):
             batch_first=True,
             norm_first=True,
         )
+        self.converge_step_embedding = nn.Embedding(max_converge_step, pcd_output_dim)
         self.joint_transformer = TransformerEncoder(encoder_layer=self.encoder_layer, num_layers=encoder_num_layers)
 
         """ rotation regress head """
@@ -139,30 +141,19 @@ class PoseTransformer(nn.Module):
 
     def forward(
         self,
-        coord1: torch.Tensor,
-        normal1: torch.Tensor,
-        color1: torch.Tensor,
-        label1: torch.Tensor,
-        coord2: torch.Tensor,
-        normal2: torch.Tensor,
-        color2: torch.Tensor,
-        label2: torch.Tensor,
+        cond_feat: torch.Tensor,
+        converge_step: torch.Tensor,
     ) -> torch.Tensor:
         """
         Args:
-            coord1: (B, N, 3)
-            normal1: (B, N, 3)
-            color1: (B, N, 3)
-            coord2: (B, M, 3)
-            normal2: (B, M, 3)
-            color2: (B, M, 3)
-            label1: (B, 1)
-            label2: (B, 1)
+            cond_feat: (B, N + M + 1, C)
+            converge_step: (B, 1)
         Returns:
             (B, 3)
         """
-        total_feat = self.encode_cond(coord1, normal1, color1, label1, coord2, normal2, color2, label2)
-        encoder_output = self.joint_transformer(total_feat)  # (B, N + M + 1, C)
+        enc_conv_step = self.converge_step_embedding(converge_step)
+        total_feat = torch.cat((cond_feat, enc_conv_step), dim=1)
+        encoder_output = self.joint_transformer(total_feat)  # (B, N + M + 1 + 1, C)
         encoder_output = encoder_output[:, 0, :]  # (B, C)  # only use the first token
 
         # Predict pose

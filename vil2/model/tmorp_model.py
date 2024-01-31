@@ -38,10 +38,13 @@ class LitPoseTransformer(L.LightningModule):
         fixed_color = batch["fixed_color"].to(torch.float32)
         fixed_label = batch["fixed_label"].to(torch.long)
         pose9d = batch["target_pose"].to(torch.float32)
-        # forward
-        pose9d_pred = self.pose_transformer(
+        converge_step = batch["converge_step"].to(torch.long)
+        # Compute conditional features
+        cond_feat = self.pose_transformer.encode_cond(
             target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
         )
+        # forward
+        pose9d_pred = self.pose_transformer(cond_feat, converge_step)
         # compute loss
         trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])
         rx_loss = F.mse_loss(pose9d_pred[:, 3:6], pose9d[:, 3:6])
@@ -67,10 +70,13 @@ class LitPoseTransformer(L.LightningModule):
         fixed_color = batch["fixed_color"].to(torch.float32)
         fixed_label = batch["fixed_label"].to(torch.long)
         pose9d = batch["target_pose"].to(torch.float32)
-        # forward
-        pose9d_pred = self.pose_transformer(
+        converge_step = batch["converge_step"].to(torch.long)
+        # Compute conditional features
+        cond_feat = self.pose_transformer.encode_cond(
             target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
         )
+        # forward
+        pose9d_pred = self.pose_transformer(cond_feat, converge_step)
         # compute loss
         trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])
         rx_loss = F.mse_loss(pose9d_pred[:, 3:6], pose9d[:, 3:6])
@@ -95,10 +101,13 @@ class LitPoseTransformer(L.LightningModule):
         fixed_color = batch["fixed_color"].to(torch.float32)
         fixed_label = batch["fixed_label"].to(torch.long)
         pose9d = batch["target_pose"].to(torch.float32)
-        # forward
-        pose9d_pred = self.pose_transformer(
+        converge_step = batch["converge_step"].to(torch.long)
+        # Compute conditional features
+        cond_feat = self.pose_transformer.encode_cond(
             target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
         )
+        # forward
+        pose9d_pred = self.pose_transformer(cond_feat, converge_step)
         # compute loss
         trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])
         rx_loss = F.mse_loss(pose9d_pred[:, 3:6], pose9d[:, 3:6])
@@ -122,9 +131,13 @@ class LitPoseTransformer(L.LightningModule):
         fixed_normal = batch["fixed_normal"].to(torch.float32)
         fixed_color = batch["fixed_color"].to(torch.float32)
         fixed_label = batch["fixed_label"].to(torch.long)
-        pose9d_pred = self.pose_transformer(
+        converge_step = batch["converge_step"].to(torch.long)
+        # Compute conditional features
+        cond_feat = self.pose_transformer.encode_cond(
             target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
         )
+        # forward
+        pose9d_pred = self.pose_transformer(cond_feat, converge_step)
         return pose9d_pred
 
     def configure_optimizers(self) -> OptimizerLRScheduler:

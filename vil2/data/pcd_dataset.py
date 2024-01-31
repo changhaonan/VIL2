@@ -42,6 +42,7 @@ class PointCloudDataset(Dataset):
         random_distortion_rate: float = 0.2,
         random_distortion_mag: float = 0.01,
         random_segment_drop_rate: float = 0.15,
+        num_converge_step: int = 3,
     ):
         # Set parameters
         self.add_colors = add_colors
@@ -51,6 +52,7 @@ class PointCloudDataset(Dataset):
         self.random_distortion_rate = random_distortion_rate
         self.random_distortion_mag = random_distortion_mag
         self.random_segment_drop_rate = random_segment_drop_rate
+        self.num_converge_step = num_converge_step  # number of noise levels
         if volume_augmentations_path is not None:
             self.volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r"), Loader=yaml.FullLoader))
         else:
@@ -94,6 +96,8 @@ class PointCloudDataset(Dataset):
 
     def augment_pcd_instance(self, coordinate, normal, color, label, pose):
         # FIXME: add augmentation
+        converge_step = np.random.randint(1, self.num_converge_step + 1)
+        # Converge step is used to represent augmentation level
         # label = np.concatenate((label, aug["labels"]))
         if self.is_elastic_distortion:
             coordinate = elastic_distortion(coordinate, 0.1, 0.1)
@@ -110,7 +114,9 @@ class PointCloudDataset(Dataset):
         if self.volume_augmentations is not None:
             # do the below only with some probability
             if "rotation" in self.volume_augmentations.keys():
+                max_angle = np.pi / float(converge_step)
                 if random() < self.volume_augmentations.rotation.prob:
+                    angle = np.random.uniform(-max_angle, max_angle)
                     coordinate, normal, color, pose = rotate_around_axis(
                         coordinate=coordinate,
                         normal=normal,
@@ -119,25 +125,25 @@ class PointCloudDataset(Dataset):
                         axis=np.random.rand(
                             3,
                         ),
-                        angle=np.random.rand(1) * 2 * np.pi,
+                        angle=angle,
                         center_point=None,
                     )
             if "translation" in self.volume_augmentations.keys():
                 if random() < self.volume_augmentations.translation.prob:
                     random_offset = np.random.rand(1, 3)
                     random_offset[0, 0] = np.random.uniform(
-                        self.volume_augmentations.translation.min_x,
-                        self.volume_augmentations.translation.max_x,
+                        self.volume_augmentations.translation.min_x / float(converge_step),
+                        self.volume_augmentations.translation.max_x / float(converge_step),
                         size=(1,),
                     )
                     random_offset[0, 1] = np.random.uniform(
-                        self.volume_augmentations.translation.min_y,
-                        self.volume_augmentations.translation.max_y,
+                        self.volume_augmentations.translation.min_y / float(converge_step),
+                        self.volume_augmentations.translation.max_y / float(converge_step),
                         size=(1,),
                     )
                     random_offset[0, 2] = np.random.uniform(
-                        self.volume_augmentations.translation.min_z,
-                        self.volume_augmentations.translation.max_z,
+                        self.volume_augmentations.translation.min_z / float(converge_step),
+                        self.volume_augmentations.translation.max_z / float(converge_step),
                         size=(1,),
                     )
                     coordinate, normal, color, pose = random_translation(
@@ -158,7 +164,7 @@ class PointCloudDataset(Dataset):
                         random_segment_drop_rate=self.random_segment_drop_rate,
                     )
 
-        return coordinate, normal, color, label, pose
+        return coordinate, normal, color, label, pose, converge_step
 
     def __len__(self):
         return len(self._data)
@@ -194,15 +200,16 @@ class PointCloudDataset(Dataset):
 
         if self.mode == "train" or self.mode == "val":
             # Augment data
-            target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(
+            target_coord, target_normal, target_color, _, target_pose, converge_step = self.augment_pcd_instance(
                 target_coord, target_normal, target_color, None, target_pose
             )
-            fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
+            fixed_coord, fixed_normal, fixed_color, _, fixed_pose, converge_step = self.augment_pcd_instance(
                 fixed_coord, fixed_normal, fixed_color, None, fixed_pose
             )
 
         target_pose = utils.mat_to_pose9d(np.linalg.inv(fixed_pose) @ target_pose)
         fixed_pose = utils.mat_to_pose9d(fixed_pose)
+        converge_step = np.array([converge_step]).astype(np.int64)
         return {
             "target_coord": target_coord.astype(np.float32),
             "target_normal": target_normal.astype(np.float32),
@@ -214,6 +221,7 @@ class PointCloudDataset(Dataset):
             "fixed_color": fixed_color.astype(np.float32),
             "fixed_pose": fixed_pose.astype(np.float32),
             "fixed_label": fixed_label.astype(np.int64),
+            "converge_step": converge_step,
         }
 
     @staticmethod
@@ -432,6 +440,7 @@ if __name__ == "__main__":
         is_elastic_distortion=True,
         is_random_distortion=True,
         volume_augmentations_path=f"{root_dir}/config/va_rotation.yaml",
+        num_converge_step=10,
     )
     dataset.set_mode("train")
 
@@ -447,7 +456,8 @@ if __name__ == "__main__":
         fixed_normal = data["fixed_normal"]
         fixed_color = data["fixed_color"]
         fixed_pose = data["fixed_pose"]
-
+        converge_step = data["converge_step"]
+        print(f"Converge step: {converge_step}")
         utils.visualize_pcd_list(
             [target_coord, fixed_coord],
             [target_normal, fixed_normal],

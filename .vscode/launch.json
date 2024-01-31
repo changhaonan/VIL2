@@ -5,6 +5,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Train Tmorp Model",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/vil2/run_pose_transformer.py",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
             "name": "BDNP",
             "type": "python",
             "request": "launch",
@@ -21,24 +29,30 @@
             "justMyCode": false
         },
         {
-            "name": "TestBlender",       
-            "type": "python",       
-            "request": "attach",   
-            "connect": {    
-                "host": "localhost",      
-                "port": 5678 
-            }   
+            "name": "TestBlender",
+            "type": "python",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            }
         },
         {
             "name": "GenDMorp",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/vil2/data_gen/dmorp_gen.py",
-            "args": ["--fix_anchor", "--data_id=1", "--target_object=spoon", "--anchor_object=tea_pot", "--num_samples=300"],
+            "args": [
+                "--fix_anchor",
+                "--data_id=1",
+                "--target_object=spoon",
+                "--anchor_object=tea_pot",
+                "--num_samples=300"
+            ],
             // "args" : ["--fix_anchor", "--data_id=0", "--target_object=tea_pot", "--anchor_object=tea_mug", "--num_samples=300"],
             "cwd": "${workspaceFolder}/vil2/data_gen",
             "console": "integratedTerminal",
             "justMyCode": false
-        }
+        },
     ]
 }
