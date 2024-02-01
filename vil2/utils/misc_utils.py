@@ -424,9 +424,9 @@ def visualize_pcd_list(
     for i in range(len(coordinate_list)):
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(coordinate_list[i])
-        if normal_list is not None:
+        if normal_list is not None and normal_list[i].shape[-1] > 0:
             pcd.normals = o3d.utility.Vector3dVector(normal_list[i])
-        if color_list is not None:
+        if color_list is not None and color_list[i].shape[-1] > 0:
             pcd.colors = o3d.utility.Vector3dVector(color_list[i])
         if pose_list is not None:
             pcd.transform(pose_list[i])

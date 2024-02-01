@@ -10,6 +10,14 @@ from tqdm import tqdm
 import copy
 from detectron2.config import LazyConfig
 import argparse
+from scipy.spatial.transform import Rotation as R
+
+
+def pose7d_to_mat(pose7d):
+    pose_mat = np.eye(4)
+    pose_mat[:3, :3] = R.from_quat(pose7d[3:]).as_matrix()
+    pose_mat[:3, 3] = pose7d[:3]
+    return pose_mat
 
 
 def read_hdf5(file_name):
@@ -47,31 +55,23 @@ def visualize_pcd_with_open3d(
     shift_transform: np.ndarray = None,
     camera_pose=None,
 ):
-    assert pcd_with_color1.shape[1] == 9 and pcd_with_color2.shape[1] == 9
-    # Create an Open3D point cloud object
     pcd1 = o3d.geometry.PointCloud()
-
-    # Set the points of the point cloud
-    pcd1.points = o3d.utility.Vector3dVector(pcd_with_color1[:, :3])
-
-    # Set the normals of the point cloud
-    pcd1.normals = o3d.utility.Vector3dVector(pcd_with_color1[:, 3:6])
-
-    # Assuming the colors are in the range [0, 255], normalize them to [0, 1]
-    color_scale = 1.0 if pcd_with_color1[:, 6:9].max() <= 1.0 else 255.0
-    pcd1.colors = o3d.utility.Vector3dVector(pcd_with_color1[:, 6:9] / color_scale)
-
-    # Create an Open3D point cloud object
     pcd2 = o3d.geometry.PointCloud()
 
-    # Set the points of the point cloud
+    pcd1.points = o3d.utility.Vector3dVector(pcd_with_color1[:, :3])
     pcd2.points = o3d.utility.Vector3dVector(pcd_with_color2[:, :3])
 
-    # Set the normals of the point cloud
-    pcd2.normals = o3d.utility.Vector3dVector(pcd_with_color2[:, 3:6])
+    if pcd_with_color1.shape[1] >= 6:
+        pcd1.normals = o3d.utility.Vector3dVector(pcd_with_color1[:, 3:6])
+        pcd2.normals = o3d.utility.Vector3dVector(pcd_with_color2[:, 3:6])
 
-    # Assuming the colors are in the range [0, 255], normalize them to [0, 1]
-    pcd2.colors = o3d.utility.Vector3dVector(pcd_with_color2[:, 6:9] / color_scale)
+    if pcd_with_color1.shape[1] >= 9:
+        color_scale = 1.0 if pcd_with_color1[:, 6:9].max() <= 1.0 else 255.0
+        pcd1.colors = o3d.utility.Vector3dVector(pcd_with_color1[:, 6:9] / color_scale)
+        pcd2.colors = o3d.utility.Vector3dVector(pcd_with_color2[:, 6:9] / color_scale)
+    else:
+        pcd1.paint_uniform_color([0.0, 0.651, 0.929])
+        pcd2.paint_uniform_color([1.0, 0.706, 0.0])
 
     if shift_transform is not None:
         pcd1.transform(shift_transform)
@@ -271,10 +271,13 @@ def build_dataset_pyrender(data_path, cfg, data_id: int = 0, vis: bool = False):
     print("Done!")
 
 
-def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False):
+def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False, filter_key: str = None):
     """Build the dataset from the real data"""
     data_file_list = os.listdir(data_path)
     data_file_list = [f for f in data_file_list if f.endswith(".pkl")]
+    # Filter by key
+    if filter_key is not None:
+        data_file_list = [f for f in data_file_list if filter_key in f]
     dtset = []
     pcd_size = cfg.MODEL.PCD_SIZE
     for data_file in tqdm(data_file_list, desc="Processing data"):
@@ -327,30 +330,152 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False):
     print("Len of dtset:", len(dtset))
     print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_real')}...")
     # Save the dtset into a .pkl file
-    with open(
-        os.path.join(
-            root_dir,
-            "test_data",
-            "dmorp_real",
-            f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}.pkl",
-        ),
-        "wb",
-    ) as f:
-        pickle.dump(dtset, f)
+    if filter_key is not None:
+        with open(
+            os.path.join(
+                root_dir,
+                "test_data",
+                "dmorp_real",
+                f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_{filter_key}.pkl",
+            ),
+            "wb",
+        ) as f:
+            pickle.dump(dtset, f)
+    else:
+        with open(
+            os.path.join(
+                root_dir,
+                "test_data",
+                "dmorp_real",
+                f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}.pkl",
+            ),
+            "wb",
+        ) as f:
+            pickle.dump(dtset, f)
     print("Done!")
+
+
+def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False):
+    """Build the dataset from the rdiff data"""
+    data_file_list = os.listdir(data_dir)
+    data_file_list = [f for f in data_file_list if f.endswith(".npz")]
+    pcd_size = cfg.MODEL.PCD_SIZE
+    # Split info
+    split_dict = {}
+    train_split_info = os.path.join(data_dir, "split_info", "train_split.txt")
+    val_split_info = os.path.join(data_dir, "split_info", "train_val_split.txt")
+    test_split_info = os.path.join(data_dir, "split_info", "test_split.txt")
+    with open(train_split_info, "r") as f:
+        train_split_list = f.readlines()
+        train_split_info = [x.split("\n")[0] for x in train_split_list]
+    with open(val_split_info, "r") as f:
+        val_split_list = f.readlines()
+        val_split_info = [x.split("\n")[0] for x in val_split_list]
+    with open(test_split_info, "r") as f:
+        test_split_list = f.readlines()
+        test_split_info = [x.split("\n")[0] for x in test_split_list]
+    split_dict["train"] = train_split_info
+    split_dict["val"] = val_split_info
+    split_dict["test"] = test_split_info
+
+    # Read data
+    def parse_child_parent(arr):
+        pcd_dict = arr[()]
+        parent_val = pcd_dict["parent"]
+        child_val = pcd_dict["child"]
+        return parent_val, child_val
+
+    data_dict = {}
+    data_dict["train"] = []
+    data_dict["val"] = []
+    data_dict["test"] = []
+    for data_file in tqdm(data_file_list, desc="Processing data"):
+        data = np.load(os.path.join(data_dir, data_file), allow_pickle=True)
+        parent_pcd_s, child_pcd_s = parse_child_parent(data["multi_obj_start_pcd"])
+        # parent_pcd_f, child_pcd_f = parse_child_parent(data["multi_obj_final_pcd"])
+        parent_pose_s, child_pose_s = parse_child_parent(data["multi_obj_start_obj_pose"])
+        parent_pose_f, child_pose_f = parse_child_parent(data["multi_obj_final_obj_pose"])
+        # Transform pose to matrix
+        child_pose_s = pose7d_to_mat(child_pose_s)
+        child_pose_f = pose7d_to_mat(child_pose_f)
+        child_transform = child_pose_f @ np.linalg.inv(child_pose_s)
+
+        if child_pcd_s.shape[0] < pcd_size or parent_pcd_s.shape[0] < pcd_size:
+            continue
+        # Sample & Compute normal
+        target_pcd = o3d.geometry.PointCloud()
+        target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
+        fixed_pcd = o3d.geometry.PointCloud()
+        fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
+        # Compute normal
+        target_pcd = target_pcd.farthest_point_down_sample(pcd_size)
+        target_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05, max_nn=30))
+        target_pcd_arr = np.hstack((np.array(target_pcd.points), np.array(target_pcd.normals)))
+        fixed_pcd = fixed_pcd.farthest_point_down_sample(pcd_size)
+        fixed_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+        fixed_pcd_arr = np.hstack((np.array(fixed_pcd.points), np.array(fixed_pcd.normals)))
+        # Shift all points to the origin
+        target_pcd_center = np.mean(target_pcd_arr[:, :3], axis=0)
+        fixed_pcd_center = np.mean(fixed_pcd_arr[:, :3], axis=0)
+        target_pcd_arr[:, :3] -= target_pcd_center
+        fixed_pcd_arr[:, :3] -= fixed_pcd_center
+
+        fixed_shift = np.eye(4, dtype=np.float32)
+        fixed_shift[:3, 3] = -fixed_pcd_center
+        target_shift = np.eye(4, dtype=np.float32)
+        target_shift[:3, 3] = target_pcd_center
+        child_transform = fixed_shift @ child_transform @ target_shift
+        if vis:
+            visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
+            visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, child_transform)
+
+        tmorp_data = {
+            "target": target_pcd_arr,
+            "fixed": fixed_pcd_arr,
+            "target_label": np.array([0]),
+            "fixed_label": np.array([1]),
+            "9dpose": utils.perform_gram_schmidt_transform(child_transform),
+            "data_id": data_id,
+        }
+        for split, split_list in split_dict.items():
+            if data_file in split_list:
+                data_dict[split].append(tmorp_data)
+                break
+    # Save the dtset into a .pkl file
+    os.makedirs(os.path.join(root_dir, "test_data", "rdiff"), exist_ok=True)
+    for split, split_list in split_dict.items():
+        print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'rdiff')}...")
+        with open(
+            os.path.join(
+                root_dir,
+                "test_data",
+                "rdiff",
+                f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
+            ),
+            "wb",
+        ) as f:
+            pickle.dump(data_dict[split], f)
 
 
 if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_id", type=int, nargs="+", default=[0])
-    parser.add_argument("--data_type", type=str, default="real")
+    parser.add_argument(
+        "--data_root_dir",
+        type=str,
+        default="/home/harvey/Data/rdiff/can_in_cabinet_stack/task_name_stack_can_in_cabinet",
+    )
+    parser.add_argument("--data_type", type=str, default="rdiff")
+    parser.add_argument("--filter_key", type=str, default=None)
     parser.add_argument("--vis", action="store_true")
     args = parser.parse_args()
+    data_root_dir = args.data_root_dir
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cfg_file = os.path.join(root_dir, "config", "pose_transformer.py")
     cfg = LazyConfig.load(cfg_file)
     data_id = args.data_id
+    filter_key = args.filter_key
     vis = args.vis
 
     dtset = []
@@ -361,6 +486,8 @@ if __name__ == "__main__":
             build_dataset_pyrender(data_path, cfg, data_id=did, vis=vis)
         elif args.data_type == "real":
             data_path = os.path.join(root_dir, "test_data", "dmorp_real", f"{did:06d}")
-            build_dataset_real(data_path, cfg, data_id=did, vis=vis)
+            build_dataset_real(data_path, cfg, data_id=did, vis=vis, filter_key=filter_key)
+        elif args.data_type == "rdiff":
+            build_dataset_rdiff(data_root_dir, cfg, data_id=did, vis=vis)
         else:
             raise NotImplementedError

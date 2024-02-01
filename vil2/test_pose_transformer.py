@@ -43,21 +43,33 @@ if __name__ == "__main__":
     max_converge_step = cfg.DATALOADER.AUGMENTATION.MAX_CONVERGE_STEP
     # Load dataset & data loader
     data_id_list = [0]
+    filter_key = "random"
     if cfg.ENV.GOAL_TYPE == "multimodal":
         dataset_folder = "dmorp_multimodal"
     if "real" in cfg.ENV.GOAL_TYPE:
         dataset_folder = "dmorp_real"
     else:
         dataset_folder = "dmorp_faster"
-    data_file_list = [
-        os.path.join(
-            root_path,
-            "test_data",
-            dataset_folder,
-            f"diffusion_dataset_{data_id}_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl",
-        )
-        for data_id in data_id_list
-    ]
+    if filter_key is not None:
+        data_file_list = [
+            os.path.join(
+                root_path,
+                "test_data",
+                dataset_folder,
+                f"diffusion_dataset_{data_id}_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_{filter_key}.pkl",
+            )
+            for data_id in data_id_list
+        ]
+    else:
+        data_file_list = [
+            os.path.join(
+                root_path,
+                "test_data",
+                dataset_folder,
+                f"diffusion_dataset_{data_id}_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl",
+            )
+            for data_id in data_id_list
+        ]
 
     volume_augmentations_path = (
         os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
@@ -75,6 +87,8 @@ if __name__ == "__main__":
         random_segment_drop_rate=random_segment_drop_rate,
         max_converge_step=max_converge_step,
     )
+    # dataset.set_mode("test")
+    dataset.set_mode("test")
     # Load test data
     data_id_list = [0]
     if cfg.ENV.GOAL_TYPE == "multimodal":

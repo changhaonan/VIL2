@@ -206,7 +206,8 @@ class PointCloudDataset(Dataset):
             fixed_coord, fixed_normal, fixed_color, _, fixed_pose, converge_step = self.augment_pcd_instance(
                 fixed_coord, fixed_normal, fixed_color, None, fixed_pose
             )
-
+        else:
+            converge_step = 1
         target_pose = utils.mat_to_pose9d(np.linalg.inv(fixed_pose) @ target_pose)
         fixed_pose = utils.mat_to_pose9d(fixed_pose)
         converge_step = np.array([converge_step]).astype(np.int64)
@@ -430,10 +431,12 @@ def random_segment_drop(coordinate, normal, color, pose, random_segment_drop_rat
 if __name__ == "__main__":
     import os
 
+    dataset_name = "rdiff"
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    split = "test"
     # Test data loader
     dataset = PointCloudDataset(
-        data_file_list=[f"{root_dir}/test_data/dmorp_real/diffusion_dataset_0_512_s25000-c1-r0.5.pkl"],
+        data_file_list=[f"{root_dir}/test_data/{dataset_name}/diffusion_dataset_0_1024_s25000-c1-r0.5_{split}.pkl"],
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
