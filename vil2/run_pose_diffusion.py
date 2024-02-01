@@ -3,7 +3,7 @@ import os
 import torch
 import pickle
 import argparse
-from vil2.data.pcd_dataset import PointCloudDataset
+from vil2.data.pcd_dataset import PcdPairDataset
 from vil2.model.network.pose_transformer_noise import PoseTransformerNoiseNet
 from vil2.model.dmorp_model_v2 import DmorpModel
 from detectron2.config import LazyConfig
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     # Load config
     task_name = "Dmorp"
     root_path = os.path.dirname((os.path.abspath(__file__)))
-    cfg_file = os.path.join(root_path, "config", "pose_transformer.py")
+    cfg_file = os.path.join(root_path, "config", "pose_transformer_rdiff.py")
     cfg = LazyConfig.load(cfg_file)
     retrain = cfg.MODEL.RETRAIN
     pcd_size = cfg.MODEL.PCD_SIZE
@@ -38,30 +38,33 @@ if __name__ == "__main__":
     volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
     random_segment_drop_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_SEGMENT_DROP_RATE
     # Load dataset & data loader
-    data_id_list = [0] # [0, 1]
     if cfg.ENV.GOAL_TYPE == "multimodal":
         dataset_folder = "dmorp_multimodal"
     elif "real" in cfg.ENV.GOAL_TYPE:
         dataset_folder = "dmorp_real"
     elif "struct" in cfg.ENV.GOAL_TYPE:
         dataset_folder = "dmorp_struct"
+    elif "rdiff" in cfg.ENV.GOAL_TYPE:
+        dataset_folder = "dmorp_rdiff"
     else:
         dataset_folder = "dmorp_faster"
-    data_file_list = [
-        os.path.join(
+
+    # Get different split
+    splits = ["train", "val", "test"]
+    data_file_dict = {}
+    for split in splits:
+        data_file_dict[split] = os.path.join(
             root_path,
             "test_data",
             dataset_folder,
-            f"diffusion_dataset_{data_id}_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl",
+            f"diffusion_dataset_0_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
         )
-        for data_id in data_id_list
-    ]
 
     volume_augmentations_path = (
         os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     )
-    dataset = PointCloudDataset(
-        data_file_list=data_file_list,
+    train_dataset = PcdPairDataset(
+        data_file_list=[data_file_dict["train"]],
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
@@ -70,24 +73,20 @@ if __name__ == "__main__":
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
         volume_augmentations_path=volume_augmentations_path,
-        random_segment_drop_rate=random_segment_drop_rate
+        random_segment_drop_rate=random_segment_drop_rate,
     )
-    # Split dataset
-    train_size = int(cfg.MODEL.TRAIN_SPLIT * len(dataset))
-    val_size = int(cfg.MODEL.VAL_SPLIT * len(dataset))
-    test_size = len(dataset) - train_size - val_size
-    train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
-
-    # Save test dataset to pickle
-    test_dataset_file = os.path.join(
-        root_path,
-        "test_data",
-        "dmorp_real",
-        f"diffusion_dataset_test_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl",
+    val_dataset = PcdPairDataset(
+        data_file_list=[data_file_dict["val"]],
+        dataset_name="dmorp",
+        add_colors=True,
+        add_normals=True,
+        is_elastic_distortion=False,
+        is_random_distortion=False,
+        random_distortion_rate=0,
+        random_distortion_mag=0,
+        volume_augmentations_path=None,
+        random_segment_drop_rate=0,
     )
-    if not os.path.exists(test_dataset_file):
-        with open(test_dataset_file, "wb") as f:
-            pickle.dump(test_dataset, f)
 
     train_data_loader = torch.utils.data.DataLoader(
         train_dataset,

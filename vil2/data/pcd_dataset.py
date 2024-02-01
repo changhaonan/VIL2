@@ -24,7 +24,7 @@ from scipy.spatial.transform import Rotation as R
 import open3d as o3d
 
 
-class PointCloudDataset(Dataset):
+class PcdPairDataset(Dataset):
     """Dataset definition for point cloud like data."""
 
     def __init__(
@@ -412,7 +412,9 @@ def random_segment_drop(coordinate, normal, color, pose, random_segment_drop_rat
     inside_count = np.sum(distances < radius)
     if inside_count >= target_points:
         mask = distances >= radius
-        assert mask.sum() > 0, "No points outside the sphere"
+        # assert mask.sum() > 0, "No points outside the sphere"
+        if mask.sum() == 0:
+            return coordinate, normal, color, pose
         if mask.sum() < target_points:
             mask = distances < radius
         # Create a new point cloud without the points inside the sphere
@@ -435,7 +437,7 @@ if __name__ == "__main__":
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     split = "test"
     # Test data loader
-    dataset = PointCloudDataset(
+    dataset = PcdPairDataset(
         data_file_list=[f"{root_dir}/test_data/{dataset_name}/diffusion_dataset_0_1024_s25000-c1-r0.5_{split}.pkl"],
         dataset_name="dmorp",
         add_colors=True,

@@ -6,7 +6,7 @@ import numpy as np
 import pickle
 import argparse
 import vil2.utils.misc_utils as utils
-from vil2.data.pcd_dataset import PointCloudDataset
+from vil2.data.pcd_dataset import PcdPairDataset
 from vil2.model.network.pose_transformer import PoseTransformer
 from vil2.model.tmorp_model import TmorpModel
 from detectron2.config import LazyConfig
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     volume_augmentations_path = (
         os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     )
-    dataset = PointCloudDataset(
+    dataset = PcdPairDataset(
         data_file_list=data_file_list,
         dataset_name="dmorp",
         add_colors=True,

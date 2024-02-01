@@ -396,6 +396,7 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False):
         parent_pose_s, child_pose_s = parse_child_parent(data["multi_obj_start_obj_pose"])
         parent_pose_f, child_pose_f = parse_child_parent(data["multi_obj_final_obj_pose"])
         # Transform pose to matrix
+        parent_pose_s = pose7d_to_mat(parent_pose_s)
         child_pose_s = pose7d_to_mat(child_pose_s)
         child_pose_f = pose7d_to_mat(child_pose_f)
         child_transform = child_pose_f @ np.linalg.inv(child_pose_s)
@@ -407,6 +408,8 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False):
         target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
         fixed_pcd = o3d.geometry.PointCloud()
         fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
+        # Transfer fixed_pcd to canonical pose
+        fixed_pcd.transform(np.linalg.inv(parent_pose_s))
         # Compute normal
         target_pcd = target_pcd.farthest_point_down_sample(pcd_size)
         target_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05, max_nn=30))
@@ -416,15 +419,15 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False):
         fixed_pcd_arr = np.hstack((np.array(fixed_pcd.points), np.array(fixed_pcd.normals)))
         # Shift all points to the origin
         target_pcd_center = np.mean(target_pcd_arr[:, :3], axis=0)
-        fixed_pcd_center = np.mean(fixed_pcd_arr[:, :3], axis=0)
+        # fixed_pcd_center = np.mean(fixed_pcd_arr[:, :3], axis=0)
         target_pcd_arr[:, :3] -= target_pcd_center
-        fixed_pcd_arr[:, :3] -= fixed_pcd_center
+        # fixed_pcd_arr[:, :3] -= fixed_pcd_center
 
-        fixed_shift = np.eye(4, dtype=np.float32)
-        fixed_shift[:3, 3] = -fixed_pcd_center
+        # fixed_shift = np.eye(4, dtype=np.float32)
+        # fixed_shift[:3, 3] = -fixed_pcd_center
         target_shift = np.eye(4, dtype=np.float32)
         target_shift[:3, 3] = target_pcd_center
-        child_transform = fixed_shift @ child_transform @ target_shift
+        child_transform = np.linalg.inv(parent_pose_s) @ child_transform @ target_shift
         if vis:
             visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
             visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, child_transform)
@@ -477,6 +480,7 @@ if __name__ == "__main__":
     data_id = args.data_id
     filter_key = args.filter_key
     vis = args.vis
+    # vis = True
 
     dtset = []
     for did in data_id:

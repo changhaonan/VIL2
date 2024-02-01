@@ -92,11 +92,11 @@ class PoseTransformer(nn.Module):
         self,
         coord1: torch.Tensor,
         normal1: torch.Tensor,
-        color1: torch.Tensor,
+        color1: torch.Tensor | None,
         label1: torch.Tensor,
         coord2: torch.Tensor,
         normal2: torch.Tensor,
-        color2: torch.Tensor,
+        color2: torch.Tensor | None,
         label2: torch.Tensor,
     ):
         """
@@ -113,8 +113,14 @@ class PoseTransformer(nn.Module):
             (B, N + M + 1, C)
         """
         # Encode geometry1 and geometry2
-        pcd_feat1 = torch.cat((normal1, color1), dim=-1)  # (B, N, 6)
-        pcd_feat2 = torch.cat((normal2, color2), dim=-1)  # (B, M, 6)
+        if color1 is None and color2 is None:
+            pcd_feat1 = normal1  # (B, N, 3)
+            pcd_feat2 = normal2  # (B, M, 3)
+        elif color1 is not None and color2 is not None:
+            pcd_feat1 = torch.cat((normal1, color1), dim=-1)  # (B, N, 6)
+            pcd_feat2 = torch.cat((normal2, color2), dim=-1)  # (B, M, 6)
+        else:
+            raise ValueError("Color must be provided for both or neither")
         center1, enc_pcd1 = self.pcd_encoder(coord1, pcd_feat1)
         center2, enc_pcd2 = self.pcd_encoder(coord2, pcd_feat2)
 
