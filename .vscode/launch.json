@@ -5,10 +5,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Train Tmorp Model",
+            "name": "Train Dmorp Model",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/vil2/run_pose_transformer.py",
+            "program": "${workspaceFolder}/vil2/run_pose_diffusion.py",
             "console": "integratedTerminal",
             "justMyCode": false
         },

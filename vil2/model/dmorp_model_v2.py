@@ -26,13 +26,14 @@ import vil2.utils.misc_utils as utils
 class LitPoseDiffusion(L.LightningModule):
     """Lightning module for Pose Diffusion"""
 
-    def __init__(self, pose_transformer: PoseTransformerNoiseNet, cfg=None) -> None:
+    def __init__(self, pose_transformer: PoseTransformerNoiseNet, cfg) -> None:
         super().__init__()
         self.pose_transformer = pose_transformer
         self.lr = cfg.TRAIN.LR
         self.start_time = time.time()
         self.diffusion_process = cfg.MODEL.DIFFUSION_PROCESS
         self.num_diffusion_iters = cfg.MODEL.NUM_DIFFUSION_ITERS
+        self.translation_only = self.pose_transformer.translation_only
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=self.num_diffusion_iters,
             # the choise of beta schedule has big impact on performance
@@ -75,9 +76,14 @@ class LitPoseDiffusion(L.LightningModule):
             noise_pred = self.pose_transformer(noisy_pose9d, timesteps, cond_feat)
             # compute loss
             trans_loss = F.mse_loss(noise_pred[:, :3], noise[:, :3])
-            rx_loss = F.mse_loss(noise_pred[:, 3:6], noise[:, 3:6])
-            ry_loss = F.mse_loss(noise_pred[:, 6:9], noise[:, 6:9])
-            loss = rx_loss + ry_loss + trans_loss
+            loss = trans_loss
+            if not self.translation_only:
+                rx_loss = F.mse_loss(noise_pred[:, 3:6], noise[:, 3:6])
+                ry_loss = F.mse_loss(noise_pred[:, 6:9], noise[:, 6:9])
+                loss += rx_loss + ry_loss
+            else:
+                rx_loss = 0
+                ry_loss = 0
             return trans_loss, rx_loss, ry_loss, loss
         else:
             raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")

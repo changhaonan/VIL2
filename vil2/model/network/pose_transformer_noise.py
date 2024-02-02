@@ -1,4 +1,5 @@
 """Pose transformer noise network."""
+
 from __future__ import annotations
 import torch
 import torch.nn as nn
@@ -23,6 +24,7 @@ class PoseTransformerNoiseNet(PoseTransformer):
         max_semantic_size: int = 10,
         use_semantic_label: bool = True,
         max_timestep: int = 100,
+        translation_only: bool = True,
     ) -> None:
         super().__init__(
             pcd_input_dim,
@@ -38,7 +40,7 @@ class PoseTransformerNoiseNet(PoseTransformer):
             max_semantic_size,
             use_semantic_label,
         )
-
+        self.translation_only = translation_only
         # Encode noisy input
         self.noisy_encoder = nn.Sequential(
             nn.Linear(9, pcd_output_dim),
@@ -80,8 +82,14 @@ class PoseTransformerNoiseNet(PoseTransformer):
         encoder_output = encoder_output[:, 0, :]  # (B, C)  # only use the first token
 
         # Predict pose
-        rot_x = self.fusion_tail_rot_x(encoder_output)
-        rot_y = self.fusion_tail_rot_y(encoder_output)
-        trans = self.fusion_tail_trans(encoder_output)
-        x = torch.cat([trans, rot_x, rot_y], dim=-1)  # (B, 9)
+        if not self.translation_only:
+            rot_x = self.fusion_tail_rot_x(encoder_output)
+            rot_y = self.fusion_tail_rot_y(encoder_output)
+            trans = self.fusion_tail_trans(encoder_output)
+            x = torch.cat([trans, rot_x, rot_y], dim=-1)  # (B, 9)
+        else:
+            rot_x = torch.zeros((batch_size, 3), device=noisy_pose.device)
+            rot_y = torch.zeros((batch_size, 3), device=noisy_pose.device)
+            trans = self.fusion_tail_trans(encoder_output)  # (B, 3)
+            x = torch.cat([trans, rot_x, rot_y], dim=-1)  # (B, 9)
         return x

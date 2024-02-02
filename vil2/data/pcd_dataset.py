@@ -433,16 +433,16 @@ def random_segment_drop(coordinate, normal, color, pose, random_segment_drop_rat
 if __name__ == "__main__":
     import os
 
-    dataset_name = "rdiff"
+    dataset_name = "dmorp_rdiff"
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     split = "test"
     # Test data loader
     dataset = PcdPairDataset(
-        data_file_list=[f"{root_dir}/test_data/{dataset_name}/diffusion_dataset_0_1024_s25000-c1-r0.5_{split}.pkl"],
+        data_file_list=[f"{root_dir}/test_data/{dataset_name}/diffusion_dataset_0_2048_s25000-c1-r0.5_{split}.pkl"],
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
-        is_elastic_distortion=True,
+        is_elastic_distortion=False,
         is_random_distortion=True,
         volume_augmentations_path=f"{root_dir}/config/va_rotation.yaml",
         max_converge_step=10,
