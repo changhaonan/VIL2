@@ -1,4 +1,5 @@
 """Diffusion model for generating multi-object relative pose using Pose Transformer"""
+
 from __future__ import annotations
 from typing import Any
 from lightning.pytorch.utilities.types import STEP_OUTPUT, OptimizerLRScheduler
@@ -19,6 +20,8 @@ from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from vil2.model.network.pose_transformer_noise import PoseTransformerNoiseNet
 from box import Box
 import yaml
+import vil2.utils.misc_utils as utils
+
 
 class LitPoseDiffusion(L.LightningModule):
     """Lightning module for Pose Diffusion"""
@@ -145,6 +148,37 @@ class LitPoseDiffusion(L.LightningModule):
         else:
             raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
 
+    def forward(self, batch):
+        target_coord = batch["target_coord"].to(torch.float32)
+        target_normal = batch["target_normal"].to(torch.float32)
+        target_color = batch["target_color"].to(torch.float32)
+        target_label = batch["target_label"].to(torch.long)
+        fixed_coord = batch["fixed_coord"].to(torch.float32)
+        fixed_normal = batch["fixed_normal"].to(torch.float32)
+        fixed_color = batch["fixed_color"].to(torch.float32)
+        fixed_label = batch["fixed_label"].to(torch.long)
+
+        B = target_coord.shape[0]
+        # Compute conditional features
+        cond_feat = self.pose_transformer.encode_cond(
+            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
+        )
+        if self.diffusion_process == "ddpm":
+            # initialize action from Guassian noise
+            pose9d_pred = torch.randn((B, 9), device=self.device)
+            for k in self.noise_scheduler.timesteps:
+                timesteps = torch.tensor([k], device=self.device).to(torch.long).repeat(B)
+                # predict noise residual
+
+                noise_pred = self.pose_transformer(pose9d_pred, timesteps, cond_feat)
+                # inverse diffusion step (remove noise)
+                pose9d_pred = self.noise_scheduler.step(
+                    model_output=noise_pred, timestep=k, sample=pose9d_pred
+                ).prev_sample
+            return pose9d_pred
+        else:
+            raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
+
     def configure_optimizers(self) -> OptimizerLRScheduler:
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
@@ -206,6 +240,56 @@ class DmorpModel:
             dataloaders=test_data_loader,
         )
 
+    def predict(
+        self,
+        target_pcd_arr: np.ndarray,
+        fixed_pcd_arr: np.ndarray,
+        target_label: np.ndarray,
+        fixed_label: np.ndarray,
+        target_pose=None,
+    ) -> Any:
+        self.lightning_pose_transformer.eval()
+        # Assemble batch
+        assert target_pcd_arr.shape[0] == fixed_pcd_arr.shape[0]
+        assert target_pcd_arr.shape[1] == fixed_pcd_arr.shape[1]
+        batch = {
+            "target_coord": target_pcd_arr[None, :, :3],
+            "target_normal": target_pcd_arr[None, :, 3:6],
+            "target_color": target_pcd_arr[None, :, 6:],
+            "target_label": target_label[None, :],
+            "fixed_coord": fixed_pcd_arr[None, :, :3],
+            "fixed_normal": fixed_pcd_arr[None, :, 3:6],
+            "fixed_color": fixed_pcd_arr[None, :, 6:],
+            "fixed_label": fixed_label[None, :],
+        }
+        # Put to torch
+        for key in batch.keys():
+            batch[key] = torch.from_numpy(batch[key]).to(torch.float32)
+        pred_pose9d = self.lightning_pose_transformer(batch)
+        pred_pose9d = pred_pose9d.detach().cpu().numpy()[0]
+
+        print(f"Pred pose: {pred_pose9d}")
+        if target_pose is not None:
+            print(f"Gt pose: {target_pose}")
+            trans_loss = np.mean(np.square(pred_pose9d[:3] - target_pose[:3]))
+            rx_loss = np.mean(np.square(pred_pose9d[3:6] - target_pose[3:6]))
+            ry_loss = np.mean(np.square(pred_pose9d[6:9] - target_pose[6:9]))
+            print(f"trans_loss: {trans_loss}, rx_loss: {rx_loss}, ry_loss: {ry_loss}")
+        # Convert pose9d to matrix
+        pred_pose9d = utils.perform_gram_schmidt_transform(pred_pose9d)
+        pred_pose_mat = np.eye(4, dtype=np.float32)
+        pred_pose_mat[:3, 0] = pred_pose9d[3:6]
+        pred_pose_mat[:3, 1] = pred_pose9d[6:9]
+        pred_pose_mat[:3, 2] = np.cross(pred_pose9d[3:6], pred_pose9d[6:9])
+        pred_pose_mat[:3, 3] = pred_pose9d[:3]
+        return pred_pose_mat
+
+    def load(self, checkpoint_path: str) -> None:
+        self.lightning_pose_transformer.load_state_dict(torch.load(checkpoint_path)["state_dict"])
+
+    def save(self, save_path: str) -> None:
+        torch.save(self.lightning_pose_transformer.state_dict(), save_path)
+
     def experiment_name(self):
         root_path = os.path.dirname(os.path.dirname((os.path.abspath(__file__))))
         dataset_name = self.cfg.MODEL.DATASET_CONFIG
@@ -214,7 +298,9 @@ class DmorpModel:
         rsdr = self.cfg.DATALOADER.AUGMENTATION.RANDOM_SEGMENT_DROP_RATE
         volume_augmentation_file = self.cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
         volume_augmentations_path = (
-            os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
+            os.path.join(root_path, "config", volume_augmentation_file)
+            if volume_augmentation_file is not None
+            else None
         )
         volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r"), Loader=yaml.FullLoader))
         sdp = volume_augmentations.segment_drop.prob

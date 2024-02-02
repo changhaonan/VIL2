@@ -52,7 +52,7 @@ if __name__ == "__main__":
         start_child_pcd_o3d = o3d.geometry.PointCloud()
         start_child_pcd_o3d.points = o3d.utility.Vector3dVector(start_child_pcd)
         start_child_pcd_o3d.paint_uniform_color([0, 1, 0])
-        start_child_pcd_o3d.transform(cild_movement)
+        # start_child_pcd_o3d.transform(cild_movement)
         origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
         o3d.visualization.draw_geometries([start_parent_pcd_o3d, start_child_pcd_o3d, origin])
 

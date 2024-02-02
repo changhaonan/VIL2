@@ -6,15 +6,23 @@
     "configurations": [
         {
             "name": "Train Tmorp Model",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/vil2/run_pose_transformer.py",
             "console": "integratedTerminal",
             "justMyCode": false
         },
         {
+            "name": "Test Dmorp Model",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/vil2/test_pose_diffusion.py",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
             "name": "BDNP",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/vil2/run_bdnp.py",
             "console": "integratedTerminal",
@@ -22,7 +30,7 @@
         },
         {
             "name": "PoseTF",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/vil2/run_pose_transformer.py",
             "console": "integratedTerminal",
@@ -30,7 +38,7 @@
         },
         {
             "name": "TestBlender",
-            "type": "python",
+            "type": "debugpy",
             "request": "attach",
             "connect": {
                 "host": "localhost",
@@ -39,7 +47,7 @@
         },
         {
             "name": "GenDMorp",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/vil2/data_gen/dmorp_gen.py",
             "args": [
