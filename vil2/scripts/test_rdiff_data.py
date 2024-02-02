@@ -20,7 +20,7 @@ def pose7d_to_mat(pose7d):
     return pose_mat
 
 
-def normalize_and_voxelize(pcd_anchor, pcd_list, voxel_size=0.01):
+def normalize_pcd(pcd_anchor, pcd_list):
     # Normalize to unit cube
     pcd_center = (pcd_anchor.get_max_bound() + pcd_anchor.get_min_bound()) / 2
     pcd_anchor = pcd_anchor.translate(-pcd_center)
@@ -34,8 +34,6 @@ def normalize_and_voxelize(pcd_anchor, pcd_list, voxel_size=0.01):
         pcd = pcd.translate(-pcd_center)
         pcd = pcd.scale(1 / scale_xyz, center=np.array([0, 0, 0]))
         normalized_pcd_list.append(pcd)
-    # Voxelization
-    # pcd = pcd.voxel_down_sample(voxel_size=voxel_size)
     return pcd_anchor, normalized_pcd_list, pcd_center, scale_xyz
 
 
@@ -123,7 +121,7 @@ if __name__ == "__main__":
             start_child_pcd_o3d.paint_uniform_color([0, 1, 0])
             start_child_pcd_o3d.transform(child_movement)
 
-            start_parent_pcd_o3d, normalized_pcd_list, start_parent_pcd_center, scale_xyz = normalize_and_voxelize(
+            start_parent_pcd_o3d, normalized_pcd_list, start_parent_pcd_center, scale_xyz = normalize_pcd(
                 start_parent_pcd_o3d, [start_child_pcd_o3d]
             )
             unit_bbox = o3d.geometry.AxisAlignedBoundingBox(min_bound=[-0.5, -0.5, -0.5], max_bound=[0.5, 0.5, 0.5])

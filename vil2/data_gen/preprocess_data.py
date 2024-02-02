@@ -48,6 +48,23 @@ def read_scene_hdf5(fixed_hdf5, target_hdf5, intrinsic_file):
     return target_color, target_depth, fixed_color, fixed_depth, intrinsic
 
 
+def normalize_pcd(pcd_anchor, pcd_list):
+    # Normalize to unit cube
+    pcd_center = (pcd_anchor.get_max_bound() + pcd_anchor.get_min_bound()) / 2
+    pcd_anchor = pcd_anchor.translate(-pcd_center)
+    scale_xyz = pcd_anchor.get_max_bound() - pcd_anchor.get_min_bound()
+    scale_xyz = np.max(scale_xyz)
+    pcd_anchor = pcd_anchor.scale(1 / scale_xyz, center=np.array([0, 0, 0]))
+
+    # Normalize the child point clouds
+    normalized_pcd_list = []
+    for pcd in pcd_list:
+        pcd = pcd.translate(-pcd_center)
+        pcd = pcd.scale(1 / scale_xyz, center=np.array([0, 0, 0]))
+        normalized_pcd_list.append(pcd)
+    return pcd_anchor, normalized_pcd_list, pcd_center, scale_xyz
+
+
 def visualize_pcd_with_open3d(
     pcd_with_color1,
     pcd_with_color2,
@@ -355,7 +372,7 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False, filt
     print("Done!")
 
 
-def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False):
+def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, normalize: bool = False):
     """Build the dataset from the rdiff data"""
     data_file_list = os.listdir(data_dir)
     data_file_list = [f for f in data_file_list if f.endswith(".npz")]
@@ -392,72 +409,76 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False):
     for data_file in tqdm(data_file_list, desc="Processing data"):
         data = np.load(os.path.join(data_dir, data_file), allow_pickle=True)
         parent_pcd_s, child_pcd_s = parse_child_parent(data["multi_obj_start_pcd"])
-        # parent_pcd_f, child_pcd_f = parse_child_parent(data["multi_obj_final_pcd"])
+        parent_pcd_f, child_pcd_f = parse_child_parent(data["multi_obj_final_pcd"])
         parent_pose_s, child_pose_s = parse_child_parent(data["multi_obj_start_obj_pose"])
         parent_pose_f, child_pose_f = parse_child_parent(data["multi_obj_final_obj_pose"])
         # Transform pose to matrix
         parent_pose_s = pose7d_to_mat(parent_pose_s)
         child_pose_s = pose7d_to_mat(child_pose_s)
         child_pose_f = pose7d_to_mat(child_pose_f)
-        child_transform = child_pose_f @ np.linalg.inv(child_pose_s)
+        target_transform = child_pose_f @ np.linalg.inv(child_pose_s)
 
         if child_pcd_s.shape[0] < pcd_size or parent_pcd_s.shape[0] < pcd_size:
             continue
-        # Sample & Compute normal
+
+        # Shift all points to the origin
+        child_pcd_center = (child_pcd_s.max(axis=0) + child_pcd_s.min(axis=0)) / 2
+        child_pcd_s[:, :3] -= child_pcd_center
         target_pcd = o3d.geometry.PointCloud()
         target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
+
         fixed_pcd = o3d.geometry.PointCloud()
         fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
-        # Transfer fixed_pcd to canonical pose
         fixed_pcd.transform(np.linalg.inv(parent_pose_s))
+
+        # Sample & Compute normal
+        target_shift = np.eye(4, dtype=np.float32)
+        target_shift[:3, 3] = child_pcd_center
+        target_transform = np.linalg.inv(parent_pose_s) @ target_transform @ target_shift
+        target_pcd.transform(target_transform)
+
+        fixed_pcd, [target_pcd], _, __ = normalize_pcd(fixed_pcd, [target_pcd])
+
+        origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+        o3d.visualization.draw_geometries([target_pcd, fixed_pcd, origin])
         # Compute normal
         target_pcd = target_pcd.farthest_point_down_sample(pcd_size)
+        fixed_pcd = fixed_pcd.farthest_point_down_sample(pcd_size)
         target_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05, max_nn=30))
         target_pcd_arr = np.hstack((np.array(target_pcd.points), np.array(target_pcd.normals)))
-        fixed_pcd = fixed_pcd.farthest_point_down_sample(pcd_size)
         fixed_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
         fixed_pcd_arr = np.hstack((np.array(fixed_pcd.points), np.array(fixed_pcd.normals)))
-        # Shift all points to the origin
-        target_pcd_center = np.mean(target_pcd_arr[:, :3], axis=0)
-        # fixed_pcd_center = np.mean(fixed_pcd_arr[:, :3], axis=0)
-        target_pcd_arr[:, :3] -= target_pcd_center
-        # fixed_pcd_arr[:, :3] -= fixed_pcd_center
 
-        # fixed_shift = np.eye(4, dtype=np.float32)
-        # fixed_shift[:3, 3] = -fixed_pcd_center
-        target_shift = np.eye(4, dtype=np.float32)
-        target_shift[:3, 3] = target_pcd_center
-        child_transform = np.linalg.inv(parent_pose_s) @ child_transform @ target_shift
         if vis:
             visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
-            visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, child_transform)
+            visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, target_transform)
 
-        tmorp_data = {
-            "target": target_pcd_arr,
-            "fixed": fixed_pcd_arr,
-            "target_label": np.array([0]),
-            "fixed_label": np.array([1]),
-            "9dpose": utils.perform_gram_schmidt_transform(child_transform),
-            "data_id": data_id,
-        }
-        for split, split_list in split_dict.items():
-            if data_file in split_list:
-                data_dict[split].append(tmorp_data)
-                break
-    # Save the dtset into a .pkl file
-    os.makedirs(os.path.join(root_dir, "test_data", "rdiff"), exist_ok=True)
-    for split, split_list in split_dict.items():
-        print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'rdiff')}...")
-        with open(
-            os.path.join(
-                root_dir,
-                "test_data",
-                "rdiff",
-                f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
-            ),
-            "wb",
-        ) as f:
-            pickle.dump(data_dict[split], f)
+    #     tmorp_data = {
+    #         "target": target_pcd_arr,
+    #         "fixed": fixed_pcd_arr,
+    #         "target_label": np.array([0]),
+    #         "fixed_label": np.array([1]),
+    #         "9dpose": utils.perform_gram_schmidt_transform(target_transform),
+    #         "data_id": data_id,
+    #     }
+    #     for split, split_list in split_dict.items():
+    #         if data_file in split_list:
+    #             data_dict[split].append(tmorp_data)
+    #             break
+    # # Save the dtset into a .pkl file
+    # os.makedirs(os.path.join(root_dir, "test_data", "rdiff"), exist_ok=True)
+    # for split, split_list in split_dict.items():
+    #     print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'rdiff')}...")
+    #     with open(
+    #         os.path.join(
+    #             root_dir,
+    #             "test_data",
+    #             "rdiff",
+    #             f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
+    #         ),
+    #         "wb",
+    #     ) as f:
+    #         pickle.dump(data_dict[split], f)
 
 
 if __name__ == "__main__":
