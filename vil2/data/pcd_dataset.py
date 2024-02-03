@@ -1,6 +1,7 @@
 """Dataset definition for point cloud like data.
 Code refered from Mask3D: https://github.com/JonasSchult/Mask3D/blob/11bd5ff94477ff7194e9a7c52e9fae54d73ac3b5/datasets/semseg.py#L486
 """
+
 from __future__ import annotations
 from typing import Optional
 from torch.utils.data import Dataset
@@ -42,6 +43,9 @@ class PcdPairDataset(Dataset):
         random_distortion_rate: float = 0.2,
         random_distortion_mag: float = 0.01,
         random_segment_drop_rate: float = 0.15,
+        crop_pcd: bool = False,
+        crop_size: float = 0.2,
+        crop_noise: float = 0.1,
         max_converge_step: int = 3,
     ):
         # Set parameters
@@ -52,6 +56,9 @@ class PcdPairDataset(Dataset):
         self.random_distortion_rate = random_distortion_rate
         self.random_distortion_mag = random_distortion_mag
         self.random_segment_drop_rate = random_segment_drop_rate
+        self.crop_pcd = crop_pcd
+        self.crop_size = crop_size
+        self.crop_noise = crop_noise
         self.max_converge_step = max_converge_step  # number of noise levels
         if volume_augmentations_path is not None:
             self.volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r"), Loader=yaml.FullLoader))
@@ -70,15 +77,6 @@ class PcdPairDataset(Dataset):
             else:
                 data_list += raw_data
         self._data = data_list
-        # Color normalization
-        # if Path(str(color_mean_std)).exists():
-        #     color_mean_std = self._load_yaml(color_mean_std)
-        #     color_mean, color_std = (
-        #         tuple(color_mean_std["mean"]),
-        #         tuple(color_mean_std["std"]),
-        #     )
-        # if add_colors:
-        #     self.normalize_color = A.Normalize(mean=color_mean, std=color_std)
         self.mode = "train"  # train, val, test
 
     def set_mode(self, mode: str):
@@ -95,10 +93,9 @@ class PcdPairDataset(Dataset):
         return target_pcd, fixed_pcd, target_label, fixed_label, pose
 
     def augment_pcd_instance(self, coordinate, normal, color, label, pose):
-        # FIXME: add augmentation
-        converge_step = np.random.randint(1, self.max_converge_step + 1)
         # Converge step is used to represent augmentation level
-        # label = np.concatenate((label, aug["labels"]))
+        converge_step = np.random.randint(1, self.max_converge_step + 1)
+
         if self.is_elastic_distortion:
             coordinate = elastic_distortion(coordinate, 0.1, 0.1)
         if self.is_random_distortion:
@@ -208,6 +205,24 @@ class PcdPairDataset(Dataset):
             )
         else:
             converge_step = 1
+
+        # Crop pcd to focus
+        if self.crop_pcd:
+            crop_center = target_pose[:3, 3] + np.random.rand(3) * 2 * self.crop_noise - self.crop_noise
+            x_min, y_min, z_min = crop_center - self.crop_size
+            x_max, y_max, z_max = crop_center + self.crop_size
+            fixed_mask = crop(fixed_coord, x_min, y_min, z_min, x_max, y_max, z_max)
+            fixed_coord = fixed_coord[fixed_mask]
+            if self.add_normals:
+                fixed_normal = fixed_normal[fixed_mask]
+            if self.add_colors:
+                fixed_color = fixed_color[fixed_mask]
+            # Update fixed pose
+            fixed_shift = np.eye(4)
+            fixed_shift[:3, 3] = crop_center
+            fixed_pose = fixed_pose @ fixed_shift
+            fixed_coord -= crop_center
+
         target_pose = utils.mat_to_pose9d(np.linalg.inv(fixed_pose) @ target_pose)
         fixed_pose = utils.mat_to_pose9d(fixed_pose)
         converge_step = np.array([converge_step]).astype(np.int64)
@@ -374,7 +389,6 @@ def random_translation(coordinate, normal, color, pose, offset_type: str = "give
         assert offset is not None
 
     transformation_matrix = np.eye(4)
-    rotation_matrix = np.eye(3)
     transformation_matrix[:3, 3] = offset
 
     # Manually apply the transformation to each point and normal
@@ -388,11 +402,10 @@ def random_translation(coordinate, normal, color, pose, offset_type: str = "give
         transformed_points.append(transformed_point)
 
         # Transform the normal (only rotation)
-        transformed_normal = np.dot(rotation_matrix, normal)
+        transformed_normal = normal
         transformed_normals.append(transformed_normal)
 
     pose_transform = np.eye(4)
-    pose_transform[:3, :3] = np.linalg.inv(rotation_matrix)
     pose_transform[:3, 3] = -offset
     pose = pose @ pose_transform
     return np.array(transformed_points), np.array(transformed_normals), color, pose
@@ -446,6 +459,7 @@ if __name__ == "__main__":
         is_random_distortion=True,
         volume_augmentations_path=f"{root_dir}/config/va_rotation.yaml",
         max_converge_step=10,
+        crop_pcd=True,
     )
     dataset.set_mode("train")
 
@@ -463,6 +477,7 @@ if __name__ == "__main__":
         fixed_pose = data["fixed_pose"]
         converge_step = data["converge_step"]
         print(f"Converge step: {converge_step}")
+        print(f"Number of target points: {len(target_coord)}, Number of fixed points: {len(fixed_coord)}")
         utils.visualize_pcd_list(
             [target_coord, fixed_coord],
             [target_normal, fixed_normal],

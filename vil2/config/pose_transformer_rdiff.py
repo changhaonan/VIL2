@@ -7,6 +7,12 @@ ENV = dict(
     GOAL_TYPE="rdiff",  # rdiff
 )
 
+PREPROCESS = dict(
+    GRID_SIZE=0.025,
+    NUM_POINT_LOW_BOUND=50,
+    NUM_POINT_HIGH_BOUND=400,
+)
+
 DATALOADER = dict(
     BATCH_SIZE=256,
     NUM_WORKERS=0,  # Set to 0 if using ilab

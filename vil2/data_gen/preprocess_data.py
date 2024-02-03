@@ -376,7 +376,7 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
     """Build the dataset from the rdiff data"""
     data_file_list = os.listdir(data_dir)
     data_file_list = [f for f in data_file_list if f.endswith(".npz")]
-    pcd_size = cfg.MODEL.PCD_SIZE
+    grid_size = cfg.PREPROCESS.GRID_SIZE
     # Split info
     split_dict = {}
     train_split_info = os.path.join(data_dir, "split_info", "train_split.txt")
@@ -413,7 +413,7 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
         parent_pose_s, child_pose_s = parse_child_parent(data["multi_obj_start_obj_pose"])
         # Transform pose to matrix
         parent_pose_s = pose7d_to_mat(parent_pose_s)
-        if child_pcd_s.shape[0] < pcd_size or parent_pcd_s.shape[0] < pcd_size:
+        if child_pcd_s.shape[0] == 0 or parent_pcd_s.shape[0] == 0:
             continue
 
         # Shift all points to the origin
@@ -432,8 +432,9 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
         fixed_pcd, [target_pcd], _, __ = normalize_pcd(fixed_pcd, [target_pcd])
 
         # Compute normal
-        target_pcd = target_pcd.farthest_point_down_sample(pcd_size)
-        fixed_pcd = fixed_pcd.farthest_point_down_sample(pcd_size)
+        target_pcd = target_pcd.voxel_down_sample(grid_size)
+        fixed_pcd = fixed_pcd.voxel_down_sample(grid_size)
+
         target_pcd_center = (target_pcd.get_max_bound() + target_pcd.get_min_bound()) / 2
         target_pcd.translate(-target_pcd_center)
         target_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05, max_nn=30))
@@ -461,15 +462,17 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
             if data_file in split_list:
                 data_dict[split].append(tmorp_data)
                 break
+
+    print("Len of dtset:", len(data_dict["train"]), len(data_dict["val"]), len(data_dict["test"]))
     # Save the dtset into a .pkl file
-    os.makedirs(os.path.join(root_dir, "test_data", "rdiff"), exist_ok=True)
+    os.makedirs(os.path.join(root_dir, "test_data", "dmorp_rdiff"), exist_ok=True)
     for split, split_list in split_dict.items():
-        print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'rdiff')}...")
+        print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_rdiff')}...")
         with open(
             os.path.join(
                 root_dir,
                 "test_data",
-                "rdiff",
+                "dmorp_rdiff",
                 f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
             ),
             "wb",
