@@ -28,7 +28,7 @@ MODEL = dict(
     DIFFUSION_PROCESS="ddpm",
     NUM_DIFFUSION_ITERS=100,
     NOISE_NET=dict(
-        NAME="TRANSFORMER",
+        NAME="TRANSFORMERV2",
         INIT_ARGS=dict(
             TRANSFORMER=dict(
                 pcd_input_dim=6,  # 3 + 3 + 3
@@ -43,6 +43,15 @@ MODEL = dict(
                 fusion_projection_dim=256,
                 use_semantic_label=True,
                 translation_only=True,
+            ),
+            TRANSFORMERV2=dict(
+                grid_sizes=[0.015, 0.03],
+                depths=[2, 3, 3],
+                dec_depths=[1, 1],
+                hidden_dims=[64, 128, 256],
+                n_heads=[4, 8, 8],
+                ks=[16, 24, 32],
+                in_dim=6,
             ),
         ),
     ),

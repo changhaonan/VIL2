@@ -4,6 +4,7 @@ import os
 import numpy as np
 import open3d as o3d
 from scipy.spatial.transform import Rotation as R
+from vil2.utils.pcd_utils import check_pcd_pyramid
 
 
 def parse_child_parent(arr):
@@ -143,6 +144,9 @@ if __name__ == "__main__":
             # Paint the nearby points to a different color
             colors = np.asarray(normalized_pcd_list[0].colors)
             colors[nearby_indices] = (0, 1, 1)
+            
+            # Check point pyramid
+            pcd_list = check_pcd_pyramid(start_parent_pcd_o3d, [0.015, 0.03, 0.06, 0.09])
 
             o3d.visualization.draw_geometries([start_parent_pcd_o3d, unit_bbox, origin] + normalized_pcd_list)
 
