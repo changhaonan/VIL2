@@ -23,7 +23,8 @@ DATALOADER = dict(
         RANDOM_DISTORTION_MAG=0.01,
         VOLUME_AUGMENTATION_FILE="va_rotation.yaml",  # None
         RANDOM_SEGMENT_DROP_RATE=0.15,
-        MAX_CONVERGE_STEP=10,
+        NOISE_SCALE=0.1,  # Scale of nosie
+        CROP_PCD=True,
     ),
 )
 TRAIN = dict(
@@ -58,6 +59,7 @@ MODEL = dict(
                 n_heads=[4, 8, 8],
                 ks=[16, 24, 32],
                 in_dim=6,
+                fusion_projection_dim=256,
             ),
         ),
     ),

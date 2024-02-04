@@ -5,8 +5,8 @@ import torch
 import pickle
 import argparse
 from vil2.data.pcd_dataset import PcdPairDataset
-from vil2.model.network.pose_transformer import PoseTransformer
-from vil2.model.tmorp_model import TmorpModel
+from vil2.model.network.pose_transformer_v2 import PoseTransformerV2
+from vil2.model.tmorp_model_v2 import TmorpModelV2
 from detectron2.config import LazyConfig
 from torch.utils.data.dataset import random_split
 import random
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     # Load config
     task_name = "Dmorp"
     root_path = os.path.dirname((os.path.abspath(__file__)))
-    cfg_file = os.path.join(root_path, "config", "pose_transformer.py")
+    cfg_file = os.path.join(root_path, "config", "pose_transformer_rdiff.py")
     cfg = LazyConfig.load(cfg_file)
     retrain = cfg.MODEL.RETRAIN
     pcd_size = cfg.MODEL.PCD_SIZE
@@ -37,7 +37,9 @@ if __name__ == "__main__":
     random_distortion_mag = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_MAG
     volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
     random_segment_drop_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_SEGMENT_DROP_RATE
+    crop_pcd = cfg.DATALOADER.AUGMENTATION.CROP_PCD
     max_converge_step = cfg.DATALOADER.AUGMENTATION.MAX_CONVERGE_STEP
+
     # Load dataset & data loader
     data_id_list = [0]
     if cfg.ENV.GOAL_TYPE == "multimodal":
@@ -70,7 +72,8 @@ if __name__ == "__main__":
         random_distortion_mag=random_distortion_mag,
         volume_augmentations_path=volume_augmentations_path,
         random_segment_drop_rate=random_segment_drop_rate,
-        noise_level=max_converge_step,
+        max_converge_step=max_converge_step,
+        crop_pcd=crop_pcd,
     )
     # Split dataset
     train_size = int(cfg.MODEL.TRAIN_SPLIT * len(dataset))
@@ -95,8 +98,8 @@ if __name__ == "__main__":
     net_name = cfg.MODEL.NOISE_NET.NAME
     net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
     net_init_args["max_converge_step"] = cfg.DATALOADER.AUGMENTATION.MAX_CONVERGE_STEP
-    pose_transformer = PoseTransformer(**net_init_args)
-    tmorp_model = TmorpModel(cfg, pose_transformer)
+    pose_transformer = PoseTransformerV2(**net_init_args)
+    tmorp_model = TmorpModelV2(cfg, pose_transformer)
 
     model_name = tmorp_model.experiment_name()
     noise_net_name = cfg.MODEL.NOISE_NET.NAME

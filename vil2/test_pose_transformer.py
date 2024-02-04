@@ -85,7 +85,7 @@ if __name__ == "__main__":
         random_distortion_mag=random_distortion_mag,
         volume_augmentations_path=volume_augmentations_path,
         random_segment_drop_rate=random_segment_drop_rate,
-        max_converge_step=max_converge_step,
+        noise_level=max_converge_step,
     )
     # dataset.set_mode("test")
     dataset.set_mode("test")

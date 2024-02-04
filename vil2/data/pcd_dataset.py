@@ -42,11 +42,10 @@ class PcdPairDataset(Dataset):
         is_random_distortion: bool = False,
         random_distortion_rate: float = 0.2,
         random_distortion_mag: float = 0.01,
-        random_segment_drop_rate: float = 0.15,
         crop_pcd: bool = False,
         crop_size: float = 0.2,
         crop_noise: float = 0.1,
-        max_converge_step: int = 3,
+        noise_level: float = 0.1,
     ):
         # Set parameters
         self.add_colors = add_colors
@@ -55,11 +54,10 @@ class PcdPairDataset(Dataset):
         self.is_random_distortion = is_random_distortion
         self.random_distortion_rate = random_distortion_rate
         self.random_distortion_mag = random_distortion_mag
-        self.random_segment_drop_rate = random_segment_drop_rate
         self.crop_pcd = crop_pcd
         self.crop_size = crop_size
         self.crop_noise = crop_noise
-        self.max_converge_step = max_converge_step  # number of noise levels
+        self.noise_level = noise_level  # number of noise levels
         if volume_augmentations_path is not None:
             self.volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r"), Loader=yaml.FullLoader))
         else:
@@ -93,9 +91,7 @@ class PcdPairDataset(Dataset):
         return target_pcd, fixed_pcd, target_label, fixed_label, pose
 
     def augment_pcd_instance(self, coordinate, normal, color, label, pose):
-        # Converge step is used to represent augmentation level
-        converge_step = np.random.randint(1, self.max_converge_step + 1)
-
+        """Augment a single point cloud instance."""
         if self.is_elastic_distortion:
             coordinate = elastic_distortion(coordinate, 0.1, 0.1)
         if self.is_random_distortion:
@@ -111,7 +107,7 @@ class PcdPairDataset(Dataset):
         if self.volume_augmentations is not None:
             # do the below only with some probability
             if "rotation" in self.volume_augmentations.keys():
-                max_angle = np.pi / float(converge_step)
+                max_angle = np.pi * self.noise_level
                 if random() < self.volume_augmentations.rotation.prob:
                     angle = np.random.uniform(-max_angle, max_angle)
                     coordinate, normal, color, pose = rotate_around_axis(
@@ -129,18 +125,18 @@ class PcdPairDataset(Dataset):
                 if random() < self.volume_augmentations.translation.prob:
                     random_offset = np.random.rand(1, 3)
                     random_offset[0, 0] = np.random.uniform(
-                        self.volume_augmentations.translation.min_x / float(converge_step),
-                        self.volume_augmentations.translation.max_x / float(converge_step),
+                        self.volume_augmentations.translation.min_x * self.noise_level,
+                        self.volume_augmentations.translation.max_x * self.noise_level,
                         size=(1,),
                     )
                     random_offset[0, 1] = np.random.uniform(
-                        self.volume_augmentations.translation.min_y / float(converge_step),
-                        self.volume_augmentations.translation.max_y / float(converge_step),
+                        self.volume_augmentations.translation.min_y * self.noise_level,
+                        self.volume_augmentations.translation.max_y * self.noise_level,
                         size=(1,),
                     )
                     random_offset[0, 2] = np.random.uniform(
-                        self.volume_augmentations.translation.min_z / float(converge_step),
-                        self.volume_augmentations.translation.max_z / float(converge_step),
+                        self.volume_augmentations.translation.min_z * self.noise_level,
+                        self.volume_augmentations.translation.max_z * self.noise_level,
                         size=(1,),
                     )
                     coordinate, normal, color, pose = random_translation(
@@ -158,10 +154,9 @@ class PcdPairDataset(Dataset):
                         normal=normal,
                         pose=pose,
                         color=color,
-                        random_segment_drop_rate=self.random_segment_drop_rate,
                     )
 
-        return coordinate, normal, color, label, pose, converge_step
+        return coordinate, normal, color, label, pose
 
     def __len__(self):
         return len(self._data)
@@ -197,14 +192,12 @@ class PcdPairDataset(Dataset):
 
         if self.mode == "train" or self.mode == "val":
             # Augment data
-            target_coord, target_normal, target_color, _, target_pose, converge_step = self.augment_pcd_instance(
+            target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(
                 target_coord, target_normal, target_color, None, target_pose
             )
-            fixed_coord, fixed_normal, fixed_color, _, fixed_pose, converge_step = self.augment_pcd_instance(
+            fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
                 fixed_coord, fixed_normal, fixed_color, None, fixed_pose
             )
-        else:
-            converge_step = 1
 
         # Crop pcd to focus
         if self.crop_pcd:
@@ -225,19 +218,27 @@ class PcdPairDataset(Dataset):
 
         target_pose = utils.mat_to_pose9d(np.linalg.inv(fixed_pose) @ target_pose)
         fixed_pose = utils.mat_to_pose9d(fixed_pose)
-        converge_step = np.array([converge_step]).astype(np.int64)
+
+        # Concat feat
+        target_feat = []
+        fixed_feat = []
+        if self.add_colors:
+            target_feat.append(target_color)
+            fixed_feat.append(fixed_color)
+        if self.add_normals:
+            target_feat.append(target_normal)
+            fixed_feat.append(fixed_normal)
+        target_feat = np.concatenate(target_feat, axis=-1)
+        fixed_feat = np.concatenate(fixed_feat, axis=-1)
         return {
             "target_coord": target_coord.astype(np.float32),
-            "target_normal": target_normal.astype(np.float32),
-            "target_color": target_color.astype(np.float32),
+            "target_feat": target_feat.astype(np.float32),
             "target_pose": target_pose.astype(np.float32),
             "target_label": target_label.astype(np.int64),
             "fixed_coord": fixed_coord.astype(np.float32),
-            "fixed_normal": fixed_normal.astype(np.float32),
-            "fixed_color": fixed_color.astype(np.float32),
+            "fixed_feat": fixed_feat.astype(np.float32),
             "fixed_pose": fixed_pose.astype(np.float32),
             "fixed_label": fixed_label.astype(np.int64),
-            "converge_step": converge_step,
         }
 
     @staticmethod
@@ -411,24 +412,23 @@ def random_translation(coordinate, normal, color, pose, offset_type: str = "give
     return np.array(transformed_points), np.array(transformed_normals), color, pose
 
 
-def random_segment_drop(coordinate, normal, color, pose, random_segment_drop_rate: float = 0.15):
+def random_segment_drop(coordinate, normal, color, pose):
     # Heuristic: center of the sphere is the mean of the points
     center = coordinate.mean(axis=0)
     # randomly shift the center but keep it inside the point cloud
     center += np.random.uniform(low=-0.02, high=0.02, size=(3,))
     # Heuristic: start with a small sphere and increase until k% of points are inside
     total_points = len(coordinate)
-    target_points = total_points * (random_segment_drop_rate)
-    radius = round(np.random.uniform(low=0.02, high=0.10), 2)
+    half_points = total_points * 0.5
+    radius = round(np.random.uniform(low=0.02, high=0.05), 2)
     distances = np.linalg.norm(coordinate - center, axis=1)
     # Count points inside the sphere
     inside_count = np.sum(distances < radius)
-    if inside_count >= target_points:
-        mask = distances >= radius
-        # assert mask.sum() > 0, "No points outside the sphere"
+    if inside_count >= half_points:
+        mask = distances >= radius  # keep mask
         if mask.sum() == 0:
             return coordinate, normal, color, pose
-        if mask.sum() < target_points:
+        if mask.sum() < half_points:
             mask = distances < radius
         # Create a new point cloud without the points inside the sphere
         new_points = coordinate[mask]
@@ -458,8 +458,8 @@ if __name__ == "__main__":
         is_elastic_distortion=False,
         is_random_distortion=True,
         volume_augmentations_path=f"{root_dir}/config/va_rotation.yaml",
-        max_converge_step=10,
-        crop_pcd=True,
+        noise_level=0.1,
+        crop_pcd=False,
     )
     dataset.set_mode("train")
 
