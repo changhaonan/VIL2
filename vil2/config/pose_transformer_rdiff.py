@@ -6,15 +6,15 @@ ENV = dict(
     SEMANTIC_FEAT_TYPE="one_hot",  # random, clip, one_hot
     GOAL_TYPE="rdiff",  # rdiff
 )
-
 PREPROCESS = dict(
-    GRID_SIZE=0.025,
+    GRID_SIZE=0.03,
+    TARGET_RESCALE=3.0,
     NUM_POINT_LOW_BOUND=50,
     NUM_POINT_HIGH_BOUND=400,
 )
 
 DATALOADER = dict(
-    BATCH_SIZE=256,
+    BATCH_SIZE=32,
     NUM_WORKERS=0,  # Set to 0 if using ilab
     AUGMENTATION=dict(
         IS_ELASTIC_DISTORTION=True,
@@ -25,11 +25,16 @@ DATALOADER = dict(
         RANDOM_SEGMENT_DROP_RATE=0.15,
         NOISE_SCALE=0.1,  # Scale of nosie
         CROP_PCD=True,
+        CROP_SIZE=0.2,
+        CROP_NOISE=0.05,
+        NOISE_LEVEL=0.1,
     ),
 )
 TRAIN = dict(
     NUM_EPOCHS=10000,
+    WARM_UP_STEP=5,
     LR=1e-4,
+    GRADIENT_CLIP_VAL=1.0,
 )
 MODEL = dict(
     DIFFUSION_PROCESS="ddpm",
@@ -52,7 +57,7 @@ MODEL = dict(
                 translation_only=True,
             ),
             TRANSFORMERV2=dict(
-                grid_sizes=[0.015, 0.03],
+                grid_sizes=[0.035, 0.06],
                 depths=[2, 3, 3],
                 dec_depths=[1, 1],
                 hidden_dims=[64, 128, 256],

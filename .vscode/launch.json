@@ -5,10 +5,26 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Process Data",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/vil2/data_gen/preprocess_data.py",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
             "name": "Train Dmorp Model",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/vil2/run_pose_diffusion.py",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Train Tmorp Model",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/vil2/run_pose_transformer_v2.py",
             "console": "integratedTerminal",
             "justMyCode": false
         },

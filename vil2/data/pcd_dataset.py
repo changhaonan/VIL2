@@ -201,10 +201,17 @@ class PcdPairDataset(Dataset):
 
         # Crop pcd to focus
         if self.crop_pcd:
-            crop_center = target_pose[:3, 3] + np.random.rand(3) * 2 * self.crop_noise - self.crop_noise
-            x_min, y_min, z_min = crop_center - self.crop_size
-            x_max, y_max, z_max = crop_center + self.crop_size
-            fixed_mask = crop(fixed_coord, x_min, y_min, z_min, x_max, y_max, z_max)
+            max_crop_attempts = 10
+            for i in range(max_crop_attempts):
+                crop_center = target_pose[:3, 3] + np.random.rand(3) * 2 * self.crop_noise - self.crop_noise
+                x_min, y_min, z_min = crop_center - self.crop_size
+                x_max, y_max, z_max = crop_center + self.crop_size
+                fixed_mask = crop(fixed_coord, x_min, y_min, z_min, x_max, y_max, z_max)
+                if fixed_mask.sum() > 0:  # Make sure there are points in the crop
+                    break
+                if i == max_crop_attempts - 1:
+                    print("Warning: Failed to find a crop")
+                    fixed_mask = np.ones(fixed_coord.shape[0], dtype=bool)
             fixed_coord = fixed_coord[fixed_mask]
             if self.add_normals:
                 fixed_normal = fixed_normal[fixed_mask]
@@ -220,8 +227,8 @@ class PcdPairDataset(Dataset):
         fixed_pose = utils.mat_to_pose9d(fixed_pose)
 
         # Concat feat
-        target_feat = []
-        fixed_feat = []
+        target_feat = [copy.deepcopy(target_coord)]
+        fixed_feat = [copy.deepcopy(fixed_coord)]
         if self.add_colors:
             target_feat.append(target_color)
             fixed_feat.append(fixed_color)
@@ -230,6 +237,25 @@ class PcdPairDataset(Dataset):
             fixed_feat.append(fixed_normal)
         target_feat = np.concatenate(target_feat, axis=-1)
         fixed_feat = np.concatenate(fixed_feat, axis=-1)
+
+        # DEBUG: sanity check
+        if fixed_coord.shape[0] == 0 or np.max(np.abs(fixed_coord)) == 0:
+            print("Fixed coord is zero")
+            # After crop this becomes empty
+            vis_list = []
+            fixed_pcd_o3d = o3d.geometry.PointCloud()
+            fixed_pcd_o3d.points = o3d.utility.Vector3dVector(fixed_pcd[:, :3])
+            vis_list.append(fixed_pcd_o3d)
+            # Add a sphere to visualize the crop center
+            sphere = o3d.geometry.TriangleMesh.create_sphere(radius=self.crop_size, resolution=20)
+            sphere.compute_vertex_normals()
+            sphere.paint_uniform_color([0.1, 0.1, 0.7])
+            sphere.translate(crop_center)
+            vis_list.append(sphere)
+            o3d.visualization.draw_geometries(vis_list)
+
+        if target_coord.shape[0] == 0 or np.max(np.abs(target_coord)) == 0:
+            print("Target coord is zero")
         return {
             "target_coord": target_coord.astype(np.float32),
             "target_feat": target_feat.astype(np.float32),

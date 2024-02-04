@@ -12,7 +12,10 @@ def build_dmorp_dataset(root_path, cfg):
     random_distortion_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_RATE
     random_distortion_mag = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_MAG
     volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
-    random_segment_drop_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_SEGMENT_DROP_RATE
+    crop_pcd = cfg.DATALOADER.AUGMENTATION.CROP_PCD
+    crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
+    crop_noise = cfg.DATALOADER.AUGMENTATION.CROP_NOISE
+    noise_level = cfg.DATALOADER.AUGMENTATION.NOISE_LEVEL
     # Load dataset & data loader
     if cfg.ENV.GOAL_TYPE == "multimodal":
         dataset_folder = "dmorp_multimodal"
@@ -49,7 +52,10 @@ def build_dmorp_dataset(root_path, cfg):
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
         volume_augmentations_path=volume_augmentations_path,
-        random_segment_drop_rate=random_segment_drop_rate,
+        crop_pcd=crop_pcd,
+        crop_size=crop_size,
+        crop_noise=crop_noise,
+        noise_level=noise_level,
     )
     val_dataset = PcdPairDataset(
         data_file_list=[data_file_dict["val"]],
@@ -61,7 +67,10 @@ def build_dmorp_dataset(root_path, cfg):
         random_distortion_rate=0,
         random_distortion_mag=0,
         volume_augmentations_path=None,
-        random_segment_drop_rate=0,
+        crop_pcd=crop_pcd,
+        crop_size=crop_size,
+        crop_noise=crop_noise,
+        noise_level=noise_level,
     )
     test_dataset = PcdPairDataset(
         data_file_list=[data_file_dict["test"]],
@@ -73,7 +82,10 @@ def build_dmorp_dataset(root_path, cfg):
         random_distortion_rate=0,
         random_distortion_mag=0,
         volume_augmentations_path=None,
-        random_segment_drop_rate=0,
+        crop_pcd=crop_pcd,
+        crop_size=crop_size,
+        crop_noise=crop_noise,
+        noise_level=noise_level,
     )
     return train_dataset, val_dataset, test_dataset
 

@@ -377,6 +377,7 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
     data_file_list = os.listdir(data_dir)
     data_file_list = [f for f in data_file_list if f.endswith(".npz")]
     grid_size = cfg.PREPROCESS.GRID_SIZE
+    target_rescale = cfg.PREPROCESS.TARGET_RESCALE
     # Split info
     split_dict = {}
     train_split_info = os.path.join(data_dir, "split_info", "train_split.txt")
@@ -408,23 +409,22 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
     data_dict["test"] = []
     for data_file in tqdm(data_file_list, desc="Processing data"):
         data = np.load(os.path.join(data_dir, data_file), allow_pickle=True)
-        parent_pcd_s, child_pcd_s = parse_child_parent(data["multi_obj_start_pcd"])
+        # parent_pcd_s, child_pcd_s = parse_child_parent(data["multi_obj_start_pcd"])
         parent_pcd_f, child_pcd_f = parse_child_parent(data["multi_obj_final_pcd"])
         parent_pose_s, child_pose_s = parse_child_parent(data["multi_obj_start_obj_pose"])
         # Transform pose to matrix
         parent_pose_s = pose7d_to_mat(parent_pose_s)
-        if child_pcd_s.shape[0] == 0 or parent_pcd_s.shape[0] == 0:
+        if child_pcd_f.shape[0] == 0 or parent_pcd_f.shape[0] == 0:
             continue
 
+        # Rescale the target pcd in case that there are not enough points after voxel downsampling
         # Shift all points to the origin
-        child_pcd_center = (child_pcd_s.max(axis=0) + child_pcd_s.min(axis=0)) / 2
-        child_pcd_s[:, :3] -= child_pcd_center
         target_pcd = o3d.geometry.PointCloud()
         # target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
         target_pcd.points = o3d.utility.Vector3dVector(child_pcd_f)
 
         fixed_pcd = o3d.geometry.PointCloud()
-        fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
+        fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_f)
         fixed_pcd.transform(np.linalg.inv(parent_pose_s))
 
         # Sample & Compute normal
@@ -432,11 +432,13 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
         fixed_pcd, [target_pcd], _, __ = normalize_pcd(fixed_pcd, [target_pcd])
 
         # Compute normal
-        target_pcd = target_pcd.voxel_down_sample(grid_size)
-        fixed_pcd = fixed_pcd.voxel_down_sample(grid_size)
-
         target_pcd_center = (target_pcd.get_max_bound() + target_pcd.get_min_bound()) / 2
         target_pcd.translate(-target_pcd_center)
+        # Rescale the target pcd in case that there are not enough points after voxel downsampling
+        # target_pcd.scale(target_rescale, center=np.array([0, 0, 0]))  # FIXME: will this bring systematic error?
+
+        target_pcd = target_pcd.voxel_down_sample(grid_size)
+        fixed_pcd = fixed_pcd.voxel_down_sample(grid_size)
         target_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05, max_nn=30))
         target_pcd_arr = np.hstack((np.array(target_pcd.points), np.array(target_pcd.normals)))
         fixed_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
@@ -449,6 +451,20 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
         if vis:
             visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
             visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, target_transform)
+
+        # DEBUG: sanity check
+        if np.max(np.abs(target_pcd_arr[:, :3])) == 0 or np.max(np.abs(fixed_pcd_arr[:, :3])) == 0:
+            print("Zero pcd found")
+            # Check raw pcd
+            vis_list = []
+            target_pcd = o3d.geometry.PointCloud()
+            target_pcd.points = o3d.utility.Vector3dVector(child_pcd_f)
+            vis_list.append(target_pcd)
+            fixed_pcd = o3d.geometry.PointCloud()
+            fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_f)
+            vis_list.append(fixed_pcd)
+            o3d.visualization.draw_geometries(vis_list)
+            continue
 
         tmorp_data = {
             "target": target_pcd_arr,
@@ -499,8 +515,8 @@ if __name__ == "__main__":
     cfg = LazyConfig.load(cfg_file)
     data_id = args.data_id
     filter_key = args.filter_key
-    vis = args.vis
-    # vis = True
+    # vis = args.vis
+    vis = True
 
     dtset = []
     for did in data_id:

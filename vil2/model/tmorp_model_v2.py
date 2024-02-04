@@ -8,6 +8,7 @@ import numpy as np
 from tqdm.auto import tqdm
 import torch
 import torch.nn as nn
+from torch.optim.lr_scheduler import LambdaLR
 import math
 import os
 import torch
@@ -16,6 +17,7 @@ import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import time
+from vil2.model.network.geometric import batch2offset
 from vil2.model.network.pose_transformer_v2 import PoseTransformerV2
 import vil2.utils.misc_utils as utils
 
@@ -25,9 +27,13 @@ class LitPoseTransformerV2(L.LightningModule):
 
     def __init__(self, pose_transformer: PoseTransformerV2, cfg=None) -> None:
         super().__init__()
+        self.cfg = cfg
         self.pose_transformer = pose_transformer
         self.lr = cfg.TRAIN.LR
+        self.warm_up_step = cfg.TRAIN.WARM_UP_STEP
         self.start_time = time.time()
+        # Logging
+        self.batch_size = cfg.DATALOADER.BATCH_SIZE
 
     def training_step(self, batch, batch_idx):
         pose9d = batch["target_pose"].to(torch.float32)
@@ -38,13 +44,13 @@ class LitPoseTransformerV2(L.LightningModule):
         ry_loss = F.mse_loss(pose9d_pred[:, 6:9], pose9d[:, 6:9])
         loss = trans_loss + rx_loss + ry_loss
         # log
-        self.log("tr_trans_loss", trans_loss, sync_dist=True)
-        self.log("tr_rx_loss", rx_loss, sync_dist=True)
-        self.log("tr_ry_loss", ry_loss, sync_dist=True)
+        self.log("tr_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("tr_rx_loss", rx_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("tr_ry_loss", ry_loss, sync_dist=True, batch_size=self.batch_size)
         # log
-        self.log("train_loss", loss, sync_dist=True)
+        self.log("train_loss", loss, sync_dist=True, batch_size=self.batch_size)
         elapsed_time = (time.time() - self.start_time) / 3600
-        self.log("train_runtime(hrs)", elapsed_time, sync_dist=True)
+        self.log("train_runtime(hrs)", elapsed_time, sync_dist=True, batch_size=self.batch_size)
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -56,12 +62,12 @@ class LitPoseTransformerV2(L.LightningModule):
         ry_loss = F.mse_loss(pose9d_pred[:, 6:9], pose9d[:, 6:9])
         loss = trans_loss + rx_loss + ry_loss
         # log
-        self.log("te_trans_loss", trans_loss, sync_dist=True)
-        self.log("te_rx_loss", rx_loss, sync_dist=True)
-        self.log("te_ry_loss", ry_loss, sync_dist=True)
-        self.log("test_loss", loss, sync_dist=True)
+        self.log("te_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("te_rx_loss", rx_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("te_ry_loss", ry_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("test_loss", loss, sync_dist=True, batch_size=self.batch_size)
         elapsed_time = (time.time() - self.start_time) / 3600
-        self.log("train_runtime(hrs)", elapsed_time, sync_dist=True)
+        self.log("train_runtime(hrs)", elapsed_time, sync_dist=True, batch_size=self.batch_size)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -73,32 +79,50 @@ class LitPoseTransformerV2(L.LightningModule):
         ry_loss = F.mse_loss(pose9d_pred[:, 6:9], pose9d[:, 6:9])
         loss = trans_loss + rx_loss + ry_loss
         # log
-        self.log("v_trans_loss", trans_loss, sync_dist=True)
-        self.log("v_rx_loss", rx_loss, sync_dist=True)
-        self.log("v_ry_loss", ry_loss, sync_dist=True)
-        self.log("val_loss", loss, sync_dist=True)
+        self.log("v_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("v_rx_loss", rx_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("v_ry_loss", ry_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("val_loss", loss, sync_dist=True, batch_size=self.batch_size)
         elapsed_time = (time.time() - self.start_time) / 3600
-        self.log("train_runtime(hrs)", elapsed_time, sync_dist=True)
+        self.log("train_runtime(hrs)", elapsed_time, sync_dist=True, batch_size=self.batch_size)
         return loss
 
     def forward(self, batch) -> Any:
-        target_coord = batch["target_coord"].to(torch.float32)
-        target_normal = batch["target_normal"].to(torch.float32)
-        target_color = batch["target_color"].to(torch.float32)
-        fixed_coord = batch["fixed_coord"].to(torch.float32)
-        fixed_normal = batch["fixed_normal"].to(torch.float32)
-        fixed_color = batch["fixed_color"].to(torch.float32)
+        # Assemble input
+        target_coord = batch["target_coord"]
+        target_feat = batch["target_feat"]
+        target_batch_idx = batch["target_batch_index"]
+        target_offset = batch2offset(target_batch_idx)
+        target_points = [target_coord, target_feat, target_offset]
+        fixed_coord = batch["fixed_coord"]
+        fixed_feat = batch["fixed_feat"]
+        fixed_batch_idx = batch["fixed_batch_index"]
+        fixed_offset = batch2offset(fixed_batch_idx)
+        fixed_points = [fixed_coord, fixed_feat, fixed_offset]
+
         # Compute conditional features
-        target_points, all_fixed_points, cluster_indexes = self.pose_transformer.encode_cond(
-            target_coord, target_normal, target_color, fixed_coord, fixed_normal, fixed_color
+        enc_target_points, all_enc_fixed_points, cluster_indexes = self.pose_transformer.encode_cond(
+            target_points, fixed_points
         )
+
         # forward
-        pose9d_pred = self.pose_transformer(target_points, all_fixed_points)
+        pose9d_pred = self.pose_transformer(enc_target_points, all_enc_fixed_points)
         return pose9d_pred
 
-    def configure_optimizers(self) -> OptimizerLRScheduler:
+    def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-        return optimizer
+
+        def lr_foo(epoch):
+            if epoch < self.warm_up_step:
+                # warm up lr
+                lr_scale = 0.1 ** (self.warm_up_step - epoch)
+            else:
+                lr_scale = 0.95**epoch
+
+            return lr_scale
+
+        scheduler = LambdaLR(optimizer, lr_lambda=lr_foo)
+        return [optimizer], [scheduler]
 
 
 class TmorpModelV2:
@@ -111,6 +135,7 @@ class TmorpModelV2:
         self.pose_transformer = pose_transformer
         self.lightning_pose_transformer = LitPoseTransformerV2(pose_transformer, cfg).to(torch.float32)
         # parameters
+        self.gradient_clip_val = cfg.TRAIN.GRADIENT_CLIP_VAL
         self.logger_project = cfg.LOGGER.PROJECT
 
     def train(self, num_epochs: int, train_data_loader, val_data_loader, save_path: str):
@@ -134,6 +159,7 @@ class TmorpModelV2:
             strategy=strategy,
             log_every_n_steps=5,
             accelerator=accelerator,
+            gradient_clip_val=self.gradient_clip_val,
         )
         trainer.fit(
             self.lightning_pose_transformer, train_dataloaders=train_data_loader, val_dataloaders=val_data_loader
@@ -216,12 +242,4 @@ class TmorpModelV2:
     def experiment_name(self):
         noise_net_name = self.cfg.MODEL.NOISE_NET.NAME
         init_args = self.cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name]
-        pod = init_args["pcd_output_dim"]
-        na = init_args["num_attention_heads"]
-        ehd = init_args["encoder_hidden_dim"]
-        fpd = init_args["fusion_projection_dim"]
-        pp_str = ""
-        for points in init_args.points_pyramid:
-            pp_str += str(points) + "-"
-        usl = f"{init_args.use_semantic_label}"
-        return f"Tmorp_model_pod{pod}_na{na}_ehd{ehd}_fpd{fpd}_pp{pp_str}_usl{usl}"
+        return f"Tmorp_model"
