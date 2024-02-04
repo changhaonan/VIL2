@@ -12,3 +12,8 @@ wandb
 open3d
 torch
 torchvision
+einops
+torch_geometric
+torch_scatter
+torch_cluster
+timm
