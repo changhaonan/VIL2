@@ -39,6 +39,14 @@ if __name__ == "__main__":
     # Load dataset & data loader
     train_dataset, val_dataset, test_dataset = build_dmorp_dataset(root_path, cfg)
 
+    train_data_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=cfg.DATALOADER.BATCH_SIZE,
+        shuffle=True,
+        num_workers=cfg.DATALOADER.NUM_WORKERS,
+        collate_fn=PcdPairCollator(),
+    )
+
     test_data_loader = torch.utils.data.DataLoader(
         test_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
@@ -73,10 +81,11 @@ if __name__ == "__main__":
 
     tmorp_model.load(checkpoint_file)
     for i in range(10):
-        test_idx = np.random.randint(len(test_dataset))
-
+        # test_idx = np.random.randint(len(test_dataset))
+        test_idx = i
         # Load the best checkpoint
         test_data = test_dataset[test_idx]
+        # test_data = train_dataset[test_idx]
         target_coord = test_data["target_coord"]
         target_feat = test_data["target_feat"]
         fixed_coord = test_data["fixed_coord"]
@@ -84,21 +93,34 @@ if __name__ == "__main__":
         target_pose = test_data["target_pose"]
 
         # Do prediction
-        pred_pose_mat = tmorp_model.predict(target_coord, target_feat, fixed_coord, fixed_feat, target_pose)
+        pred_pose_mat = tmorp_model.predict(target_coord, target_feat, fixed_coord, fixed_feat, target_pose=target_pose)
 
-        # Check the prediction
+        # DEBUG & VISUALIZATION
         target_color = np.zeros_like(target_coord)
         target_color[:, 0] = 1
         fixed_color = np.zeros_like(fixed_coord)
         fixed_color[:, 1] = 1
+
+        fixed_normal = fixed_feat[:, 3:6]
+        target_normal = target_feat[:, 3:6]
+        target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
         utils.visualize_pcd_list(
             coordinate_list=[target_coord, fixed_coord],
+            normal_list=[target_normal, fixed_normal],
             color_list=[target_color, fixed_color],
             pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
         )
 
         utils.visualize_pcd_list(
             coordinate_list=[target_coord, fixed_coord],
+            normal_list=[target_normal, fixed_normal],
+            color_list=[target_color, fixed_color],
+            pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
+        )
+        # # Check the prediction
+        utils.visualize_pcd_list(
+            coordinate_list=[target_coord, fixed_coord],
+            normal_list=[target_normal, fixed_normal],
             color_list=[target_color, fixed_color],
             pose_list=[pred_pose_mat, np.eye(4, dtype=np.float32)],
         )

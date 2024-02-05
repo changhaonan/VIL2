@@ -15,25 +15,24 @@ PREPROCESS = dict(
 
 DATALOADER = dict(
     BATCH_SIZE=32,
-    NUM_WORKERS=0,  # Set to 0 if using ilab
+    NUM_WORKERS=8,  # Set to 0 if using ilab
     AUGMENTATION=dict(
-        IS_ELASTIC_DISTORTION=False,
+        IS_ELASTIC_DISTORTION=True,
         IS_RANDOM_DISTORTION=True,
         RANDOM_DISTORTION_RATE=0.2,
         RANDOM_DISTORTION_MAG=0.01,
         VOLUME_AUGMENTATION_FILE="va_rotation.yaml",  # None
         RANDOM_SEGMENT_DROP_RATE=0.15,
-        NOISE_SCALE=0.1,  # Scale of nosie
         CROP_PCD=True,
-        CROP_SIZE=0.3,
+        CROP_SIZE=0.4,
         CROP_NOISE=0.1,
-        NOISE_LEVEL=0.3,
+        NOISE_LEVEL=0.5,
         ROT_AXIS="yz",
     ),
 )
 TRAIN = dict(
     NUM_EPOCHS=10000,
-    WARM_UP_STEP=5,
+    WARM_UP_STEP=0,
     LR=1e-4,
     GRADIENT_CLIP_VAL=1.0,
 )

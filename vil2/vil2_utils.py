@@ -16,6 +16,7 @@ def build_dmorp_dataset(root_path, cfg):
     crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
     crop_noise = cfg.DATALOADER.AUGMENTATION.CROP_NOISE
     noise_level = cfg.DATALOADER.AUGMENTATION.NOISE_LEVEL
+    rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
     # Load dataset & data loader
     if cfg.ENV.GOAL_TYPE == "multimodal":
         dataset_folder = "dmorp_multimodal"
@@ -38,7 +39,7 @@ def build_dmorp_dataset(root_path, cfg):
             dataset_folder,
             f"diffusion_dataset_0_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
         )
-
+    print("Data loaded from: ", data_file_dict)
     volume_augmentations_path = (
         os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     )
@@ -56,24 +57,10 @@ def build_dmorp_dataset(root_path, cfg):
         crop_size=crop_size,
         crop_noise=crop_noise,
         noise_level=noise_level,
+        rot_axis=rot_axis,
     )
     val_dataset = PcdPairDataset(
         data_file_list=[data_file_dict["val"]],
-        dataset_name="dmorp",
-        add_colors=True,
-        add_normals=True,
-        is_elastic_distortion=False,
-        is_random_distortion=False,
-        random_distortion_rate=0,
-        random_distortion_mag=0,
-        volume_augmentations_path=None,
-        crop_pcd=crop_pcd,
-        crop_size=crop_size,
-        crop_noise=crop_noise,
-        noise_level=noise_level,
-    )
-    test_dataset = PcdPairDataset(
-        data_file_list=[data_file_dict["test"]],
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
@@ -86,6 +73,23 @@ def build_dmorp_dataset(root_path, cfg):
         crop_size=crop_size,
         crop_noise=crop_noise,
         noise_level=noise_level,
+        rot_axis=rot_axis,
+    )
+    test_dataset = PcdPairDataset(
+        data_file_list=[data_file_dict["test"]],
+        dataset_name="dmorp",
+        add_colors=True,
+        add_normals=True,
+        is_elastic_distortion=False,
+        is_random_distortion=False,
+        random_distortion_rate=random_distortion_rate,
+        random_distortion_mag=random_distortion_mag,
+        volume_augmentations_path=volume_augmentations_path,
+        crop_pcd=crop_pcd,
+        crop_size=crop_size,
+        crop_noise=crop_noise,
+        noise_level=noise_level,
+        rot_axis=rot_axis,
     )
     return train_dataset, val_dataset, test_dataset
 

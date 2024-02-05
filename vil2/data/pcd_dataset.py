@@ -92,10 +92,10 @@ class PcdPairDataset(Dataset):
         fixed_label = data["fixed_label"]
         return target_pcd, fixed_pcd, target_label, fixed_label, pose
 
-    def augment_pcd_instance(self, coordinate, normal, color, label, pose):
+    def augment_pcd_instance(self, coordinate, normal, color, label, pose, disable_rot: bool = False):
         """Augment a single point cloud instance."""
         if self.is_elastic_distortion:
-            coordinate = elastic_distortion(coordinate, 0.1, 0.1)
+            coordinate = elastic_distortion(coordinate, 0.03, 0.03)
         if self.is_random_distortion:
             coordinate, color, normal, label = random_around_points(
                 coordinate,
@@ -108,7 +108,7 @@ class PcdPairDataset(Dataset):
 
         if self.volume_augmentations is not None:
             # do the below only with some probability
-            if "rotation" in self.volume_augmentations.keys():
+            if "rotation" in self.volume_augmentations.keys() and not disable_rot:
                 max_angle = np.pi * self.noise_level
                 if random() < self.volume_augmentations.rotation.prob:
                     angle = np.random.uniform(-max_angle, max_angle)
@@ -192,22 +192,23 @@ class PcdPairDataset(Dataset):
         target_pose = utils.pose9d_to_mat(target_pose, rot_axis=self.rot_axis)
         fixed_pose = np.eye(4)
 
-        # if self.mode == "train" or self.mode == "val":
-        #     # Augment data
-        #     target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(
-        #         target_coord, target_normal, target_color, None, target_pose
-        #     )
-        #     fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
-        #         fixed_coord, fixed_normal, fixed_color, None, fixed_pose
-        #     )
+        if self.mode == "train" or self.mode == "val":
+            # Augment data
+            target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(
+                target_coord, target_normal, target_color, None, target_pose
+            )
+            fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
+                fixed_coord, fixed_normal, fixed_color, None, fixed_pose, disable_rot=True
+            )  # Disable rotation for fixed pcd
 
         # Crop pcd to focus
         if self.crop_pcd:
             max_crop_attempts = 10
             for i in range(max_crop_attempts):
                 crop_center = target_pose[:3, 3] + np.random.rand(3) * 2 * self.crop_noise - self.crop_noise
-                x_min, y_min, z_min = crop_center - self.crop_size
-                x_max, y_max, z_max = crop_center + self.crop_size
+                crop_size = (0.5 * np.random.rand(3) + 0.5) * self.crop_size
+                x_min, y_min, z_min = crop_center - crop_size
+                x_max, y_max, z_max = crop_center + crop_size
                 fixed_mask = crop(fixed_coord, x_min, y_min, z_min, x_max, y_max, z_max)
                 if fixed_mask.sum() > 0:  # Make sure there are points in the crop
                     break
@@ -517,12 +518,13 @@ if __name__ == "__main__":
             dataset_folder,
             f"diffusion_dataset_0_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
         )
+    print("Data loaded from: ", data_file_dict)
 
     volume_augmentations_path = (
         os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     )
     dataset = PcdPairDataset(
-        data_file_list=[data_file_dict["train"]],
+        data_file_list=[data_file_dict["test"]],
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
@@ -531,7 +533,7 @@ if __name__ == "__main__":
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
         volume_augmentations_path=volume_augmentations_path,
-        crop_pcd=crop,
+        crop_pcd=crop_pcd,
         crop_size=crop_size,
         crop_noise=crop_noise,
         noise_level=noise_level,
@@ -540,13 +542,15 @@ if __name__ == "__main__":
 
     # Test data augmentation
     for i in range(10):
-        random_idx = np.random.randint(0, len(dataset))
+        # random_idx = np.random.randint(0, len(dataset))
+        random_idx = i
         data = dataset[random_idx]
         target_coord = data["target_coord"]
         target_feat = data["target_feat"]
         fixed_coord = data["fixed_coord"]
         fixed_feat = data["fixed_feat"]
         target_pose = data["target_pose"]
+        print("Target pose: ", target_pose)
         print(f"Number of target points: {len(target_coord)}, Number of fixed points: {len(fixed_coord)}")
 
         target_color = np.zeros_like(target_coord)
@@ -554,13 +558,19 @@ if __name__ == "__main__":
         fixed_color = np.zeros_like(fixed_coord)
         fixed_color[:, 1] = 1
 
+        fixed_normal = fixed_feat[:, 3:6]
+        target_normal = target_feat[:, 3:6]
+        target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
         utils.visualize_pcd_list(
             coordinate_list=[target_coord, fixed_coord],
+            normal_list=[target_normal, fixed_normal],
             color_list=[target_color, fixed_color],
             pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
         )
+
         utils.visualize_pcd_list(
             coordinate_list=[target_coord, fixed_coord],
+            normal_list=[target_normal, fixed_normal],
             color_list=[target_color, fixed_color],
-            pose_list=[utils.pose9d_to_mat(target_pose, rot_axis=rot_axis), np.eye(4, dtype=np.float32)],
+            pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
         )

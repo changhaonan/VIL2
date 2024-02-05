@@ -222,18 +222,15 @@ class TmorpModelV2:
             ry_loss = np.mean(np.square(pred_pose9d[6:9] - target_pose[6:9]))
             print(f"trans_loss: {trans_loss}, rx_loss: {rx_loss}, ry_loss: {ry_loss}")
         # Convert pose9d to matrix
-        pred_pose9d = utils.pose9d_to_mat(pred_pose9d, rot_axis=self.rot_axis)
-        pred_pose_mat = np.eye(4, dtype=np.float32)
-        pred_pose_mat[:3, 0] = pred_pose9d[3:6]
-        pred_pose_mat[:3, 1] = pred_pose9d[6:9]
-        pred_pose_mat[:3, 2] = np.cross(pred_pose9d[3:6], pred_pose9d[6:9])
-        pred_pose_mat[:3, 3] = pred_pose9d[:3]
+        pred_pose_mat = utils.pose9d_to_mat(pred_pose9d, rot_axis=self.rot_axis)
         return pred_pose_mat
 
     def load(self, checkpoint_path: str) -> None:
+        print(f"Loading checkpoint from {checkpoint_path}")
         self.lightning_pose_transformer.load_state_dict(torch.load(checkpoint_path)["state_dict"])
 
     def save(self, save_path: str) -> None:
+        print(f"Saving checkpoint to {save_path}")
         torch.save(self.lightning_pose_transformer.state_dict(), save_path)
 
     def experiment_name(self):
