@@ -95,7 +95,7 @@ class PcdPairDataset(Dataset):
     def augment_pcd_instance(self, coordinate, normal, color, label, pose, disable_rot: bool = False):
         """Augment a single point cloud instance."""
         if self.is_elastic_distortion:
-            coordinate = elastic_distortion(coordinate, 0.03, 0.03)
+            coordinate = elastic_distortion(coordinate, 0.05, 0.05)
         if self.is_random_distortion:
             coordinate, color, normal, label = random_around_points(
                 coordinate,
@@ -209,17 +209,17 @@ class PcdPairDataset(Dataset):
                 crop_size = (0.5 * np.random.rand(3) + 0.5) * self.crop_size
                 x_min, y_min, z_min = crop_center - crop_size
                 x_max, y_max, z_max = crop_center + crop_size
-                fixed_mask = crop(fixed_coord, x_min, y_min, z_min, x_max, y_max, z_max)
-                if fixed_mask.sum() > 0:  # Make sure there are points in the crop
+                fixed_indices = crop(fixed_coord, x_min, y_min, z_min, x_max, y_max, z_max)
+                if fixed_indices.sum() > 0:  # Make sure there are points in the crop
                     break
                 if i == max_crop_attempts - 1:
                     print("Warning: Failed to find a crop")
-                    fixed_mask = np.ones(fixed_coord.shape[0], dtype=bool)
-            fixed_coord = fixed_coord[fixed_mask]
+                    fixed_indices = np.arange(len(fixed_coord))
+            fixed_coord = fixed_coord[fixed_indices]
             if self.add_normals:
-                fixed_normal = fixed_normal[fixed_mask]
+                fixed_normal = fixed_normal[fixed_indices]
             if self.add_colors:
-                fixed_color = fixed_color[fixed_mask]
+                fixed_color = fixed_color[fixed_indices]
             # Update fixed pose
             fixed_shift = np.eye(4)
             fixed_shift[:3, 3] = crop_center

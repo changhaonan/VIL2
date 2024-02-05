@@ -237,3 +237,59 @@ class TmorpModelV2:
         noise_net_name = self.cfg.MODEL.NOISE_NET.NAME
         init_args = self.cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name]
         return f"Tmorp_model"
+
+    def sample_bbox(self, coord, feat, crop_size: float):
+        """Sample a bbox in the point cloud"""
+        max_try = 10
+        for i in range(max_try):
+            # Compute the occupied bbox
+            min_coord = np.min(coord, axis=0)
+            max_coord = np.max(coord, axis=0)
+            bbox_size = max_coord - min_coord
+            # Sample a bbox
+            bbox_center = min_coord + bbox_size / 2
+            bbox_min = bbox_center - crop_size / 2
+            bbox_max = bbox_center + crop_size / 2
+
+            # Crop the point cloud
+            inds = self.crop(coord, *bbox_min, *bbox_max)
+            if inds.sum() > 0:
+                break
+            if i == max_try - 1:
+                inds = np.arange(len(coord))
+
+        coord = coord[inds]
+        feat = feat[inds]
+
+        coord_center = bbox_center
+        coord -= coord_center
+        feat[:, :3] -= coord_center
+
+        return coord, feat
+
+    def crop(self, points, x_min, y_min, z_min, x_max, y_max, z_max):
+        if x_max <= x_min or y_max <= y_min or z_max <= z_min:
+            raise ValueError(
+                "We should have x_min < x_max and y_min < y_max and z_min < z_max. But we got"
+                " (x_min = {x_min}, y_min = {y_min}, z_min = {z_min},"
+                " x_max = {x_max}, y_max = {y_max}, z_max = {z_max})".format(
+                    x_min=x_min,
+                    x_max=x_max,
+                    y_min=y_min,
+                    y_max=y_max,
+                    z_min=z_min,
+                    z_max=z_max,
+                )
+            )
+        inds = np.all(
+            [
+                (points[:, 0] >= x_min),
+                (points[:, 0] < x_max),
+                (points[:, 1] >= y_min),
+                (points[:, 1] < y_max),
+                (points[:, 2] >= z_min),
+                (points[:, 2] < z_max),
+            ],
+            axis=0,
+        )
+        return inds

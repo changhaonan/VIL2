@@ -92,34 +92,40 @@ if __name__ == "__main__":
         fixed_feat = test_data["fixed_feat"]
         target_pose = test_data["target_pose"]
 
+        # Sample a pcd
+        crop_size = 0.5
+        crop_fixed_coord, crop_fixed_feat = tmorp_model.sample_bbox(fixed_coord, fixed_feat, crop_size=crop_size)
+
         # Do prediction
-        pred_pose_mat = tmorp_model.predict(target_coord, target_feat, fixed_coord, fixed_feat, target_pose=target_pose)
+        pred_pose_mat = tmorp_model.predict(
+            target_coord, target_feat, crop_fixed_coord, crop_fixed_feat, target_pose=target_pose
+        )
 
         # DEBUG & VISUALIZATION
         target_color = np.zeros_like(target_coord)
         target_color[:, 0] = 1
-        fixed_color = np.zeros_like(fixed_coord)
+        fixed_color = np.zeros_like(crop_fixed_coord)
         fixed_color[:, 1] = 1
 
-        fixed_normal = fixed_feat[:, 3:6]
+        fixed_normal = crop_fixed_feat[:, 3:6]
         target_normal = target_feat[:, 3:6]
         target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
         utils.visualize_pcd_list(
-            coordinate_list=[target_coord, fixed_coord],
+            coordinate_list=[target_coord, crop_fixed_coord],
             normal_list=[target_normal, fixed_normal],
             color_list=[target_color, fixed_color],
             pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
         )
 
-        utils.visualize_pcd_list(
-            coordinate_list=[target_coord, fixed_coord],
-            normal_list=[target_normal, fixed_normal],
-            color_list=[target_color, fixed_color],
-            pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
-        )
+        # utils.visualize_pcd_list(
+        #     coordinate_list=[target_coord, fixed_coord],
+        #     normal_list=[target_normal, fixed_normal],
+        #     color_list=[target_color, fixed_color],
+        #     pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
+        # )
         # # Check the prediction
         utils.visualize_pcd_list(
-            coordinate_list=[target_coord, fixed_coord],
+            coordinate_list=[target_coord, crop_fixed_coord],
             normal_list=[target_normal, fixed_normal],
             color_list=[target_color, fixed_color],
             pose_list=[pred_pose_mat, np.eye(4, dtype=np.float32)],

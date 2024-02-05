@@ -42,8 +42,9 @@ if __name__ == "__main__":
         is_elastic_distortion=False,
         is_random_distortion=True,
         volume_augmentations_path=f"{root_dir}/config/va_rotation.yaml",
-        noise_level=0.1,
+        noise_level=0.5,
         crop_pcd=False,
+        crop_size=0.4
     )
     dataset.set_mode("train")
 
