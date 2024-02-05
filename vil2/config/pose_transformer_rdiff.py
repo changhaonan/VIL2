@@ -17,7 +17,7 @@ DATALOADER = dict(
     BATCH_SIZE=32,
     NUM_WORKERS=0,  # Set to 0 if using ilab
     AUGMENTATION=dict(
-        IS_ELASTIC_DISTORTION=True,
+        IS_ELASTIC_DISTORTION=False,
         IS_RANDOM_DISTORTION=True,
         RANDOM_DISTORTION_RATE=0.2,
         RANDOM_DISTORTION_MAG=0.01,
@@ -25,9 +25,10 @@ DATALOADER = dict(
         RANDOM_SEGMENT_DROP_RATE=0.15,
         NOISE_SCALE=0.1,  # Scale of nosie
         CROP_PCD=True,
-        CROP_SIZE=0.2,
-        CROP_NOISE=0.05,
-        NOISE_LEVEL=0.1,
+        CROP_SIZE=0.3,
+        CROP_NOISE=0.1,
+        NOISE_LEVEL=0.3,
+        ROT_AXIS="yz",
     ),
 )
 TRAIN = dict(

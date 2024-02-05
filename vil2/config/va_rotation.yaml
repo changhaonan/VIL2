@@ -1,5 +1,5 @@
 rotation:
-  prob: 0.0
+  prob: 1.0
 translation:
   prob: 1.0
   min_x: -0.1

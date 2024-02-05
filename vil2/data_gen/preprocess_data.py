@@ -297,6 +297,7 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False, filt
         data_file_list = [f for f in data_file_list if filter_key in f]
     dtset = []
     pcd_size = cfg.MODEL.PCD_SIZE
+    rot_axis = cfg.MODEL.ROT_AXIS
     for data_file in tqdm(data_file_list, desc="Processing data"):
         # Load data
         pcd_dict = pickle.load(open(os.path.join(data_path, data_file), "rb"))
@@ -318,7 +319,7 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False, filt
             fixed_pcd_arr[:, :3] -= fixed_pcd_center
             shift_transform = np.eye(4, dtype=np.float32)
             shift_transform[:3, 3] = target_pcd_center - fixed_pcd_center
-            pose_9d = utils.perform_gram_schmidt_transform(shift_transform)
+            pose_9d = utils.mat_to_pose9d(shift_transform, rot_axis=rot_axis)
             tmorp_data = {
                 "target": target_pcd_arr,
                 "fixed": fixed_pcd_arr,
@@ -378,6 +379,7 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
     data_file_list = [f for f in data_file_list if f.endswith(".npz")]
     grid_size = cfg.PREPROCESS.GRID_SIZE
     target_rescale = cfg.PREPROCESS.TARGET_RESCALE
+    rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
     # Split info
     split_dict = {}
     train_split_info = os.path.join(data_dir, "split_info", "train_split.txt")
@@ -471,7 +473,7 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
             "fixed": fixed_pcd_arr,
             "target_label": np.array([0]),
             "fixed_label": np.array([1]),
-            "9dpose": utils.perform_gram_schmidt_transform(target_transform),
+            "9dpose": utils.mat_to_pose9d(target_transform, rot_axis=rot_axis),
             "data_id": data_id,
         }
         for split, split_list in split_dict.items():
@@ -515,8 +517,8 @@ if __name__ == "__main__":
     cfg = LazyConfig.load(cfg_file)
     data_id = args.data_id
     filter_key = args.filter_key
-    # vis = args.vis
-    vis = True
+    vis = args.vis
+    # vis = True
 
     dtset = []
     for did in data_id:

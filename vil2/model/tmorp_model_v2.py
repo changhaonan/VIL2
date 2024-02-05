@@ -135,6 +135,7 @@ class TmorpModelV2:
         self.pose_transformer = pose_transformer
         self.lightning_pose_transformer = LitPoseTransformerV2(pose_transformer, cfg).to(torch.float32)
         # parameters
+        self.rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
         self.gradient_clip_val = cfg.TRAIN.GRADIENT_CLIP_VAL
         self.logger_project = cfg.LOGGER.PROJECT
 
@@ -189,31 +190,27 @@ class TmorpModelV2:
 
     def predict(
         self,
-        target_pcd_arr: np.ndarray,
-        fixed_pcd_arr: np.ndarray,
-        target_label: np.ndarray,
-        fixed_label: np.ndarray,
-        converge_step: np.ndarray,
+        target_coord: np.ndarray,
+        target_feat: np.ndarray,
+        fixed_coord: np.ndarray,
+        fixed_feat: np.ndarray,
         target_pose=None,
     ) -> Any:
         self.lightning_pose_transformer.eval()
         # Assemble batch
-        assert target_pcd_arr.shape[0] == fixed_pcd_arr.shape[0]
-        assert target_pcd_arr.shape[1] == fixed_pcd_arr.shape[1] == 9
+        target_batch_idx = np.array([0] * target_coord.shape[0], dtype=np.int64)
+        fixed_batch_idx = np.array([0] * fixed_coord.shape[0], dtype=np.int64)
         batch = {
-            "target_coord": target_pcd_arr[None, :, :3],
-            "target_normal": target_pcd_arr[None, :, 3:6],
-            "target_color": target_pcd_arr[None, :, 6:],
-            "target_label": target_label[None, :],
-            "fixed_coord": fixed_pcd_arr[None, :, :3],
-            "fixed_normal": fixed_pcd_arr[None, :, 3:6],
-            "fixed_color": fixed_pcd_arr[None, :, 6:],
-            "fixed_label": fixed_label[None, :],
-            "converge_step": converge_step[None, :],
+            "target_coord": target_coord,
+            "target_feat": target_feat,
+            "target_batch_index": target_batch_idx,
+            "fixed_coord": fixed_coord,
+            "fixed_feat": fixed_feat,
+            "fixed_batch_index": fixed_batch_idx,
         }
         # Put to torch
         for key in batch.keys():
-            batch[key] = torch.from_numpy(batch[key]).to(torch.float32)
+            batch[key] = torch.from_numpy(batch[key])
         pred_pose9d = self.lightning_pose_transformer(batch)
         pred_pose9d = pred_pose9d.detach().cpu().numpy()[0]
 
@@ -225,7 +222,7 @@ class TmorpModelV2:
             ry_loss = np.mean(np.square(pred_pose9d[6:9] - target_pose[6:9]))
             print(f"trans_loss: {trans_loss}, rx_loss: {rx_loss}, ry_loss: {ry_loss}")
         # Convert pose9d to matrix
-        pred_pose9d = utils.perform_gram_schmidt_transform(pred_pose9d)
+        pred_pose9d = utils.pose9d_to_mat(pred_pose9d, rot_axis=self.rot_axis)
         pred_pose_mat = np.eye(4, dtype=np.float32)
         pred_pose_mat[:3, 0] = pred_pose9d[3:6]
         pred_pose_mat[:3, 1] = pred_pose9d[6:9]

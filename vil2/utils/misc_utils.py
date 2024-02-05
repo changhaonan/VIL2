@@ -1,4 +1,5 @@
 """Miscellaneous utilities."""
+
 from __future__ import annotations
 import torch.nn as nn
 import matplotlib.pyplot as plt
@@ -256,34 +257,50 @@ def quat_to_rotvec(quat_pose):
         raise NotImplementedError
 
 
-def pose9d_to_mat(pose9d):
+def pose9d_to_mat(pose9d, rot_axis="xy"):
+    """
+    Args:
+        pose9d: (7,)
+        rot_axis: "xy", "yz", "zx"
+    """
+    # Normalize the pose
+    pose9d = perform_gram_schmidt_transform(pose9d)
+    # Convert to matrix
     trans = pose9d[:3]
-    rx = pose9d[3:6]
-    ry = pose9d[6:9]
     mat = np.eye(4, dtype=np.float32)
-    mat[:3, 0] = rx
-    mat[:3, 1] = ry
-    mat[:3, 2] = np.cross(rx, ry)
+    if rot_axis == "xy":
+        mat[:3, 0] = pose9d[3:6]
+        mat[:3, 1] = pose9d[6:9]
+        mat[:3, 2] = np.cross(mat[:3, 0], mat[:3, 1])
+    elif rot_axis == "yz":
+        mat[:3, 1] = pose9d[3:6]
+        mat[:3, 2] = pose9d[6:9]
+        mat[:3, 0] = np.cross(mat[:3, 1], mat[:3, 2])
+    elif rot_axis == "zx":
+        mat[:3, 2] = pose9d[3:6]
+        mat[:3, 0] = pose9d[6:9]
+        mat[:3, 1] = np.cross(mat[:3, 2], mat[:3, 0])
+    else:
+        raise NotImplementedError
     mat[:3, 3] = trans
     return mat
 
 
-def mat_to_pose9d(mat):
+def mat_to_pose9d(mat, rot_axis="xy"):
     pose9d = np.zeros((9,), dtype=np.float32)
     pose9d[:3] = mat[:3, 3]
-    pose9d[3:6] = mat[:3, 0]
-    pose9d[6:9] = mat[:3, 1]
+    if rot_axis == "xy":
+        pose9d[3:6] = mat[:3, 0]
+        pose9d[6:9] = mat[:3, 1]
+    elif rot_axis == "yz":
+        pose9d[3:6] = mat[:3, 1]
+        pose9d[6:9] = mat[:3, 2]
+    elif rot_axis == "zx":
+        pose9d[3:6] = mat[:3, 2]
+        pose9d[6:9] = mat[:3, 0]
+    else:
+        raise NotImplementedError
     return pose9d
-
-
-def mul_9d_pose(pose_1, pose_2):
-    """Multiply two 9d poses."""
-    mat_1 = pose9d_to_mat(pose_1)
-    mat_2 = pose9d_to_mat(pose_2)
-
-    mat_3 = mat_1 @ mat_2
-    pose_3 = mat_to_pose9d(mat_3)
-    return pose_3
 
 
 # -----------------------------------------------------------------------------
@@ -372,23 +389,14 @@ def farthest_point_sampling_with_color(pcd, n_points):
 
 def perform_gram_schmidt_transform(transform):
     """Perform Gram-Schmidt normalization on transform matrix or 9d pose."""
-    if transform.shape == (4, 4):
-        transform = copy.deepcopy(transform)
-        translation = transform[:3, 3]
-        rotation = transform[:3, :3]
-        v1 = rotation[:, 0]
-        v1_normalized = v1 / np.linalg.norm(v1)
-        v2 = rotation[:, 1]
-        v2_orthogonal = v2 - np.dot(v2, v1_normalized) * v1_normalized
-        v2_normalized = v2_orthogonal / np.linalg.norm(v2_orthogonal)
-    elif transform.shape == (9,):
-        transform = copy.deepcopy(transform)
-        translation = transform[:3]
-        v1 = transform[3:6]
-        v1_normalized = v1 / np.linalg.norm(v1)
-        v2 = transform[6:9]
-        v2_orthogonal = v2 - np.dot(v2, v1_normalized) * v1_normalized
-        v2_normalized = v2_orthogonal / np.linalg.norm(v2_orthogonal)
+    assert transform.shape == (9,), "Input transform should be a 9d pose."
+    transform = copy.deepcopy(transform)
+    translation = transform[:3]
+    v1 = transform[3:6]
+    v1_normalized = v1 / np.linalg.norm(v1)
+    v2 = transform[6:9]
+    v2_orthogonal = v2 - np.dot(v2, v1_normalized) * v1_normalized
+    v2_normalized = v2_orthogonal / np.linalg.norm(v2_orthogonal)
     return np.concatenate((translation, v1_normalized, v2_normalized))
 
 

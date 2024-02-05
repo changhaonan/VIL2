@@ -282,7 +282,7 @@ class DmorpModel:
             ry_loss = np.mean(np.square(pred_pose9d[6:9] - target_pose[6:9]))
             print(f"trans_loss: {trans_loss}, rx_loss: {rx_loss}, ry_loss: {ry_loss}")
         # Convert pose9d to matrix
-        pred_pose9d = utils.perform_gram_schmidt_transform(pred_pose9d)
+        pred_pose9d = utils.pose9d_to_mat(pred_pose9d)
         pred_pose_mat = np.eye(4, dtype=np.float32)
         pred_pose_mat[:3, 0] = pred_pose9d[3:6]
         pred_pose_mat[:3, 1] = pred_pose9d[6:9]

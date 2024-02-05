@@ -46,6 +46,7 @@ class PcdPairDataset(Dataset):
         crop_size: float = 0.2,
         crop_noise: float = 0.1,
         noise_level: float = 0.1,
+        rot_axis: str = "xy",
     ):
         # Set parameters
         self.add_colors = add_colors
@@ -66,6 +67,7 @@ class PcdPairDataset(Dataset):
             self.image_augmentations = A.load(image_augmentations_path)
         else:
             self.image_augmentations = None
+        self.rot_axis = rot_axis
         # Load data
         data_list = []
         for data_file in data_file_list:
@@ -187,17 +189,17 @@ class PcdPairDataset(Dataset):
         else:
             target_color = None
             fixed_color = None
-        target_pose = utils.pose9d_to_mat(target_pose)
+        target_pose = utils.pose9d_to_mat(target_pose, rot_axis=self.rot_axis)
         fixed_pose = np.eye(4)
 
-        if self.mode == "train" or self.mode == "val":
-            # Augment data
-            target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(
-                target_coord, target_normal, target_color, None, target_pose
-            )
-            fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
-                fixed_coord, fixed_normal, fixed_color, None, fixed_pose
-            )
+        # if self.mode == "train" or self.mode == "val":
+        #     # Augment data
+        #     target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(
+        #         target_coord, target_normal, target_color, None, target_pose
+        #     )
+        #     fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
+        #         fixed_coord, fixed_normal, fixed_color, None, fixed_pose
+        #     )
 
         # Crop pcd to focus
         if self.crop_pcd:
@@ -223,8 +225,8 @@ class PcdPairDataset(Dataset):
             fixed_pose = fixed_pose @ fixed_shift
             fixed_coord -= crop_center
 
-        target_pose = utils.mat_to_pose9d(np.linalg.inv(fixed_pose) @ target_pose)
-        fixed_pose = utils.mat_to_pose9d(fixed_pose)
+        target_pose = utils.mat_to_pose9d(np.linalg.inv(fixed_pose) @ target_pose, rot_axis=self.rot_axis)
+        fixed_pose = utils.mat_to_pose9d(fixed_pose, rot_axis=self.rot_axis)
 
         # Concat feat
         target_feat = [copy.deepcopy(target_coord)]
@@ -256,6 +258,7 @@ class PcdPairDataset(Dataset):
 
         if target_coord.shape[0] == 0 or np.max(np.abs(target_coord)) == 0:
             print("Target coord is zero")
+
         return {
             "target_coord": target_coord.astype(np.float32),
             "target_feat": target_feat.astype(np.float32),
@@ -471,49 +474,93 @@ def random_segment_drop(coordinate, normal, color, pose):
 
 if __name__ == "__main__":
     import os
+    from detectron2.config import LazyConfig
 
     dataset_name = "dmorp_rdiff"
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     split = "test"
+    task_name = "Dmorp"
+    root_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg_file = os.path.join(root_path, "config", "pose_transformer_rdiff.py")
+    cfg = LazyConfig.load(cfg_file)
+
     # Test data loader
+    pcd_size = cfg.MODEL.PCD_SIZE
+    is_elastic_distortion = cfg.DATALOADER.AUGMENTATION.IS_ELASTIC_DISTORTION
+    is_random_distortion = cfg.DATALOADER.AUGMENTATION.IS_RANDOM_DISTORTION
+    random_distortion_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_RATE
+    random_distortion_mag = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_MAG
+    volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
+    crop_pcd = cfg.DATALOADER.AUGMENTATION.CROP_PCD
+    crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
+    crop_noise = cfg.DATALOADER.AUGMENTATION.CROP_NOISE
+    noise_level = cfg.DATALOADER.AUGMENTATION.NOISE_LEVEL
+    rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
+    # Load dataset & data loader
+    if cfg.ENV.GOAL_TYPE == "multimodal":
+        dataset_folder = "dmorp_multimodal"
+    elif "real" in cfg.ENV.GOAL_TYPE:
+        dataset_folder = "dmorp_real"
+    elif "struct" in cfg.ENV.GOAL_TYPE:
+        dataset_folder = "dmorp_struct"
+    elif "rdiff" in cfg.ENV.GOAL_TYPE:
+        dataset_folder = "dmorp_rdiff"
+    else:
+        dataset_folder = "dmorp_faster"
+
+    # Get different split
+    splits = ["train", "val", "test"]
+    data_file_dict = {}
+    for split in splits:
+        data_file_dict[split] = os.path.join(
+            root_path,
+            "test_data",
+            dataset_folder,
+            f"diffusion_dataset_0_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
+        )
+
+    volume_augmentations_path = (
+        os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
+    )
     dataset = PcdPairDataset(
-        data_file_list=[f"{root_dir}/test_data/{dataset_name}/diffusion_dataset_0_2048_s25000-c1-r0.5_{split}.pkl"],
+        data_file_list=[data_file_dict["train"]],
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
-        is_elastic_distortion=False,
-        is_random_distortion=True,
-        volume_augmentations_path=f"{root_dir}/config/va_rotation.yaml",
-        noise_level=0.1,
-        crop_pcd=False,
+        is_elastic_distortion=is_elastic_distortion,
+        is_random_distortion=is_random_distortion,
+        random_distortion_rate=random_distortion_rate,
+        random_distortion_mag=random_distortion_mag,
+        volume_augmentations_path=volume_augmentations_path,
+        crop_pcd=crop,
+        crop_size=crop_size,
+        crop_noise=crop_noise,
+        noise_level=noise_level,
+        rot_axis=rot_axis,
     )
-    dataset.set_mode("train")
 
     # Test data augmentation
     for i in range(10):
         random_idx = np.random.randint(0, len(dataset))
         data = dataset[random_idx]
         target_coord = data["target_coord"]
-        target_normal = data["target_normal"]
-        target_color = data["target_color"]
-        target_pose = data["target_pose"]
+        target_feat = data["target_feat"]
         fixed_coord = data["fixed_coord"]
-        fixed_normal = data["fixed_normal"]
-        fixed_color = data["fixed_color"]
-        fixed_pose = data["fixed_pose"]
-        converge_step = data["converge_step"]
-        print(f"Converge step: {converge_step}")
+        fixed_feat = data["fixed_feat"]
+        target_pose = data["target_pose"]
         print(f"Number of target points: {len(target_coord)}, Number of fixed points: {len(fixed_coord)}")
-        utils.visualize_pcd_list(
-            [target_coord, fixed_coord],
-            [target_normal, fixed_normal],
-            [target_color, fixed_color],
-            [np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
-        )
+
+        target_color = np.zeros_like(target_coord)
+        target_color[:, 0] = 1
+        fixed_color = np.zeros_like(fixed_coord)
+        fixed_color[:, 1] = 1
 
         utils.visualize_pcd_list(
-            [target_coord, fixed_coord],
-            [target_normal, fixed_normal],
-            [target_color, fixed_color],
-            [utils.pose9d_to_mat(target_pose), np.eye(4, dtype=np.float32)],
+            coordinate_list=[target_coord, fixed_coord],
+            color_list=[target_color, fixed_color],
+            pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
+        )
+        utils.visualize_pcd_list(
+            coordinate_list=[target_coord, fixed_coord],
+            color_list=[target_color, fixed_color],
+            pose_list=[utils.pose9d_to_mat(target_pose, rot_axis=rot_axis), np.eye(4, dtype=np.float32)],
         )
