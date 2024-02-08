@@ -238,8 +238,10 @@ class TmorpModelV2:
         init_args = self.cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name]
         return f"Tmorp_model"
 
-    def sample_bbox(self, coord, feat, crop_size: float):
+    def sample_bbox(self, coord, feat, crop_size: float, fake_crop=False):
         """Sample a bbox in the point cloud"""
+        if fake_crop:
+            return coord, feat
         max_try = 10
         for i in range(max_try):
             # Compute the occupied bbox
@@ -248,8 +250,9 @@ class TmorpModelV2:
             bbox_size = max_coord - min_coord
             # Sample a bbox
             bbox_center = min_coord + bbox_size / 2
-            bbox_min = bbox_center - crop_size / 2
-            bbox_max = bbox_center + crop_size / 2
+            bbox_center = bbox_center * (1 + np.random.uniform(-0.2, 0.2, 3))
+            bbox_min = bbox_center - crop_size
+            bbox_max = bbox_center + crop_size
 
             # Crop the point cloud
             inds = self.crop(coord, *bbox_min, *bbox_max)

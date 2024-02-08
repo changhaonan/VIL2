@@ -93,8 +93,10 @@ if __name__ == "__main__":
         target_pose = test_data["target_pose"]
 
         # Sample a pcd
-        crop_size = 0.5
-        crop_fixed_coord, crop_fixed_feat = tmorp_model.sample_bbox(fixed_coord, fixed_feat, crop_size=crop_size)
+        crop_size = 0.2
+        crop_fixed_coord, crop_fixed_feat = tmorp_model.sample_bbox(
+            fixed_coord, fixed_feat, crop_size=crop_size, fake_crop=True
+        )
 
         # Do prediction
         pred_pose_mat = tmorp_model.predict(

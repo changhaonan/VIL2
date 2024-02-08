@@ -85,7 +85,7 @@ def build_dmorp_dataset(root_path, cfg):
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
         volume_augmentations_path=volume_augmentations_path,
-        crop_pcd=False,
+        crop_pcd=True,
         crop_size=crop_size,
         crop_noise=crop_noise,
         noise_level=noise_level,

@@ -23,6 +23,7 @@ from box import Box
 import copy
 from scipy.spatial.transform import Rotation as R
 import open3d as o3d
+from sklearn.neighbors import NearestNeighbors
 
 
 class PcdPairDataset(Dataset):
@@ -45,6 +46,7 @@ class PcdPairDataset(Dataset):
         crop_pcd: bool = False,
         crop_size: float = 0.2,
         crop_noise: float = 0.1,
+        crop_strategy: str = "knn",
         noise_level: float = 0.1,
         rot_axis: str = "xy",
     ):
@@ -58,6 +60,7 @@ class PcdPairDataset(Dataset):
         self.crop_pcd = crop_pcd
         self.crop_size = crop_size
         self.crop_noise = crop_noise
+        self.crop_strategy = crop_strategy
         self.noise_level = noise_level  # number of noise levels
         if volume_augmentations_path is not None:
             self.volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r"), Loader=yaml.FullLoader))
@@ -95,7 +98,8 @@ class PcdPairDataset(Dataset):
     def augment_pcd_instance(self, coordinate, normal, color, label, pose, disable_rot: bool = False):
         """Augment a single point cloud instance."""
         if self.is_elastic_distortion:
-            coordinate = elastic_distortion(coordinate, 0.05, 0.05)
+            # coordinate = elastic_distortion(coordinate, 0.05, 0.05)
+            coordinate = elastic_distortion(coordinate, 0.1, 0.1)
         if self.is_random_distortion:
             coordinate, color, normal, label = random_around_points(
                 coordinate,
@@ -209,12 +213,20 @@ class PcdPairDataset(Dataset):
                 crop_size = (0.5 * np.random.rand(3) + 0.5) * self.crop_size
                 x_min, y_min, z_min = crop_center - crop_size
                 x_max, y_max, z_max = crop_center + crop_size
-                fixed_indices = crop(fixed_coord, x_min, y_min, z_min, x_max, y_max, z_max)
+                if self.crop_strategy == "bbox":
+                    fixed_indices = crop_bbox(fixed_coord, x_min, y_min, z_min, x_max, y_max, z_max)
+                elif self.crop_strategy == "radius":
+                    fixed_indices = crop_radius(fixed_coord, crop_center, self.crop_size)
+                elif self.crop_strategy == "knn":
+                    fixed_indices = crop_knn(fixed_coord, target_coord, crop_center, k=20)
+                else:
+                    raise ValueError("Invalid crop strategy")
                 if fixed_indices.sum() > 0:  # Make sure there are points in the crop
                     break
                 if i == max_crop_attempts - 1:
                     print("Warning: Failed to find a crop")
                     fixed_indices = np.arange(len(fixed_coord))
+            raw_fixed_coord = copy.deepcopy(fixed_coord)
             fixed_coord = fixed_coord[fixed_indices]
             if self.add_normals:
                 fixed_normal = fixed_normal[fixed_indices]
@@ -225,6 +237,8 @@ class PcdPairDataset(Dataset):
             fixed_shift[:3, 3] = crop_center
             fixed_pose = fixed_pose @ fixed_shift
             fixed_coord -= crop_center
+            # DEBUG:
+            raw_fixed_coord -= crop_center
 
         target_pose = utils.mat_to_pose9d(np.linalg.inv(fixed_pose) @ target_pose, rot_axis=self.rot_axis)
         fixed_pose = utils.mat_to_pose9d(fixed_pose, rot_axis=self.rot_axis)
@@ -240,6 +254,22 @@ class PcdPairDataset(Dataset):
             fixed_feat.append(fixed_normal)
         target_feat = np.concatenate(target_feat, axis=-1)
         fixed_feat = np.concatenate(fixed_feat, axis=-1)
+
+        # Visualize
+        vis_list = []
+        raw_fixed_pcd_o3d = o3d.geometry.PointCloud()
+        raw_fixed_pcd_o3d.points = o3d.utility.Vector3dVector(raw_fixed_coord)
+        raw_fixed_pcd_o3d.paint_uniform_color([0.1, 0.1, 0.7])
+        vis_list.append(raw_fixed_pcd_o3d)
+        target_pcd_o3d = o3d.geometry.PointCloud()
+        target_pcd_o3d.points = o3d.utility.Vector3dVector(target_coord)
+        target_pcd_o3d.paint_uniform_color([0.7, 0.1, 0.1])
+        vis_list.append(target_pcd_o3d)
+        fixed_pcd_o3d = o3d.geometry.PointCloud()
+        fixed_pcd_o3d.points = o3d.utility.Vector3dVector(fixed_coord)
+        fixed_pcd_o3d.paint_uniform_color([0.1, 0.7, 0.1])
+        vis_list.append(fixed_pcd_o3d)
+        o3d.visualization.draw_geometries(vis_list)
 
         # DEBUG: sanity check
         if fixed_coord.shape[0] == 0 or np.max(np.abs(fixed_coord)) == 0:
@@ -321,7 +351,7 @@ def elastic_distortion(pointcloud, granularity, magnitude):
     return pointcloud
 
 
-def crop(points, x_min, y_min, z_min, x_max, y_max, z_max):
+def crop_bbox(points, x_min, y_min, z_min, x_max, y_max, z_max):
     if x_max <= x_min or y_max <= y_min or z_max <= z_min:
         raise ValueError(
             "We should have x_min < x_max and y_min < y_max and z_min < z_max. But we got"
@@ -347,6 +377,19 @@ def crop(points, x_min, y_min, z_min, x_max, y_max, z_max):
         axis=0,
     )
     return inds
+
+
+def crop_radius(points, center, radius):
+    inds = np.linalg.norm(points - center, axis=1) < radius
+    return inds
+
+
+def crop_knn(points, ref_points, crop_center, k=20):
+    points_shifted = points - crop_center
+    neigh = NearestNeighbors(n_neighbors=k)
+    neigh.fit(points_shifted)
+    indices = neigh.kneighbors(ref_points, return_distance=False)
+    return indices.flatten()
 
 
 def random_around_points(
@@ -528,7 +571,7 @@ if __name__ == "__main__":
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
-        is_elastic_distortion=is_elastic_distortion,
+        is_elastic_distortion=True,
         is_random_distortion=is_random_distortion,
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
@@ -561,16 +604,17 @@ if __name__ == "__main__":
         fixed_normal = fixed_feat[:, 3:6]
         target_normal = target_feat[:, 3:6]
         target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
-        utils.visualize_pcd_list(
-            coordinate_list=[target_coord, fixed_coord],
-            normal_list=[target_normal, fixed_normal],
-            color_list=[target_color, fixed_color],
-            pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
-        )
 
-        utils.visualize_pcd_list(
-            coordinate_list=[target_coord, fixed_coord],
-            normal_list=[target_normal, fixed_normal],
-            color_list=[target_color, fixed_color],
-            pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
-        )
+        # utils.visualize_pcd_list(
+        #     coordinate_list=[target_coord, fixed_coord],
+        #     normal_list=[target_normal, fixed_normal],
+        #     color_list=[target_color, fixed_color],
+        #     pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
+        # )
+
+        # utils.visualize_pcd_list(
+        #     coordinate_list=[target_coord, fixed_coord],
+        #     normal_list=[target_normal, fixed_normal],
+        #     color_list=[target_color, fixed_color],
+        #     pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
+        # )
