@@ -14,9 +14,11 @@ def build_dmorp_dataset(root_path, cfg):
     volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
     crop_pcd = cfg.DATALOADER.AUGMENTATION.CROP_PCD
     crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
+    crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
     crop_noise = cfg.DATALOADER.AUGMENTATION.CROP_NOISE
     noise_level = cfg.DATALOADER.AUGMENTATION.NOISE_LEVEL
     rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
+    knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
     # Load dataset & data loader
     if cfg.ENV.GOAL_TYPE == "multimodal":
         dataset_folder = "dmorp_multimodal"
@@ -56,8 +58,10 @@ def build_dmorp_dataset(root_path, cfg):
         crop_pcd=crop_pcd,
         crop_size=crop_size,
         crop_noise=crop_noise,
+        crop_strategy=crop_strategy,
         noise_level=noise_level,
         rot_axis=rot_axis,
+        knn_k=knn_k,
     )
     val_dataset = PcdPairDataset(
         data_file_list=[data_file_dict["val"]],
@@ -72,24 +76,27 @@ def build_dmorp_dataset(root_path, cfg):
         crop_pcd=crop_pcd,
         crop_size=crop_size,
         crop_noise=crop_noise,
+        crop_strategy=crop_strategy,
         noise_level=noise_level,
         rot_axis=rot_axis,
+        knn_k=knn_k,
     )
     test_dataset = PcdPairDataset(
         data_file_list=[data_file_dict["test"]],
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
-        is_elastic_distortion=True,
-        is_random_distortion=True,
+        is_random_distortion=is_random_distortion,
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
         volume_augmentations_path=volume_augmentations_path,
-        crop_pcd=True,
+        crop_pcd=crop_pcd,
         crop_size=crop_size,
         crop_noise=crop_noise,
+        crop_strategy=crop_strategy,
         noise_level=noise_level,
         rot_axis=rot_axis,
+        knn_k=knn_k,
     )
     return train_dataset, val_dataset, test_dataset
 

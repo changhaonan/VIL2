@@ -49,6 +49,7 @@ class PcdPairDataset(Dataset):
         crop_strategy: str = "knn",
         noise_level: float = 0.1,
         rot_axis: str = "xy",
+        **kwargs,
     ):
         # Set parameters
         self.add_colors = add_colors
@@ -61,6 +62,8 @@ class PcdPairDataset(Dataset):
         self.crop_size = crop_size
         self.crop_noise = crop_noise
         self.crop_strategy = crop_strategy
+        if self.crop_strategy == "knn":
+            self.knn_k = kwargs.get("knn_k", 20)
         self.noise_level = noise_level  # number of noise levels
         if volume_augmentations_path is not None:
             self.volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r"), Loader=yaml.FullLoader))
@@ -218,7 +221,7 @@ class PcdPairDataset(Dataset):
                 elif self.crop_strategy == "radius":
                     fixed_indices = crop_radius(fixed_coord, crop_center, self.crop_size)
                 elif self.crop_strategy == "knn":
-                    fixed_indices = crop_knn(fixed_coord, target_coord, crop_center, k=20)
+                    fixed_indices = crop_knn(fixed_coord, target_coord, crop_center, k=self.knn_k)
                 else:
                     raise ValueError("Invalid crop strategy")
                 if fixed_indices.sum() > 0:  # Make sure there are points in the crop
@@ -255,21 +258,27 @@ class PcdPairDataset(Dataset):
         target_feat = np.concatenate(target_feat, axis=-1)
         fixed_feat = np.concatenate(fixed_feat, axis=-1)
 
-        # Visualize
-        vis_list = []
-        raw_fixed_pcd_o3d = o3d.geometry.PointCloud()
-        raw_fixed_pcd_o3d.points = o3d.utility.Vector3dVector(raw_fixed_coord)
-        raw_fixed_pcd_o3d.paint_uniform_color([0.1, 0.1, 0.7])
-        vis_list.append(raw_fixed_pcd_o3d)
-        target_pcd_o3d = o3d.geometry.PointCloud()
-        target_pcd_o3d.points = o3d.utility.Vector3dVector(target_coord)
-        target_pcd_o3d.paint_uniform_color([0.7, 0.1, 0.1])
-        vis_list.append(target_pcd_o3d)
-        fixed_pcd_o3d = o3d.geometry.PointCloud()
-        fixed_pcd_o3d.points = o3d.utility.Vector3dVector(fixed_coord)
-        fixed_pcd_o3d.paint_uniform_color([0.1, 0.7, 0.1])
-        vis_list.append(fixed_pcd_o3d)
-        o3d.visualization.draw_geometries(vis_list)
+        # # Visualize
+        # vis_list = []
+        # raw_fixed_pcd_o3d = o3d.geometry.PointCloud()
+        # raw_fixed_pcd_o3d.points = o3d.utility.Vector3dVector(raw_fixed_coord)
+        # raw_fixed_pcd_o3d.paint_uniform_color([0.1, 0.1, 0.7])
+        # vis_list.append(raw_fixed_pcd_o3d)
+        # target_pcd_o3d = o3d.geometry.PointCloud()
+        # target_pcd_o3d.points = o3d.utility.Vector3dVector(target_coord)
+        # target_pcd_o3d.paint_uniform_color([0.7, 0.1, 0.1])
+        # vis_list.append(target_pcd_o3d)
+        # fixed_pcd_o3d = o3d.geometry.PointCloud()
+        # fixed_pcd_o3d.points = o3d.utility.Vector3dVector(fixed_coord)
+        # fixed_pcd_o3d.paint_uniform_color([0.1, 0.7, 0.1])
+        # vis_list.append(fixed_pcd_o3d)
+        # target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=self.rot_axis)
+        # target_pcd_shift_o3d = o3d.geometry.PointCloud()
+        # target_pcd_shift_o3d.points = o3d.utility.Vector3dVector(target_coord)
+        # target_pcd_shift_o3d.paint_uniform_color([0.7, 0.1, 0.7])
+        # target_pcd_shift_o3d.transform(target_pose_mat)
+        # vis_list.append(target_pcd_shift_o3d)
+        # o3d.visualization.draw_geometries(vis_list)
 
         # DEBUG: sanity check
         if fixed_coord.shape[0] == 0 or np.max(np.abs(fixed_coord)) == 0:
@@ -385,6 +394,8 @@ def crop_radius(points, center, radius):
 
 
 def crop_knn(points, ref_points, crop_center, k=20):
+    if points.shape[0] < k:
+        raise ValueError("The number of points should be larger than k")
     points_shifted = points - crop_center
     neigh = NearestNeighbors(n_neighbors=k)
     neigh.fit(points_shifted)
@@ -536,9 +547,12 @@ if __name__ == "__main__":
     volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
     crop_pcd = cfg.DATALOADER.AUGMENTATION.CROP_PCD
     crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
+    crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
     crop_noise = cfg.DATALOADER.AUGMENTATION.CROP_NOISE
     noise_level = cfg.DATALOADER.AUGMENTATION.NOISE_LEVEL
     rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
+    knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
+
     # Load dataset & data loader
     if cfg.ENV.GOAL_TYPE == "multimodal":
         dataset_folder = "dmorp_multimodal"
@@ -579,8 +593,10 @@ if __name__ == "__main__":
         crop_pcd=crop_pcd,
         crop_size=crop_size,
         crop_noise=crop_noise,
+        crop_strategy=crop_strategy,
         noise_level=noise_level,
         rot_axis=rot_axis,
+        knn_k=knn_k,
     )
 
     # Test data augmentation

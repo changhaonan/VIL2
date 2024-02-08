@@ -380,6 +380,7 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
     grid_size = cfg.PREPROCESS.GRID_SIZE
     target_rescale = cfg.PREPROCESS.TARGET_RESCALE
     rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
+    num_point_lower_bound = cfg.PREPROCESS.NUM_POINT_LOW_BOUND
     # Split info
     split_dict = {}
     train_split_info = os.path.join(data_dir, "split_info", "train_split.txt")
@@ -416,8 +417,12 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
         parent_pose_s, child_pose_s = parse_child_parent(data["multi_obj_start_obj_pose"])
         # Transform pose to matrix
         parent_pose_s = pose7d_to_mat(parent_pose_s)
-        if child_pcd_f.shape[0] == 0 or parent_pcd_f.shape[0] == 0:
+
+        if child_pcd_f.shape[0] <= num_point_lower_bound or parent_pcd_f.shape[0] <= num_point_lower_bound:
             continue
+        # Filter outliers
+        parent_pcd_f = parent_pcd_f[np.linalg.norm(parent_pcd_f, axis=1) <= 2.0]
+        child_pcd_f = child_pcd_f[np.linalg.norm(child_pcd_f, axis=1) <= 2.0]
 
         # Rescale the target pcd in case that there are not enough points after voxel downsampling
         # Shift all points to the origin
@@ -450,9 +455,23 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
         target_transform = np.eye(4, dtype=np.float32)
         target_transform[:3, 3] = target_pcd_center
 
-        if vis:
+        if (
+            vis
+            or target_pcd_arr.shape[0] < (num_point_lower_bound / 2)
+            or fixed_pcd_arr.shape[0] < num_point_lower_bound
+        ):
             visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
             visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, target_transform)
+            # Visualize & Check
+            raw_target_pcd = o3d.geometry.PointCloud()
+            raw_target_pcd.points = o3d.utility.Vector3dVector(child_pcd_f)
+            raw_target_pcd.transform(np.linalg.inv(parent_pose_s))
+            raw_target_pcd.paint_uniform_color([0.0, 0.651, 0.929])
+            raw_fixed_pcd = o3d.geometry.PointCloud()
+            raw_fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_f)
+            raw_fixed_pcd.transform(np.linalg.inv(parent_pose_s))
+            origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
+            o3d.visualization.draw_geometries([raw_target_pcd, raw_fixed_pcd, origin])
 
         # DEBUG: sanity check
         if np.max(np.abs(target_pcd_arr[:, :3])) == 0 or np.max(np.abs(fixed_pcd_arr[:, :3])) == 0:
