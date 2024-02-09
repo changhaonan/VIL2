@@ -322,6 +322,24 @@ class PcdPairDataset(Dataset):
         """database file containing information about preproscessed dataset"""
         return self._data
 
+    @staticmethod
+    def crop(pcd, crop_center, crop_strategy, **kwargs):
+        """Crop point cloud to a given size around a given center."""
+        if crop_strategy == "bbox":
+            crop_size = kwargs.get("crop_size", 0.2)
+            x_min, y_min, z_min = crop_center - crop_size
+            x_max, y_max, z_max = crop_center + crop_size
+            return crop_bbox(pcd, x_min, y_min, z_min, x_max, y_max, z_max)
+        elif crop_strategy == "radius":
+            crop_size = kwargs.get("crop_size", 0.2)
+            return crop_radius(pcd, crop_center, crop_size)
+        elif crop_strategy == "knn":
+            knn_k = kwargs.get("knn_k", 20)
+            ref_points = kwargs.get("ref_points", pcd)
+            return crop_knn(pcd, ref_points, crop_center, k=knn_k)
+        else:
+            raise ValueError("Invalid crop strategy")
+
 
 def elastic_distortion(pointcloud, granularity, magnitude):
     """Apply elastic distortion on sparse coordinate space.
@@ -621,16 +639,16 @@ if __name__ == "__main__":
         target_normal = target_feat[:, 3:6]
         target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
 
-        # utils.visualize_pcd_list(
-        #     coordinate_list=[target_coord, fixed_coord],
-        #     normal_list=[target_normal, fixed_normal],
-        #     color_list=[target_color, fixed_color],
-        #     pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
-        # )
+        utils.visualize_pcd_list(
+            coordinate_list=[target_coord, fixed_coord],
+            normal_list=[target_normal, fixed_normal],
+            color_list=[target_color, fixed_color],
+            pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
+        )
 
-        # utils.visualize_pcd_list(
-        #     coordinate_list=[target_coord, fixed_coord],
-        #     normal_list=[target_normal, fixed_normal],
-        #     color_list=[target_color, fixed_color],
-        #     pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
-        # )
+        utils.visualize_pcd_list(
+            coordinate_list=[target_coord, fixed_coord],
+            normal_list=[target_normal, fixed_normal],
+            color_list=[target_color, fixed_color],
+            pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
+        )

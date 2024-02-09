@@ -236,7 +236,8 @@ class TmorpModelV2:
     def experiment_name(self):
         noise_net_name = self.cfg.MODEL.NOISE_NET.NAME
         init_args = self.cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name]
-        return f"Tmorp_model"
+        crop_strategy = self.cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
+        return f"Tmorp_model_{crop_strategy}"
 
     def sample_bbox(self, coord, feat, crop_size: float, fake_crop=False):
         """Sample a bbox in the point cloud"""

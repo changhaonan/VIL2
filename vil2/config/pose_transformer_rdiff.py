@@ -9,7 +9,7 @@ ENV = dict(
 PREPROCESS = dict(
     GRID_SIZE=0.025,
     TARGET_RESCALE=3.0,
-    NUM_POINT_LOW_BOUND=30,
+    NUM_POINT_LOW_BOUND=40,
     NUM_POINT_HIGH_BOUND=400,
 )
 
@@ -26,7 +26,7 @@ DATALOADER = dict(
         CROP_PCD=True,
         CROP_SIZE=0.2,
         CROP_NOISE=0.1,
-        CROP_STRATEGY="knn",  # bbox, radius, knn
+        CROP_STRATEGY="bbox",  # bbox, radius, knn
         NOISE_LEVEL=0.5,
         ROT_AXIS="yz",
         KNN_K=20,

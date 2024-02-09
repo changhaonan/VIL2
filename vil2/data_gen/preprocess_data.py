@@ -419,7 +419,16 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
         parent_pose_s = pose7d_to_mat(parent_pose_s)
 
         if child_pcd_f.shape[0] <= num_point_lower_bound or parent_pcd_f.shape[0] <= num_point_lower_bound:
+            # target_pcd = o3d.geometry.PointCloud()
+            # target_pcd.points = o3d.utility.Vector3dVector(child_pcd_f)
+            # target_pcd.paint_uniform_color([1.0, 0.706, 0.0])
+            # fixed_pcd = o3d.geometry.PointCloud()
+            # fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_f)
+            # origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
+            # o3d.visualization.draw_geometries([target_pcd, fixed_pcd, origin])
+            print(f"Target pcd has {child_pcd_f.shape[0]} points, fixed pcd has {parent_pcd_f.shape[0]} points")
             continue
+
         # Filter outliers
         parent_pcd_f = parent_pcd_f[np.linalg.norm(parent_pcd_f, axis=1) <= 2.0]
         child_pcd_f = child_pcd_f[np.linalg.norm(child_pcd_f, axis=1) <= 2.0]
@@ -460,8 +469,8 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
             or target_pcd_arr.shape[0] < (num_point_lower_bound / 2)
             or fixed_pcd_arr.shape[0] < num_point_lower_bound
         ):
-            visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
-            visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, target_transform)
+            # visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
+            # visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, target_transform)
             # Visualize & Check
             raw_target_pcd = o3d.geometry.PointCloud()
             raw_target_pcd.points = o3d.utility.Vector3dVector(child_pcd_f)

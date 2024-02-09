@@ -36,6 +36,7 @@ if __name__ == "__main__":
     cfg_file = os.path.join(root_path, "config", "pose_transformer_rdiff.py")
     cfg = LazyConfig.load(cfg_file)
 
+    has_gt_crop = True
     # Load dataset & data loader
     train_dataset, val_dataset, test_dataset = build_dmorp_dataset(root_path, cfg)
 
@@ -46,7 +47,6 @@ if __name__ == "__main__":
         num_workers=cfg.DATALOADER.NUM_WORKERS,
         collate_fn=PcdPairCollator(),
     )
-
     test_data_loader = torch.utils.data.DataLoader(
         test_dataset,
         batch_size=cfg.DATALOADER.BATCH_SIZE,
@@ -80,7 +80,7 @@ if __name__ == "__main__":
     checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
 
     tmorp_model.load(checkpoint_file)
-    for i in range(10):
+    for i in range(20):
         # test_idx = np.random.randint(len(test_dataset))
         test_idx = i
         # Load the best checkpoint
@@ -92,43 +92,85 @@ if __name__ == "__main__":
         fixed_feat = test_data["fixed_feat"]
         target_pose = test_data["target_pose"]
 
-        # Sample a pcd
-        crop_size = 0.2
-        crop_fixed_coord, crop_fixed_feat = tmorp_model.sample_bbox(
-            fixed_coord, fixed_feat, crop_size=crop_size, fake_crop=True
-        )
+        # Init crop center
+        crop_center = target_pose[:3]
 
-        # Do prediction
-        pred_pose_mat = tmorp_model.predict(
-            target_coord, target_feat, crop_fixed_coord, crop_fixed_feat, target_pose=target_pose
-        )
+        for j in range(1):
+            # Iterate multiple times
+            # DEBUG: iterative seems to be not working
+            if not has_gt_crop:
+                # Sample a pcd
+                crop_size = 0.2
+                crop_fixed_coord, crop_fixed_feat = tmorp_model.sample_bbox(
+                    fixed_coord, fixed_feat, crop_size=crop_size, fake_crop=True
+                )
+            else:
+                # Paraters
+                knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
+                crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
+                crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
+                crop_indices = PcdPairDataset.crop(
+                    pcd=fixed_coord,
+                    crop_center=crop_center,
+                    crop_strategy=crop_strategy,
+                    ref_points=target_coord,
+                    crop_size=crop_size,
+                    knn_k=knn_k,
+                )
+                crop_fixed_coord = fixed_coord[crop_indices]
+                crop_fixed_feat = fixed_feat[crop_indices]
+                crop_fixed_coord[:, :3] -= crop_center
+                crop_fixed_feat[:, :3] -= crop_center
+                # DEBUG: Check the cropping result
+                fixed_pcd = o3d.geometry.PointCloud()
+                fixed_pcd.points = o3d.utility.Vector3dVector(fixed_coord)
+                fixed_color = np.zeros_like(fixed_coord)
+                fixed_color[:, 1] = 1
+                fixed_color[crop_indices, 0] = 1
+                fixed_pcd.colors = o3d.utility.Vector3dVector(fixed_color)
+                o3d.visualization.draw_geometries([fixed_pcd])
 
-        # DEBUG & VISUALIZATION
-        target_color = np.zeros_like(target_coord)
-        target_color[:, 0] = 1
-        fixed_color = np.zeros_like(crop_fixed_coord)
-        fixed_color[:, 1] = 1
+            # Do prediction
+            pred_pose_mat = tmorp_model.predict(
+                target_coord=target_coord,
+                target_feat=target_feat,
+                fixed_coord=crop_fixed_coord,
+                fixed_feat=crop_fixed_feat,
+                target_pose=target_pose,
+            )
 
-        fixed_normal = crop_fixed_feat[:, 3:6]
-        target_normal = target_feat[:, 3:6]
-        target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
-        utils.visualize_pcd_list(
-            coordinate_list=[target_coord, crop_fixed_coord],
-            normal_list=[target_normal, fixed_normal],
-            color_list=[target_color, fixed_color],
-            pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
-        )
+            # DEBUG & VISUALIZATION
+            target_color = np.zeros_like(target_coord)
+            target_color[:, 0] = 1
+            fixed_color = np.zeros_like(crop_fixed_coord)
+            fixed_color[:, 1] = 1
 
-        # utils.visualize_pcd_list(
-        #     coordinate_list=[target_coord, fixed_coord],
-        #     normal_list=[target_normal, fixed_normal],
-        #     color_list=[target_color, fixed_color],
-        #     pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
-        # )
-        # # Check the prediction
-        utils.visualize_pcd_list(
-            coordinate_list=[target_coord, crop_fixed_coord],
-            normal_list=[target_normal, fixed_normal],
-            color_list=[target_color, fixed_color],
-            pose_list=[pred_pose_mat, np.eye(4, dtype=np.float32)],
-        )
+            fixed_normal = crop_fixed_feat[:, 3:6]
+            target_normal = target_feat[:, 3:6]
+            target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
+            # utils.visualize_pcd_list(
+            #     coordinate_list=[target_coord, crop_fixed_coord],
+            #     normal_list=[target_normal, fixed_normal],
+            #     color_list=[target_color, fixed_color],
+            #     pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
+            # )
+
+            # utils.visualize_pcd_list(
+            #     coordinate_list=[target_coord, fixed_coord],
+            #     normal_list=[target_normal, fixed_normal],
+            #     color_list=[target_color, fixed_color],
+            #     pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
+            # )
+            # # Check the prediction
+            utils.visualize_pcd_list(
+                coordinate_list=[target_coord, crop_fixed_coord],
+                normal_list=[target_normal, fixed_normal],
+                color_list=[target_color, fixed_color],
+                pose_list=[pred_pose_mat, np.eye(4, dtype=np.float32)],
+            )
+
+            # Update crop_center
+            crop_center = pred_pose_mat[:3, 3] + crop_center
+            target_coord = (pred_pose_mat[:3, :3] @ target_coord.T).T + pred_pose_mat[:3, 3]
+            target_feat[:, :3] = (pred_pose_mat[:3, :3] @ target_feat[:, :3].T).T + pred_pose_mat[:3, 3]
+            target_feat[:, 3:6] = (pred_pose_mat[:3, :3] @ target_feat[:, 3:6].T).T
