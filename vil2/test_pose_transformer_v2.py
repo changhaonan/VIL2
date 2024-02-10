@@ -116,16 +116,18 @@ if __name__ == "__main__":
         fixed_pcd = o3d.geometry.PointCloud()
         fixed_pcd.points = o3d.utility.Vector3dVector(fixed_coord)
         fixed_pcd.paint_uniform_color([0, 1, 0])
-        o3d.visualization.draw_geometries([fixed_pcd])
+        # o3d.visualization.draw_geometries([fixed_pcd])
 
         for j in range(3):
             print(f"Status: {pred_status[j]} for {j}-th sample")
-            vis_list = []
+            vis_list = [fixed_pcd]
             # Crop fixed
             crop_fixed_coord = samples[sorted_indices[j]]["fixed_coord"]
             crop_fixed_pcd = o3d.geometry.PointCloud()
             crop_fixed_pcd.points = o3d.utility.Vector3dVector(crop_fixed_coord)
             crop_fixed_pcd.paint_uniform_color([1, 0, 0])
+            crop_center = samples[sorted_indices[j]]["crop_center"]
+            crop_fixed_pcd.translate(crop_center)
             vis_list.append(crop_fixed_pcd)
 
             # Target
@@ -134,6 +136,7 @@ if __name__ == "__main__":
             target_pcd.points = o3d.utility.Vector3dVector(target_coord)
             target_pcd.paint_uniform_color([0, 0, 1])
             target_pcd.transform(pred_pose_mat)
+            target_pcd.translate(crop_center)
             vis_list.append(target_pcd)
 
             # Origin

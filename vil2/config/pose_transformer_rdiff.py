@@ -63,11 +63,13 @@ MODEL = dict(
                 grid_sizes=[0.035, 0.06],
                 depths=[2, 3, 3],
                 dec_depths=[1, 1],
-                hidden_dims=[64, 128, 256],
+                # hidden_dims=[64, 128, 256], # V0
+                hidden_dims=[128, 256, 512],  # V2
                 n_heads=[4, 8, 8],
                 ks=[16, 24, 32],
                 in_dim=6,
-                fusion_projection_dim=256,
+                # fusion_projection_dim=256,  # V0
+                fusion_projection_dim=512,  # V2
             ),
         ),
     ),

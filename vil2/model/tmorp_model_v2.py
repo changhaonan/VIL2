@@ -52,7 +52,7 @@ class LitPoseTransformerV2(L.LightningModule):
         rx_loss = F.mse_loss(pose9d_pred_valid[:, 3:6], pose9d_valid[:, 3:6])
         ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
         # sum
-        loss = trans_loss + rx_loss + ry_loss + status_loss
+        loss = trans_loss + rx_loss + ry_loss + 0.1 * status_loss
         # log
         self.log("tr_status_loss", status_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("tr_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
@@ -77,7 +77,7 @@ class LitPoseTransformerV2(L.LightningModule):
         rx_loss = F.mse_loss(pose9d_pred_valid[:, 3:6], pose9d_valid[:, 3:6])
         ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
         # sum
-        loss = trans_loss + rx_loss + ry_loss + status_loss
+        loss = trans_loss + rx_loss + ry_loss + 0.1 * status_loss
         # log
         self.log("te_status_loss", status_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("te_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
@@ -101,7 +101,7 @@ class LitPoseTransformerV2(L.LightningModule):
         rx_loss = F.mse_loss(pose9d_pred_valid[:, 3:6], pose9d_valid[:, 3:6])
         ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
         # sum
-        loss = trans_loss + rx_loss + ry_loss + status_loss
+        loss = trans_loss + rx_loss + ry_loss + 0.1 * status_loss
         # log
         self.log("v_status_loss", status_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("v_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
@@ -305,6 +305,7 @@ class TmorpModelV2:
                 "fixed_feat": crop_fixed_feat,
                 "target_pose": np.zeros(9),
                 "is_valid_crop": np.ones(1),
+                "crop_center": crop_center,  # Aux info
             }
             samples.append(sample)
         return PcdPairCollator()(samples), samples

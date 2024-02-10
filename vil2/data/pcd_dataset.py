@@ -172,9 +172,8 @@ class PcdPairDataset(Dataset):
 
     def __getitem__(self, idx):
         idx = idx % len(self._data)
-        # Parse data from the dataset
+        # Parse data from the dataset & Convert to float32
         target_pcd, fixed_pcd, target_label, fixed_label, pose = self.parse_pcd_data(idx)
-        # Convert to float32
         target_pcd = target_pcd.astype(np.float32)
         fixed_pcd = fixed_pcd.astype(np.float32)
         target_label = np.array([target_label]).astype(np.int64)
@@ -264,16 +263,18 @@ class PcdPairDataset(Dataset):
             # DEBUG:
             raw_fixed_coord -= crop_center
 
-        # Apply translation disturbance after cropping
-        
-        coordinate, normal, color, pose = random_translation(
-            coordinate=coordinate,
-            normal=normal,
-            pose=pose,
-            color=color,
-            offset_type="given",
-            offset=random_offset,
-        )
+        if self.mode == "train" or self.mode == "val":
+            # Apply translation disturbance after cropping
+            fixed_disturbance = (np.random.rand(3) * 2 - 1.0) * self.noise_level * 0.1
+            target_disturbance = (np.random.rand(3) * 2 - 1.0) * self.noise_level * 0.1
+            fixed_shift = np.eye(4)
+            fixed_shift[:3, 3] = -fixed_disturbance
+            fixed_pose = fixed_pose @ fixed_shift
+            target_shift = np.eye(4)
+            target_shift[:3, 3] = -target_disturbance
+            target_pose = target_pose @ target_shift
+            fixed_coord += fixed_disturbance
+            target_coord += target_disturbance
 
         target_pose = utils.mat_to_pose9d(np.linalg.inv(fixed_pose) @ target_pose, rot_axis=self.rot_axis)
         fixed_pose = utils.mat_to_pose9d(fixed_pose, rot_axis=self.rot_axis)
@@ -501,22 +502,9 @@ def random_on_pose(
 def rotate_around_axis(coordinate, normal, color, pose, axis, angle, center_point=None):
     axis = axis / np.linalg.norm(axis)
     rotation_matrix = R.from_rotvec(axis * angle).as_matrix()
-    transformation_matrix = np.eye(4)
-    transformation_matrix[:3, :3] = rotation_matrix
 
-    # Manually apply the transformation to each point and normal
-    transformed_points = []
-    transformed_normals = []
-    for point, normal in zip(coordinate, normal):
-        # Convert to homogeneous coordinate and transform
-        point_homogeneous = np.append(point, 1)
-        transformed_point_homogeneous = np.dot(transformation_matrix, point_homogeneous)
-        transformed_point = transformed_point_homogeneous[:3]
-        transformed_points.append(transformed_point)
-
-        # Transform the normal (only rotation)
-        transformed_normal = np.dot(rotation_matrix, normal)
-        transformed_normals.append(transformed_normal)
+    transformed_points = (rotation_matrix @ coordinate.T).T
+    transformed_normals = (rotation_matrix @ normal.T).T
 
     pose_transform = np.eye(4)
     pose_transform[:3, :3] = np.linalg.inv(rotation_matrix)
@@ -534,27 +522,13 @@ def random_translation(coordinate, normal, color, pose, offset_type: str = "give
     else:
         assert offset is not None
 
-    transformation_matrix = np.eye(4)
-    transformation_matrix[:3, 3] = offset
-
-    # Manually apply the transformation to each point and normal
-    transformed_points = []
-    transformed_normals = []
-    for point, normal in zip(coordinate, normal):
-        # Convert to homogeneous coordinate and transform
-        point_homogeneous = np.append(point, 1)
-        transformed_point_homogeneous = np.dot(transformation_matrix, point_homogeneous)
-        transformed_point = transformed_point_homogeneous[:3]
-        transformed_points.append(transformed_point)
-
-        # Transform the normal (only rotation)
-        transformed_normal = normal
-        transformed_normals.append(transformed_normal)
+    transformed_points = coordinate + offset
+    transformed_normals = normal
 
     pose_transform = np.eye(4)
     pose_transform[:3, 3] = -offset
     pose = pose @ pose_transform
-    return np.array(transformed_points), np.array(transformed_normals), color, pose
+    return transformed_points, transformed_normals, color, pose
 
 
 def random_segment_drop(coordinate, normal, color, pose):
