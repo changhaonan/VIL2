@@ -136,6 +136,9 @@ if __name__ == "__main__":
             target_pcd.transform(pred_pose_mat)
             vis_list.append(target_pcd)
 
+            # Origin
+            origin_pcd = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+            vis_list.append(origin_pcd)
             o3d.visualization.draw_geometries(vis_list)
 
         # for j in range(10):
