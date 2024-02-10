@@ -102,7 +102,6 @@ class PcdPairDataset(Dataset):
     def augment_pcd_instance(self, coordinate, normal, color, label, pose, disable_rot: bool = False):
         """Augment a single point cloud instance."""
         if self.is_elastic_distortion:
-            # coordinate = elastic_distortion(coordinate, 0.05, 0.05)
             coordinate = elastic_distortion(coordinate, 0.1, 0.1)
         if self.is_random_distortion:
             coordinate, color, normal, label = random_around_points(
@@ -264,6 +263,17 @@ class PcdPairDataset(Dataset):
             fixed_coord -= crop_center
             # DEBUG:
             raw_fixed_coord -= crop_center
+
+        # Apply translation disturbance after cropping
+        
+        coordinate, normal, color, pose = random_translation(
+            coordinate=coordinate,
+            normal=normal,
+            pose=pose,
+            color=color,
+            offset_type="given",
+            offset=random_offset,
+        )
 
         target_pose = utils.mat_to_pose9d(np.linalg.inv(fixed_pose) @ target_pose, rot_axis=self.rot_axis)
         fixed_pose = utils.mat_to_pose9d(fixed_pose, rot_axis=self.rot_axis)

@@ -51,7 +51,7 @@ class PoseTransformerV2(nn.Module):
 
         # Learnable embedding
         self.pose_embedding = nn.Embedding(1, hidden_dims[-1])
-
+        self.status_embedding = nn.Embedding(1, hidden_dims[-1])
         # Pose refiner
         self.refine_decoders = nn.ModuleList()
         self.conv1x1 = nn.ModuleList()
@@ -121,7 +121,8 @@ class PoseTransformerV2(nn.Module):
         target_feat, target_feat_mask = to_dense_batch(target_feat, target_batch_index)
 
         pose_token = self.pose_embedding.weight[0].unsqueeze(0).expand(target_feat.size(0), -1)
-        target_feat = torch.cat((pose_token[:, None, :], target_feat), dim=1)
+        status_token = self.status_embedding.weight[0].unsqueeze(0).expand(target_feat.size(0), -1)
+        target_feat = torch.cat((pose_token[:, None, :], status_token[:, None, :], target_feat), dim=1)
         target_feat_mask = torch.cat((torch.ones_like(target_feat_mask[:, :1]), target_feat_mask), dim=1)
         target_feat_padding_mask = target_feat_mask == 0
 
@@ -177,14 +178,10 @@ class PoseTransformerV2(nn.Module):
 
         # Decode pose & status
         pose_pred = self.pose_decoder(target_feat[:, 0, :])
-        status_pred = self.status_decoder(target_feat[:, 0, :])
+        status_pred = self.status_decoder(target_feat[:, 1, :])
 
         # DEBUG:
         # Check the existence of nan
         if torch.isnan(pose_pred).any():
             print("Nan exists in the pose")
         return pose_pred, status_pred
-
-    # def check_exist_batch(self, batch):
-    #     """Debug method"""
-    #     pass
