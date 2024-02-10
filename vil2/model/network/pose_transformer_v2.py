@@ -86,6 +86,12 @@ class PoseTransformerV2(nn.Module):
             nn.ReLU(inplace=True),
             nn.Linear(fusion_projection_dim, 9),
         )
+        self.status_decoder = nn.Sequential(
+            nn.Linear(hidden_dims[0], fusion_projection_dim),
+            nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
+            nn.ReLU(inplace=True),
+            nn.Linear(fusion_projection_dim, 2),
+        )
 
     def encode_cond(
         self,
@@ -169,14 +175,15 @@ class PoseTransformerV2(nn.Module):
             # fixed_coord_batch, mask = to_dense_batch(fixed_coord, fixed_batch_index)
             # visualize_tensor_pcd(fixed_coord_batch[0])
 
-        # Decode pose
+        # Decode pose & status
         pose_pred = self.pose_decoder(target_feat[:, 0, :])
+        status_pred = self.status_decoder(target_feat[:, 0, :])
 
         # DEBUG:
         # Check the existence of nan
         if torch.isnan(pose_pred).any():
             print("Nan exists in the pose")
-        return pose_pred
+        return pose_pred, status_pred
 
     # def check_exist_batch(self, batch):
     #     """Debug method"""

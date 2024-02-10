@@ -21,6 +21,10 @@ from vil2.model.network.geometric import batch2offset
 from vil2.model.network.pose_transformer_v2 import PoseTransformerV2
 import vil2.utils.misc_utils as utils
 
+# DataUtils
+from vil2.data.pcd_dataset import PcdPairDataset
+from vil2.data.pcd_datalodaer import PcdPairCollator
+
 
 class LitPoseTransformerV2(L.LightningModule):
     """Lightning module for Pose Transformer"""
@@ -37,13 +41,20 @@ class LitPoseTransformerV2(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         pose9d = batch["target_pose"].to(torch.float32)
-        pose9d_pred = self.forward(batch)
+        is_valid_crop = batch["is_valid_crop"].to(torch.long)
+        pred_pose9d, pred_status = self.forward(batch)
         # compute loss
-        trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])
-        rx_loss = F.mse_loss(pose9d_pred[:, 3:6], pose9d[:, 3:6])
-        ry_loss = F.mse_loss(pose9d_pred[:, 6:9], pose9d[:, 6:9])
-        loss = trans_loss + rx_loss + ry_loss
+        status_loss = F.cross_entropy(pred_status, is_valid_crop)
+        # mask out invalid crops
+        pose9d_valid = pose9d[is_valid_crop == 1]
+        pose9d_pred_valid = pred_pose9d[is_valid_crop == 1]
+        trans_loss = F.mse_loss(pose9d_pred_valid[:, :3], pose9d_valid[:, :3])
+        rx_loss = F.mse_loss(pose9d_pred_valid[:, 3:6], pose9d_valid[:, 3:6])
+        ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
+        # sum
+        loss = trans_loss + rx_loss + ry_loss + status_loss
         # log
+        self.log("tr_status_loss", status_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("tr_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("tr_rx_loss", rx_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("tr_ry_loss", ry_loss, sync_dist=True, batch_size=self.batch_size)
@@ -55,13 +66,20 @@ class LitPoseTransformerV2(L.LightningModule):
 
     def test_step(self, batch, batch_idx):
         pose9d = batch["target_pose"].to(torch.float32)
-        pose9d_pred = self.forward(batch)
+        is_valid_crop = batch["is_valid_crop"].to(torch.long)
+        pred_pose9d, pred_status = self.forward(batch)
         # compute loss
-        trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])
-        rx_loss = F.mse_loss(pose9d_pred[:, 3:6], pose9d[:, 3:6])
-        ry_loss = F.mse_loss(pose9d_pred[:, 6:9], pose9d[:, 6:9])
-        loss = trans_loss + rx_loss + ry_loss
+        status_loss = F.cross_entropy(pred_status, is_valid_crop)
+        # mask out invalid crops
+        pose9d_valid = pose9d[is_valid_crop == 1]
+        pose9d_pred_valid = pred_pose9d[is_valid_crop == 1]
+        trans_loss = F.mse_loss(pose9d_pred_valid[:, :3], pose9d_valid[:, :3])
+        rx_loss = F.mse_loss(pose9d_pred_valid[:, 3:6], pose9d_valid[:, 3:6])
+        ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
+        # sum
+        loss = trans_loss + rx_loss + ry_loss + status_loss
         # log
+        self.log("te_status_loss", status_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("te_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("te_rx_loss", rx_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("te_ry_loss", ry_loss, sync_dist=True, batch_size=self.batch_size)
@@ -72,13 +90,20 @@ class LitPoseTransformerV2(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         pose9d = batch["target_pose"].to(torch.float32)
-        pose9d_pred = self.forward(batch)
+        is_valid_crop = batch["is_valid_crop"].to(torch.long)
+        pred_pose9d, pred_status = self.forward(batch)
         # compute loss
-        trans_loss = F.mse_loss(pose9d_pred[:, :3], pose9d[:, :3])
-        rx_loss = F.mse_loss(pose9d_pred[:, 3:6], pose9d[:, 3:6])
-        ry_loss = F.mse_loss(pose9d_pred[:, 6:9], pose9d[:, 6:9])
-        loss = trans_loss + rx_loss + ry_loss
+        status_loss = F.cross_entropy(pred_status, is_valid_crop)
+        # mask out invalid crops
+        pose9d_valid = pose9d[is_valid_crop == 1]
+        pose9d_pred_valid = pred_pose9d[is_valid_crop == 1]
+        trans_loss = F.mse_loss(pose9d_pred_valid[:, :3], pose9d_valid[:, :3])
+        rx_loss = F.mse_loss(pose9d_pred_valid[:, 3:6], pose9d_valid[:, 3:6])
+        ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
+        # sum
+        loss = trans_loss + rx_loss + ry_loss + status_loss
         # log
+        self.log("v_status_loss", status_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("v_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("v_rx_loss", rx_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("v_ry_loss", ry_loss, sync_dist=True, batch_size=self.batch_size)
@@ -106,8 +131,8 @@ class LitPoseTransformerV2(L.LightningModule):
         )
 
         # forward
-        pose9d_pred = self.pose_transformer(enc_target_points, all_enc_fixed_points)
-        return pose9d_pred
+        pred_pose9d, pred_status = self.pose_transformer(enc_target_points, all_enc_fixed_points)
+        return pred_pose9d.to(torch.float32), pred_status.to(torch.float32)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
@@ -190,40 +215,39 @@ class TmorpModelV2:
 
     def predict(
         self,
-        target_coord: np.ndarray,
-        target_feat: np.ndarray,
-        fixed_coord: np.ndarray,
-        fixed_feat: np.ndarray,
+        target_coord: np.ndarray | None = None,
+        target_feat: np.ndarray | None = None,
+        fixed_coord: np.ndarray | None = None,
+        fixed_feat: np.ndarray | None = None,
+        batch=None,
         target_pose=None,
     ) -> Any:
         self.lightning_pose_transformer.eval()
         # Assemble batch
-        target_batch_idx = np.array([0] * target_coord.shape[0], dtype=np.int64)
-        fixed_batch_idx = np.array([0] * fixed_coord.shape[0], dtype=np.int64)
-        batch = {
-            "target_coord": target_coord,
-            "target_feat": target_feat,
-            "target_batch_index": target_batch_idx,
-            "fixed_coord": fixed_coord,
-            "fixed_feat": fixed_feat,
-            "fixed_batch_index": fixed_batch_idx,
-        }
-        # Put to torch
-        for key in batch.keys():
-            batch[key] = torch.from_numpy(batch[key])
-        pred_pose9d = self.lightning_pose_transformer(batch)
-        pred_pose9d = pred_pose9d.detach().cpu().numpy()[0]
-
-        print(f"Pred pose: {pred_pose9d}")
+        if batch is None:
+            target_batch_idx = np.array([0] * target_coord.shape[0], dtype=np.int64)
+            fixed_batch_idx = np.array([0] * fixed_coord.shape[0], dtype=np.int64)
+            batch = {
+                "target_coord": target_coord,
+                "target_feat": target_feat,
+                "target_batch_index": target_batch_idx,
+                "fixed_coord": fixed_coord,
+                "fixed_feat": fixed_feat,
+                "fixed_batch_index": fixed_batch_idx,
+            }
+            # Put to torch
+            for key in batch.keys():
+                batch[key] = torch.from_numpy(batch[key])
+        pred_pose9d, pred_status = self.lightning_pose_transformer(batch)
+        pred_status = torch.softmax(pred_status, dim=1)
+        pred_pose9d = pred_pose9d.detach().cpu().numpy()
+        pred_status = pred_status.detach().cpu().numpy()
         if target_pose is not None:
-            print(f"Gt pose: {target_pose}")
-            trans_loss = np.mean(np.square(pred_pose9d[:3] - target_pose[:3]))
-            rx_loss = np.mean(np.square(pred_pose9d[3:6] - target_pose[3:6]))
-            ry_loss = np.mean(np.square(pred_pose9d[6:9] - target_pose[6:9]))
+            trans_loss = np.mean(np.square(pred_pose9d[:, :3] - target_pose[:, :3]))
+            rx_loss = np.mean(np.square(pred_pose9d[:, 3:6] - target_pose[:, 3:6]))
+            ry_loss = np.mean(np.square(pred_pose9d[:, 6:9] - target_pose[:, 6:9]))
             print(f"trans_loss: {trans_loss}, rx_loss: {rx_loss}, ry_loss: {ry_loss}")
-        # Convert pose9d to matrix
-        pred_pose_mat = utils.pose9d_to_mat(pred_pose9d, rot_axis=self.rot_axis)
-        return pred_pose_mat
+        return pred_pose9d, pred_status
 
     def load(self, checkpoint_path: str) -> None:
         print(f"Loading checkpoint from {checkpoint_path}")
@@ -239,61 +263,48 @@ class TmorpModelV2:
         crop_strategy = self.cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
         return f"Tmorp_model_{crop_strategy}"
 
-    def sample_bbox(self, coord, feat, crop_size: float, fake_crop=False):
-        """Sample a bbox in the point cloud"""
-        if fake_crop:
-            return coord, feat
-        max_try = 10
-        for i in range(max_try):
-            # Compute the occupied bbox
-            min_coord = np.min(coord, axis=0)
-            max_coord = np.max(coord, axis=0)
-            bbox_size = max_coord - min_coord
-            # Sample a bbox
-            bbox_center = min_coord + bbox_size / 2
-            bbox_center = bbox_center * (1 + np.random.uniform(-0.2, 0.2, 3))
-            bbox_min = bbox_center - crop_size
-            bbox_max = bbox_center + crop_size
+    def batch_random_sample(
+        self,
+        batch_size: int,
+        target_coord: np.ndarray,
+        target_feat: np.ndarray,
+        fixed_coord: np.ndarray,
+        fixed_feat: np.ndarray,
+        crop_strategy: str,
+        **kwargs,
+    ) -> Any:
+        crop_size = kwargs.get("crop_size", 0.2)
+        knn_k = kwargs.get("knn_k", 20)
 
-            # Crop the point cloud
-            inds = self.crop(coord, *bbox_min, *bbox_max)
-            if inds.sum() > 0:
-                break
-            if i == max_try - 1:
-                inds = np.arange(len(coord))
-
-        coord = coord[inds]
-        feat = feat[inds]
-
-        coord_center = bbox_center
-        coord -= coord_center
-        feat[:, :3] -= coord_center
-
-        return coord, feat
-
-    def crop(self, points, x_min, y_min, z_min, x_max, y_max, z_max):
-        if x_max <= x_min or y_max <= y_min or z_max <= z_min:
-            raise ValueError(
-                "We should have x_min < x_max and y_min < y_max and z_min < z_max. But we got"
-                " (x_min = {x_min}, y_min = {y_min}, z_min = {z_min},"
-                " x_max = {x_max}, y_max = {y_max}, z_max = {z_max})".format(
-                    x_min=x_min,
-                    x_max=x_max,
-                    y_min=y_min,
-                    y_max=y_max,
-                    z_min=z_min,
-                    z_max=z_max,
-                )
+        samples = []
+        # Randomly sample batch
+        for i in range(batch_size):
+            # Do random crop sampling
+            x_min, y_min, z_min = fixed_coord.min(axis=0)
+            x_max, y_max, z_max = fixed_coord.max(axis=0)
+            crop_center = np.random.rand(3) * (
+                np.array([x_max, y_max, z_max]) - np.array([x_min, y_min, z_min])
+            ) + np.array([x_min, y_min, z_min])
+            crop_indices = PcdPairDataset.crop(
+                pcd=fixed_coord,
+                crop_center=crop_center,
+                crop_strategy=crop_strategy,
+                ref_points=target_coord,
+                crop_size=crop_size,
+                knn_k=knn_k,
             )
-        inds = np.all(
-            [
-                (points[:, 0] >= x_min),
-                (points[:, 0] < x_max),
-                (points[:, 1] >= y_min),
-                (points[:, 1] < y_max),
-                (points[:, 2] >= z_min),
-                (points[:, 2] < z_max),
-            ],
-            axis=0,
-        )
-        return inds
+            crop_fixed_coord = fixed_coord[crop_indices]
+            crop_fixed_feat = fixed_feat[crop_indices]
+            crop_fixed_coord[:, :3] -= crop_center
+            crop_fixed_feat[:, :3] -= crop_center
+            # Convert to batch
+            sample = {
+                "target_coord": target_coord,
+                "target_feat": target_feat,
+                "fixed_coord": crop_fixed_coord,
+                "fixed_feat": crop_fixed_feat,
+                "target_pose": np.zeros(9),
+                "is_valid_crop": np.ones(1),
+            }
+            samples.append(sample)
+        return PcdPairCollator()(samples), samples

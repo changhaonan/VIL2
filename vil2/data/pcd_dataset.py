@@ -47,6 +47,7 @@ class PcdPairDataset(Dataset):
         crop_size: float = 0.2,
         crop_noise: float = 0.1,
         crop_strategy: str = "knn",
+        random_crop_prob: float = 0.5,
         noise_level: float = 0.1,
         rot_axis: str = "xy",
         **kwargs,
@@ -62,8 +63,8 @@ class PcdPairDataset(Dataset):
         self.crop_size = crop_size
         self.crop_noise = crop_noise
         self.crop_strategy = crop_strategy
-        if self.crop_strategy == "knn":
-            self.knn_k = kwargs.get("knn_k", 20)
+        self.knn_k = kwargs.get("knn_k", 20)
+        self.random_crop_prob = random_crop_prob
         self.noise_level = noise_level  # number of noise levels
         if volume_augmentations_path is not None:
             self.volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r"), Loader=yaml.FullLoader))
@@ -209,26 +210,47 @@ class PcdPairDataset(Dataset):
             )  # Disable rotation for fixed pcd
 
         # Crop pcd to focus
+        is_valid_crop = True
         if self.crop_pcd:
+            random_val = random()
+            x_min, y_min, z_min = fixed_coord.min(axis=0)
+            x_max, y_max, z_max = fixed_coord.max(axis=0)
+            target_center = np.mean(target_coord, axis=0)
+            target_radius = np.linalg.norm(target_coord - target_center, axis=1).max()
+            # Apply crop around the target pose
             max_crop_attempts = 10
             for i in range(max_crop_attempts):
-                crop_center = target_pose[:3, 3] + np.random.rand(3) * 2 * self.crop_noise - self.crop_noise
+                if random_val > self.random_crop_prob:
+                    crop_center = target_pose[:3, 3] + np.random.rand(3) * 2 * self.crop_noise - self.crop_noise
+                    is_valid_crop = True
+                else:
+                    crop_center = np.random.rand(3) * (
+                        np.array([x_max, y_max, z_max]) - np.array([x_min, y_min, z_min])
+                    ) + np.array([x_min, y_min, z_min])
+                    if np.linalg.norm(crop_center - target_pose[:3, 3]) < self.crop_noise * np.sqrt(3):
+                        is_valid_crop = True
+                    else:
+                        is_valid_crop = False
                 crop_size = (0.5 * np.random.rand(3) + 0.5) * self.crop_size
+                crop_size = np.clip(
+                    crop_size, a_min=target_radius, a_max=None
+                )  # Cannot be smaller than the target radius
                 x_min, y_min, z_min = crop_center - crop_size
                 x_max, y_max, z_max = crop_center + crop_size
-                if self.crop_strategy == "bbox":
-                    fixed_indices = crop_bbox(fixed_coord, x_min, y_min, z_min, x_max, y_max, z_max)
-                elif self.crop_strategy == "radius":
-                    fixed_indices = crop_radius(fixed_coord, crop_center, self.crop_size)
-                elif self.crop_strategy == "knn":
-                    fixed_indices = crop_knn(fixed_coord, target_coord, crop_center, k=self.knn_k)
-                else:
-                    raise ValueError("Invalid crop strategy")
-                if fixed_indices.sum() > 0:  # Make sure there are points in the crop
+                fixed_indices = PcdPairDataset.crop(
+                    pcd=fixed_coord,
+                    crop_center=crop_center,
+                    crop_strategy=self.crop_strategy,
+                    crop_size=crop_size,
+                    knn_k=self.knn_k,
+                    ref_points=target_coord,
+                )
+                if fixed_indices.sum() > 20:  # Make sure there are at least 20 points in the crop
                     break
                 if i == max_crop_attempts - 1:
                     print("Warning: Failed to find a crop")
                     fixed_indices = np.arange(len(fixed_coord))
+
             raw_fixed_coord = copy.deepcopy(fixed_coord)
             fixed_coord = fixed_coord[fixed_indices]
             if self.add_normals:
@@ -278,6 +300,7 @@ class PcdPairDataset(Dataset):
         # target_pcd_shift_o3d.paint_uniform_color([0.7, 0.1, 0.7])
         # target_pcd_shift_o3d.transform(target_pose_mat)
         # vis_list.append(target_pcd_shift_o3d)
+        # print(f"Crop is valid: {is_valid_crop}")
         # o3d.visualization.draw_geometries(vis_list)
 
         # DEBUG: sanity check
@@ -308,6 +331,7 @@ class PcdPairDataset(Dataset):
             "fixed_feat": fixed_feat.astype(np.float32),
             "fixed_pose": fixed_pose.astype(np.float32),
             "fixed_label": fixed_label.astype(np.int64),
+            "is_valid_crop": np.array([is_valid_crop]).astype(np.int64),
         }
 
     @staticmethod
@@ -337,6 +361,15 @@ class PcdPairDataset(Dataset):
             knn_k = kwargs.get("knn_k", 20)
             ref_points = kwargs.get("ref_points", pcd)
             return crop_knn(pcd, ref_points, crop_center, k=knn_k)
+        elif crop_strategy == "knn_bbox":
+            # Get knn first, and then crop the bbox
+            knn_k = kwargs.get("knn_k", 20)
+            ref_points = kwargs.get("ref_points", pcd)
+            knn_indices = crop_knn(pcd, ref_points, crop_center, k=knn_k)
+            knn_pcd = pcd[knn_indices]
+            x_min, y_min, z_min = knn_pcd.min(axis=0)
+            x_max, y_max, z_max = knn_pcd.max(axis=0)
+            return crop_bbox(pcd, x_min, y_min, z_min, x_max, y_max, z_max)
         else:
             raise ValueError("Invalid crop strategy")
 
@@ -566,6 +599,7 @@ if __name__ == "__main__":
     crop_pcd = cfg.DATALOADER.AUGMENTATION.CROP_PCD
     crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
     crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
+    random_crop_prob = cfg.DATALOADER.AUGMENTATION.RANDOM_CROP_PROB
     crop_noise = cfg.DATALOADER.AUGMENTATION.CROP_NOISE
     noise_level = cfg.DATALOADER.AUGMENTATION.NOISE_LEVEL
     rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
@@ -612,13 +646,14 @@ if __name__ == "__main__":
         crop_size=crop_size,
         crop_noise=crop_noise,
         crop_strategy=crop_strategy,
+        random_crop_prob=random_crop_prob,
         noise_level=noise_level,
         rot_axis=rot_axis,
         knn_k=knn_k,
     )
 
     # Test data augmentation
-    for i in range(10):
+    for i in range(20):
         # random_idx = np.random.randint(0, len(dataset))
         random_idx = i
         data = dataset[random_idx]

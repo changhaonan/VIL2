@@ -13,6 +13,7 @@ class PcdPairCollator:
             "target_pose": [],
             "target_batch_index": [],
             "fixed_batch_index": [],
+            "is_valid_crop": [],
         }
         for sample_id, item in enumerate(samples):
             target["target_coord"].append(item["target_coord"])  # (N, 3)
@@ -22,6 +23,7 @@ class PcdPairCollator:
             target["fixed_feat"].append(item["fixed_feat"])  # (M, 3)
             target["fixed_batch_index"].append(np.full([len(item["fixed_coord"])], fill_value=sample_id))  # (M,)
             target["target_pose"].append(item["target_pose"][None, :])  #
+            target["is_valid_crop"].append(item["is_valid_crop"])
 
         return {k: torch.from_numpy(np.concatenate(v)) for k, v in target.items()}
 
@@ -44,7 +46,7 @@ if __name__ == "__main__":
         volume_augmentations_path=f"{root_dir}/config/va_rotation.yaml",
         noise_level=0.5,
         crop_pcd=False,
-        crop_size=0.4
+        crop_size=0.4,
     )
     dataset.set_mode("train")
 

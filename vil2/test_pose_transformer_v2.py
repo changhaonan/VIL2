@@ -36,7 +36,6 @@ if __name__ == "__main__":
     cfg_file = os.path.join(root_path, "config", "pose_transformer_rdiff.py")
     cfg = LazyConfig.load(cfg_file)
 
-    has_gt_crop = True
     # Load dataset & data loader
     train_dataset, val_dataset, test_dataset = build_dmorp_dataset(root_path, cfg)
 
@@ -67,12 +66,6 @@ if __name__ == "__main__":
     save_path = os.path.join(save_dir, model_name)
     os.makedirs(save_dir, exist_ok=True)
 
-    # Do test
-    # tmorp_model.test(
-    #     test_data_loader=test_data_loader,
-    #     save_path=save_path,
-    # )
-
     checkpoint_path = f"{save_path}/checkpoints"
     # Select the best checkpoint
     checkpoints = os.listdir(checkpoint_path)
@@ -94,83 +87,147 @@ if __name__ == "__main__":
 
         # Init crop center
         crop_center = target_pose[:3]
+        crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
+        knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
+        crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
 
-        for j in range(1):
-            # Iterate multiple times
-            # DEBUG: iterative seems to be not working
-            if not has_gt_crop:
-                # Sample a pcd
-                crop_size = 0.2
-                crop_fixed_coord, crop_fixed_feat = tmorp_model.sample_bbox(
-                    fixed_coord, fixed_feat, crop_size=crop_size, fake_crop=True
-                )
-            else:
-                # Paraters
-                knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
-                crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
-                crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
-                crop_indices = PcdPairDataset.crop(
-                    pcd=fixed_coord,
-                    crop_center=crop_center,
-                    crop_strategy=crop_strategy,
-                    ref_points=target_coord,
-                    crop_size=crop_size,
-                    knn_k=knn_k,
-                )
-                crop_fixed_coord = fixed_coord[crop_indices]
-                crop_fixed_feat = fixed_feat[crop_indices]
-                crop_fixed_coord[:, :3] -= crop_center
-                crop_fixed_feat[:, :3] -= crop_center
-                # DEBUG: Check the cropping result
-                fixed_pcd = o3d.geometry.PointCloud()
-                fixed_pcd.points = o3d.utility.Vector3dVector(fixed_coord)
-                fixed_color = np.zeros_like(fixed_coord)
-                fixed_color[:, 1] = 1
-                fixed_color[crop_indices, 0] = 1
-                fixed_pcd.colors = o3d.utility.Vector3dVector(fixed_color)
-                o3d.visualization.draw_geometries([fixed_pcd])
+        # Batch sampling
+        batch_size = 32
+        sample_batch, samples = tmorp_model.batch_random_sample(
+            batch_size,
+            target_coord=target_coord,
+            target_feat=target_feat,
+            fixed_coord=fixed_coord,
+            fixed_feat=fixed_feat,
+            crop_strategy=crop_strategy,
+            crop_size=crop_size,
+            knn_k=knn_k,
+        )
 
-            # Do prediction
-            pred_pose_mat = tmorp_model.predict(
-                target_coord=target_coord,
-                target_feat=target_feat,
-                fixed_coord=crop_fixed_coord,
-                fixed_feat=crop_fixed_feat,
-                target_pose=target_pose,
-            )
+        pred_pose9d, pred_status = tmorp_model.predict(batch=sample_batch)
 
-            # DEBUG & VISUALIZATION
-            target_color = np.zeros_like(target_coord)
-            target_color[:, 0] = 1
-            fixed_color = np.zeros_like(crop_fixed_coord)
-            fixed_color[:, 1] = 1
+        # Rank the prediction by status
+        sorted_indices = np.argsort(pred_status[:, 1])
+        sorted_indices = sorted_indices[::-1]
+        pred_pose9d = pred_pose9d[sorted_indices]
+        pred_status = pred_status[sorted_indices]
 
-            fixed_normal = crop_fixed_feat[:, 3:6]
-            target_normal = target_feat[:, 3:6]
-            target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
-            # utils.visualize_pcd_list(
-            #     coordinate_list=[target_coord, crop_fixed_coord],
-            #     normal_list=[target_normal, fixed_normal],
-            #     color_list=[target_color, fixed_color],
-            #     pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
-            # )
+        # Check the result
+        fixed_pcd = o3d.geometry.PointCloud()
+        fixed_pcd.points = o3d.utility.Vector3dVector(fixed_coord)
+        fixed_pcd.paint_uniform_color([0, 1, 0])
+        o3d.visualization.draw_geometries([fixed_pcd])
 
-            # utils.visualize_pcd_list(
-            #     coordinate_list=[target_coord, fixed_coord],
-            #     normal_list=[target_normal, fixed_normal],
-            #     color_list=[target_color, fixed_color],
-            #     pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
-            # )
-            # # Check the prediction
-            utils.visualize_pcd_list(
-                coordinate_list=[target_coord, crop_fixed_coord],
-                normal_list=[target_normal, fixed_normal],
-                color_list=[target_color, fixed_color],
-                pose_list=[pred_pose_mat, np.eye(4, dtype=np.float32)],
-            )
+        for j in range(3):
+            print(f"Status: {pred_status[j]} for {j}-th sample")
+            vis_list = []
+            # Crop fixed
+            crop_fixed_coord = samples[sorted_indices[j]]["fixed_coord"]
+            crop_fixed_pcd = o3d.geometry.PointCloud()
+            crop_fixed_pcd.points = o3d.utility.Vector3dVector(crop_fixed_coord)
+            crop_fixed_pcd.paint_uniform_color([1, 0, 0])
+            vis_list.append(crop_fixed_pcd)
 
-            # Update crop_center
-            crop_center = pred_pose_mat[:3, 3] + crop_center
-            target_coord = (pred_pose_mat[:3, :3] @ target_coord.T).T + pred_pose_mat[:3, 3]
-            target_feat[:, :3] = (pred_pose_mat[:3, :3] @ target_feat[:, :3].T).T + pred_pose_mat[:3, 3]
-            target_feat[:, 3:6] = (pred_pose_mat[:3, :3] @ target_feat[:, 3:6].T).T
+            # Target
+            pred_pose_mat = utils.pose9d_to_mat(pred_pose9d[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
+            target_pcd = o3d.geometry.PointCloud()
+            target_pcd.points = o3d.utility.Vector3dVector(target_coord)
+            target_pcd.paint_uniform_color([0, 0, 1])
+            target_pcd.transform(pred_pose_mat)
+            vis_list.append(target_pcd)
+
+            o3d.visualization.draw_geometries(vis_list)
+
+        # for j in range(10):
+        #     # Iterate multiple times
+        #     # DEBUG: iterative seems to be not working
+        #     if not has_gt_crop:
+        #         # Do random crop sampling
+        #         x_min, y_min, z_min = fixed_coord.min(axis=0)
+        #         x_max, y_max, z_max = fixed_coord.max(axis=0)
+        #         crop_center = np.random.rand(3) * (
+        #             np.array([x_max, y_max, z_max]) - np.array([x_min, y_min, z_min])
+        #         ) + np.array([x_min, y_min, z_min])
+        #         crop_indices = PcdPairDataset.crop(
+        #             pcd=fixed_coord,
+        #             crop_center=crop_center,
+        #             crop_strategy=crop_strategy,
+        #             ref_points=target_coord,
+        #             crop_size=crop_size,
+        #             knn_k=knn_k,
+        #         )
+        #         crop_fixed_coord = fixed_coord[crop_indices]
+        #         crop_fixed_feat = fixed_feat[crop_indices]
+        #         crop_fixed_coord[:, :3] -= crop_center
+        #         crop_fixed_feat[:, :3] -= crop_center
+        #     else:
+        #         crop_indices = PcdPairDataset.crop(
+        #             pcd=fixed_coord,
+        #             crop_center=crop_center,
+        #             crop_strategy=crop_strategy,
+        #             ref_points=target_coord,
+        #             crop_size=crop_size,
+        #             knn_k=knn_k,
+        #         )
+        #         crop_fixed_coord = fixed_coord[crop_indices]
+        #         crop_fixed_feat = fixed_feat[crop_indices]
+        #         crop_fixed_coord[:, :3] -= crop_center
+        #         crop_fixed_feat[:, :3] -= crop_center
+
+        #     # Do prediction
+        #     pred_pose_mat, pred_status = tmorp_model.predict(
+        #         target_coord=target_coord,
+        #         target_feat=target_feat,
+        #         fixed_coord=crop_fixed_coord,
+        #         fixed_feat=crop_fixed_feat,
+        #         target_pose=target_pose,
+        #     )
+
+        #     # DEBUG: Check the cropping result
+        #     print(pred_status)
+        #     fixed_pcd = o3d.geometry.PointCloud()
+        #     fixed_pcd.points = o3d.utility.Vector3dVector(fixed_coord)
+        #     fixed_color = np.zeros_like(fixed_coord)
+        #     fixed_color[:, 1] = 1
+        #     fixed_color[crop_indices, 0] = 1
+        #     fixed_pcd.colors = o3d.utility.Vector3dVector(fixed_color)
+        #     o3d.visualization.draw_geometries([fixed_pcd])
+
+        #     if pred_status[1] >= 0.7:
+        #         break
+
+        # DEBUG & VISUALIZATION
+        # target_color = np.zeros_like(target_coord)
+        # target_color[:, 0] = 1
+        # fixed_color = np.zeros_like(crop_fixed_coord)
+        # fixed_color[:, 1] = 1
+
+        # fixed_normal = crop_fixed_feat[:, 3:6]
+        # target_normal = target_feat[:, 3:6]
+        # target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
+        # # utils.visualize_pcd_list(
+        # #     coordinate_list=[target_coord, crop_fixed_coord],
+        # #     normal_list=[target_normal, fixed_normal],
+        # #     color_list=[target_color, fixed_color],
+        # #     pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
+        # # )
+
+        # # utils.visualize_pcd_list(
+        # #     coordinate_list=[target_coord, fixed_coord],
+        # #     normal_list=[target_normal, fixed_normal],
+        # #     color_list=[target_color, fixed_color],
+        # #     pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
+        # # )
+        # # # Check the prediction
+        # utils.visualize_pcd_list(
+        #     coordinate_list=[target_coord, crop_fixed_coord],
+        #     normal_list=[target_normal, fixed_normal],
+        #     color_list=[target_color, fixed_color],
+        #     pose_list=[pred_pose_mat, np.eye(4, dtype=np.float32)],
+        # )
+
+        # # Update crop_center
+        # crop_center = pred_pose_mat[:3, 3] + crop_center
+        # target_coord = (pred_pose_mat[:3, :3] @ target_coord.T).T + pred_pose_mat[:3, 3]
+        # target_feat[:, :3] = (pred_pose_mat[:3, :3] @ target_feat[:, :3].T).T + pred_pose_mat[:3, 3]
+        # target_feat[:, 3:6] = (pred_pose_mat[:3, :3] @ target_feat[:, 3:6].T).T
