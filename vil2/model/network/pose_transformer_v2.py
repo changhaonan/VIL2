@@ -71,15 +71,6 @@ class PoseTransformerV2(nn.Module):
             self.linear_projs.insert(0, nn.Linear(hidden_dims[i + 1], hidden_dims[i]))
 
         # Pose decoder
-        # init_zero = dict(
-        #     init_mode="kaiming_uniform", init_weight=0, init_bias=0
-        # )  # init the final output layer's weights to zeros
-        # self.pose_decoder = nn.Sequential(
-        #     nn.Linear(hidden_dims[0], fusion_projection_dim),
-        #     nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
-        #     nn.ReLU(inplace=True),
-        #     Linear(fusion_projection_dim, 9, **init_zero),
-        # )
         self.pose_decoder = nn.Sequential(
             nn.Linear(hidden_dims[0], fusion_projection_dim),
             nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),

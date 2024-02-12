@@ -2,6 +2,32 @@
 
 ## DMorp
 
+### Installation
+> Step 0:
+```
+conda create -n mcts python=3.8
+```
+> Step 1:
+```
+pip install -r base_requirements.txt
+pip install -e .
+pip install git+https://github.com/marian42/mesh_to_sdf.git
+pip install git+https://github.com/facebookresearch/detectron2.git
+```
+
+> Step2: If using CUDA 11.8, install pytorch and other related modules via the following:
+```
+pip install torch==2.0.0 torchvision==0.15.1 torchaudio==2.0.1 --index-url https://download.pytorch.org/whl/cu118
+pip install torch-scatter -f https://data.pyg.org/whl/torch-2.0.0+cu118.html --no-index
+pip install torch-cluster -f https://data.pyg.org/whl/torch-2.0.0+cu118.html --no-index
+pip install https://github.com/unlimblue/KNN_CUDA/releases/download/0.2/KNN_CUDA-0.2-py3-none-any.whl
+pip install git+https://github.com/facebookresearch/pytorch3d.git
+```
+> Step 3: Setting the env variables
+```
+export RPDIFF_SOURCE_DIR=$PWD/vil2/external/rpdiff
+```
+
 ### Progress
 
 - [x] Fit two objects data.

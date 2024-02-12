@@ -37,3 +37,17 @@ multimodal*
 real*
 logfile
 
+# Data
+vil2/external/rpdiff/data/*
+vil2/external/rpdiff/descriptions/*
+vil2/external/rpdiff/eval_data/*
+vil2/external/rpdiff/share/*
+
+# Checkpoints
+*.pth
+
+# Build
+build/*
+
+# Logs
+log.txt

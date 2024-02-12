@@ -60,16 +60,18 @@ MODEL = dict(
                 translation_only=True,
             ),
             TRANSFORMERV2=dict(
+                # Point transformer network
                 grid_sizes=[0.035, 0.06],
                 depths=[2, 3, 3],
-                dec_depths=[1, 1],
-                # hidden_dims=[64, 128, 256], # V0
+                dec_depths=[1, 1],  # V2
+                # dec_depths=[2, 2],  # V3
                 hidden_dims=[128, 256, 512],  # V2
-                n_heads=[4, 8, 8],
+                # n_heads=[4, 8, 8],  # V2
+                n_heads=[8, 16, 16],  # V3
                 ks=[16, 24, 32],
                 in_dim=6,
-                # fusion_projection_dim=256,  # V0
                 fusion_projection_dim=512,  # V2
+                # Joint transformer network
             ),
         ),
     ),

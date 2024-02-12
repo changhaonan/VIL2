@@ -532,23 +532,28 @@ def random_translation(coordinate, normal, color, pose, offset_type: str = "give
 
 
 def random_segment_drop(coordinate, normal, color, pose):
-    # Heuristic: center of the sphere is the mean of the points
-    center = coordinate.mean(axis=0)
-    # randomly shift the center but keep it inside the point cloud
-    center += np.random.uniform(low=-0.02, high=0.02, size=(3,))
-    # Heuristic: start with a small sphere and increase until k% of points are inside
+    # Boundary
+    x_min, x_max = coordinate[:, 0].min(), coordinate[:, 0].max()
+    y_min, y_max = coordinate[:, 1].min(), coordinate[:, 1].max()
+    z_min, z_max = coordinate[:, 2].min(), coordinate[:, 2].max()
+    drop_center = np.array([uniform(x_min, x_max), uniform(y_min, y_max), uniform(z_min, z_max)])
+
     total_points = len(coordinate)
     half_points = total_points * 0.5
-    radius = round(np.random.uniform(low=0.02, high=0.05), 2)
-    distances = np.linalg.norm(coordinate - center, axis=1)
+    radius = uniform(0.1, 0.3) * min(x_max - x_min, y_max - y_min, z_max - z_min)
+    distances = np.linalg.norm(coordinate - drop_center, axis=1)
     # Count points inside the sphere
     inside_count = np.sum(distances < radius)
-    if inside_count >= half_points:
+    if inside_count <= half_points:
         mask = distances >= radius  # keep mask
         if mask.sum() == 0:
             return coordinate, normal, color, pose
         if mask.sum() < half_points:
             mask = distances < radius
+
+        # # DEBUG:
+        # points_removed = total_points - mask.sum()
+        # print(f"Points removed: {points_removed}")
         # Create a new point cloud without the points inside the sphere
         new_points = coordinate[mask]
         new_normals = normal[mask]

@@ -526,6 +526,122 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
             pickle.dump(data_dict[split], f)
 
 
+def build_dataset_rdiff_eval(cfg, parent_pcd_f, child_pcd_f, parent_pose_s, index: int = 0, data_id: int = 0, vis: bool = False, normalize: bool = False):
+    """Build the dataset from the rdiff online eval data"""
+    grid_size = cfg.PREPROCESS.GRID_SIZE
+    target_rescale = cfg.PREPROCESS.TARGET_RESCALE
+    rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
+    num_point_lower_bound = cfg.PREPROCESS.NUM_POINT_LOW_BOUND
+
+    # parent_pcd_f, child_pcd_f = parse_child_parent(data["multi_obj_final_pcd"])
+    # parent_pose_s, child_pose_s = parse_child_parent(data["multi_obj_start_obj_pose"])
+    # Transform pose to matrix
+    parent_pose_s = pose7d_to_mat(parent_pose_s)
+
+    if child_pcd_f.shape[0] <= num_point_lower_bound or parent_pcd_f.shape[0] <= num_point_lower_bound:
+        # target_pcd = o3d.geometry.PointCloud()
+        # target_pcd.points = o3d.utility.Vector3dVector(child_pcd_f)
+        # target_pcd.paint_uniform_color([1.0, 0.706, 0.0])
+        # fixed_pcd = o3d.geometry.PointCloud()
+        # fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_f)
+        # origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
+        # o3d.visualization.draw_geometries([target_pcd, fixed_pcd, origin])
+        print(f"Target pcd has {child_pcd_f.shape[0]} points, fixed pcd has {parent_pcd_f.shape[0]} points")
+        return
+    
+    # Filter outliers
+    parent_pcd_f = parent_pcd_f[np.linalg.norm(parent_pcd_f, axis=1) <= 2.0]
+    child_pcd_f = child_pcd_f[np.linalg.norm(child_pcd_f, axis=1) <= 2.0]
+
+    # Rescale the target pcd in case that there are not enough points after voxel downsampling
+    # Shift all points to the origin
+    target_pcd = o3d.geometry.PointCloud()
+    # target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
+    target_pcd.points = o3d.utility.Vector3dVector(child_pcd_f)
+
+    fixed_pcd = o3d.geometry.PointCloud()
+    fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_f)
+    fixed_pcd.transform(np.linalg.inv(parent_pose_s))
+
+    # Sample & Compute normal
+    target_pcd.transform(np.linalg.inv(parent_pose_s))
+    fixed_pcd, [target_pcd], _, __ = normalize_pcd(fixed_pcd, [target_pcd])
+
+    # Compute normal
+    target_pcd_center = (target_pcd.get_max_bound() + target_pcd.get_min_bound()) / 2
+    target_pcd.translate(-target_pcd_center)
+    # Rescale the target pcd in case that there are not enough points after voxel downsampling
+    # target_pcd.scale(target_rescale, center=np.array([0, 0, 0]))  # FIXME: will this bring systematic error?
+
+    target_pcd = target_pcd.voxel_down_sample(grid_size)
+    fixed_pcd = fixed_pcd.voxel_down_sample(grid_size)
+    target_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05, max_nn=30))
+    target_pcd_arr = np.hstack((np.array(target_pcd.points), np.array(target_pcd.normals)))
+    fixed_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+    fixed_pcd_arr = np.hstack((np.array(fixed_pcd.points), np.array(fixed_pcd.normals)))
+
+    # Move target to center
+    target_transform = np.eye(4, dtype=np.float32)
+    target_transform[:3, 3] = target_pcd_center
+
+    if (
+        vis
+        or target_pcd_arr.shape[0] < (num_point_lower_bound / 2)
+        or fixed_pcd_arr.shape[0] < num_point_lower_bound
+    ):
+        # visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
+        # visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, target_transform)
+        # Visualize & Check
+        raw_target_pcd = o3d.geometry.PointCloud()
+        raw_target_pcd.points = o3d.utility.Vector3dVector(child_pcd_f)
+        raw_target_pcd.transform(np.linalg.inv(parent_pose_s))
+        raw_target_pcd.paint_uniform_color([0.0, 0.651, 0.929])
+        raw_fixed_pcd = o3d.geometry.PointCloud()
+        raw_fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_f)
+        raw_fixed_pcd.transform(np.linalg.inv(parent_pose_s))
+        origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
+        o3d.visualization.draw_geometries([raw_target_pcd, raw_fixed_pcd, origin])
+
+    # DEBUG: sanity check
+    if np.max(np.abs(target_pcd_arr[:, :3])) == 0 or np.max(np.abs(fixed_pcd_arr[:, :3])) == 0:
+        print("Zero pcd found")
+        # Check raw pcd
+        vis_list = []
+        target_pcd = o3d.geometry.PointCloud()
+        target_pcd.points = o3d.utility.Vector3dVector(child_pcd_f)
+        vis_list.append(target_pcd)
+        fixed_pcd = o3d.geometry.PointCloud()
+        fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_f)
+        vis_list.append(fixed_pcd)
+        o3d.visualization.draw_geometries(vis_list)
+        return
+
+    tmorp_data = {
+        "target": target_pcd_arr,
+        "fixed": fixed_pcd_arr,
+        "target_label": np.array([0]),
+        "fixed_label": np.array([1]),
+        "9dpose": utils.mat_to_pose9d(target_transform, rot_axis=rot_axis),
+        "data_id": data_id,
+    }
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Save the dtset into a .pkl file
+    save_path = os.path.join(root_dir, "test_data", "dmorp_rdiff_eval")
+    os.makedirs(save_path, exist_ok=True)
+    print(f"Saving dataset to {save_path}...")
+    save_file_path = os.path.join(
+            root_dir,
+            "test_data",
+            "dmorp_rdiff_eval",
+            f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_test{index}.pkl",
+        )
+    with open(
+        save_file_path,
+        "wb",
+    ) as f:
+        pickle.dump([tmorp_data], f)
+    return save_file_path
+
 if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
@@ -535,7 +651,7 @@ if __name__ == "__main__":
         type=str,
         default="/home/harvey/Data/rdiff/can_in_cabinet_stack/task_name_stack_can_in_cabinet",
     )
-    parser.add_argument("--data_type", type=str, default="rdiff")
+    parser.add_argument("--data_type", type=str, default="rdiff_eval")
     parser.add_argument("--filter_key", type=str, default=None)
     parser.add_argument("--vis", action="store_true")
     args = parser.parse_args()
