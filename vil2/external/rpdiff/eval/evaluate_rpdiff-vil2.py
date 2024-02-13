@@ -130,7 +130,31 @@ def main(args: config_util.AttrDict) -> None:
     eval_teleport_imgs_dir = osp.join(eval_save_dir, "teleport_imgs")
     util.safe_makedirs(eval_teleport_imgs_dir)
 
-    infer_kwargs = {}
+    #########################################################################
+    # Load Dmorps model
+    task_name = "Dmorp"
+    root_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname((os.path.abspath(__file__))))))
+    cfg_file = os.path.join(root_path, "config", "pose_transformer_rdiff.py")
+    cfg = LazyConfig.load(cfg_file)
+
+    # Build model
+    net_name = cfg.MODEL.NOISE_NET.NAME
+    net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
+    pose_transformer = PoseTransformerV2(**net_init_args)
+    tmorp_model = TmorpModelV2(cfg, pose_transformer)
+    model_name = tmorp_model.experiment_name()
+    noise_net_name = cfg.MODEL.NOISE_NET.NAME
+    save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints", noise_net_name)
+    save_path = os.path.join(save_dir, model_name)
+    os.makedirs(save_dir, exist_ok=True)
+
+    checkpoint_path = f"{save_path}/checkpoints"
+    # Load the best checkpoint
+    checkpoints = os.listdir(checkpoint_path)
+    sorted_checkpoints = sorted(checkpoints, key=lambda x: float(x.split("=")[-1].split(".ckpt")[0]))
+    checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
+
+    tmorp_model.load(checkpoint_file)
 
     #####################################################################################
     # load all the multi class mesh info
@@ -254,172 +278,11 @@ def main(args: config_util.AttrDict) -> None:
 
     #########################################################################
     # Set up the models (feat encoder, voxel affordance, pose refinement, success)
-
-    model_ckpt_logdir = osp.join(path_util.get_rpdiff_model_weights(), args.experiment.logdir)
-
-    reso_grid = args.data.voxel_grid.reso_grid  # args.reso_grid
-    padding_grid = args.data.voxel_grid.padding
-
-    raster_pts = three_util.get_raster_points(reso_grid, padding=padding_grid)
-    raster_pts = raster_pts.reshape(reso_grid, reso_grid, reso_grid, 3)
-    raster_pts = raster_pts.transpose(2, 1, 0, 3)
-    raster_pts = raster_pts.reshape(-1, 3)
-
     rot_grid_samples = args.data.rot_grid_samples
     rot_grid = util.generate_healpix_grid(size=rot_grid_samples)
     args.data.rot_grid_bins = rot_grid.shape[0]
 
     exp_args = args.experiment
-
-    ############################################################################
-    # Setup each model
-
-    ###
-    # Load pose refinement model, loss, and optimizer
-    ###
-
-    pose_refine_model_path = None
-    pr_model = None
-    if exp_args.load_pose_regression:
-
-        # assumes model path exists
-        pose_refine_model_path = osp.join(model_ckpt_logdir, args.experiment.eval.pose_refine_model_name)
-        pose_refine_model_path = check_ckpt_load_latest(pose_refine_model_path)
-        pose_refine_ckpt = torch.load(pose_refine_model_path, map_location=torch.device("cpu"))
-
-        # update config with config used during training
-        config_util.update_recursive(
-            args.model.refine_pose, config_util.recursive_attr_dict(pose_refine_ckpt["args"]["model"]["refine_pose"])
-        )
-
-        # model (pr = pose refine)
-        pr_type = args.model.refine_pose.type
-        pr_args = config_util.copy_attr_dict(args.model[pr_type])
-        if args.model.refine_pose.get("model_kwargs") is not None:
-            custom_pr_args = args.model.refine_pose.model_kwargs[pr_type]
-            config_util.update_recursive(pr_args, custom_pr_args)
-
-        if pr_type == "nsm_transformer":
-            pr_model_cls = NSMTransformerSingleTransformationRegression
-        elif pr_type == "nsm_transformer_cvae":
-            pr_model_cls = NSMTransformerSingleTransformationRegressionCVAE
-        else:
-            raise ValueError(f"Unrecognized: {pr_type}")
-
-        pr_model = pr_model_cls(mc_vis=mc_vis, feat_dim=args.model.refine_pose.feat_dim, **pr_args).cuda()
-
-        pr_model.load_state_dict(pose_refine_ckpt["refine_pose_model_state_dict"])
-
-    ###
-    # Load success classifier and optimizer
-    ###
-
-    success_model_path = None
-    success_model = None
-    if exp_args.load_success_classifier:
-
-        # assumes model path exists
-        success_model_path = osp.join(model_ckpt_logdir, args.experiment.eval.success_model_name)
-        success_model_path = check_ckpt_load_latest(success_model_path)
-        success_ckpt = torch.load(success_model_path, map_location=torch.device("cpu"))
-
-        # update config with config used during training
-        config_util.update_recursive(
-            args.model.success, config_util.recursive_attr_dict(success_ckpt["args"]["model"]["success"])
-        )
-
-        sc_type = args.model.success.type
-        sc_args = config_util.copy_attr_dict(args.model[sc_type])
-        if args.model.success.get("model_kwargs") is not None:
-            custom_sc_args = args.model.success.model_kwargs[sc_type]
-            config_util.update_recursive(sc_args, custom_sc_args)
-
-        # model
-        if sc_type == "nsm_transformer":
-            success_model_cls = NSMTransformerSingleSuccessClassifier
-        else:
-            raise ValueError(f"Unrecognized success model type: {sc_type}")
-
-        sc_args.sigmoid = True
-
-        success_model = success_model_cls(mc_vis=mc_vis, feat_dim=args.model.success.feat_dim, **sc_args).cuda()
-
-        success_model.load_state_dict(success_ckpt["success_model_state_dict"])
-
-    ###
-    # Load coarse affordance model, loss, and optimizer
-    ###
-
-    voxel_aff_model_path = None
-    coarse_aff_model = None
-    if exp_args.load_coarse_aff:
-
-        # assumes model path exists
-        voxel_aff_model_path = osp.join(model_ckpt_logdir, args.experiment.eval.voxel_aff_model_name)
-        voxel_aff_model_path = check_ckpt_load_latest(voxel_aff_model_path)
-        voxel_aff_ckpt = torch.load(voxel_aff_model_path, map_location=torch.device("cpu"))
-
-        # update config with config used during training
-        config_util.update_recursive(
-            args.model.coarse_aff, config_util.recursive_attr_dict(voxel_aff_ckpt["args"]["model"]["coarse_aff"])
-        )
-
-        # model
-        coarse_aff_type = args.model.coarse_aff.type
-        coarse_aff_args = config_util.copy_attr_dict(args.model[coarse_aff_type])
-        if args.model.coarse_aff.get("model_kwargs") is not None:
-            custom_coarse_aff_args = args.model.coarse_aff.model_kwargs[coarse_aff_args]
-            config_util.update_recursive(coarse_aff_args, custom_coarse_aff_args)
-
-        coarse_aff_model = CoarseAffordanceVoxelRot(
-            mc_vis=mc_vis,
-            feat_dim=args.model.coarse_aff.feat_dim,
-            rot_grid_dim=args.data.rot_grid_bins,
-            padding=args.data.voxel_grid.padding,
-            voxel_reso_grid=args.data.voxel_grid.reso_grid,
-            scene_encoder_kwargs=coarse_aff_args,
-        ).cuda()
-
-        coarse_aff_model.load_state_dict(voxel_aff_ckpt["coarse_aff_model_state_dict"])
-
-        if args.model.coarse_aff.get("multi_model") is not None:
-            if args.model.coarse_aff.multi_model:
-
-                coarse_aff_args2 = config_util.copy_attr_dict(args.model[coarse_aff_type])
-                if args.model.coarse_aff.get("model_kwargs2") is not None:
-                    custom_coarse_aff_args2 = args.model.coarse_aff.model_kwargs2[coarse_aff_type]
-                    config_util.update_recursive(coarse_aff_args2, custom_coarse_aff_args2)
-
-                # hacky thing we shouldn't need?
-                args.model.coarse_aff = config_util.recursive_attr_dict(args.model.coarse_aff)
-                voxel_reso_grid2 = args.data.voxel_grid.reso_grid
-                voxel_reso_grid2 = util.set_if_not_none(
-                    voxel_reso_grid2, args.model.coarse_aff.model2.voxel_grid.reso_grid
-                )
-
-                padding2 = args.data.voxel_grid.padding
-                padding2 = util.set_if_not_none(padding2, args.data.voxel_grid.padding)
-
-                coarse_aff_model2 = CoarseAffordanceVoxelRot(
-                    mc_vis=mc_vis,
-                    feat_dim=args.model.coarse_aff.feat_dim,
-                    rot_grid_dim=args.data.rot_grid_bins,
-                    padding=padding2,
-                    voxel_reso_grid=voxel_reso_grid2,
-                    scene_encoder_kwargs=coarse_aff_args2,
-                ).cuda()
-
-                infer_kwargs["coarse_aff_model2"] = {}
-                infer_kwargs["coarse_aff_model2"]["model"] = coarse_aff_model2
-                infer_kwargs["coarse_aff_model2"]["reso_grid"] = voxel_reso_grid2
-                infer_kwargs["coarse_aff_model2"]["padding"] = padding2
-
-                coarse_aff_model2.load_state_dict(voxel_aff_ckpt["coarse_aff_model_state_dict2"])
-
-    #####################################################################################
-    # prepare function used for inference using set of trained models
-
-    infer_relation_policy = policy_inference_methods_dict[args.experiment.eval.inference_method]
 
     #####################################################################################
     # prepare the simuation environment
@@ -454,14 +317,6 @@ def main(args: config_util.AttrDict) -> None:
     run_log_folder = osp.join(run_logs, nowstr)
     util.safe_makedirs(run_log_folder)
 
-    # Save full name of model paths used
-    if exp_args.load_pose_regression:
-        args.experiment.eval.pose_refine_model_name_full = pose_refine_model_path
-    if exp_args.load_success_classifier:
-        args.experiment.eval.success_model_name_full = success_model_path
-    if exp_args.load_coarse_aff:
-        args.experiment.eval.voxel_aff_model_name_full = voxel_aff_model_path
-
     place_success_list = []
     full_cfg_dict = {}
     full_cfg_dict["args"] = config_util.recursive_dict(args)
@@ -469,7 +324,7 @@ def main(args: config_util.AttrDict) -> None:
     json.dump(full_cfg_dict, open(full_cfg_fname, "w", encoding="utf-8"), ensure_ascii=False, indent=4)
 
     #####################################################################################
-    # load  floating gripper
+    # load floating gripper
 
     floating_hand = FloatingSphereGripper(pb_client=pb_client)
     floating_hand.hide_hand()
@@ -485,9 +340,6 @@ def main(args: config_util.AttrDict) -> None:
     scene_extents = args.data.coarse_aff.scene_extents
     scene_scale = 1 / np.max(scene_extents)
     args.data.coarse_aff.scene_scale = scene_scale
-
-    if util.exists_and_true(exp_args.eval, "multi_aff_rot"):
-        infer_kwargs["multi_aff_rot"] = True
 
     for iteration in range(exp_args.start_iteration, exp_args.num_iterations):
         #####################################################################################
@@ -957,173 +809,66 @@ def main(args: config_util.AttrDict) -> None:
             util.meshcat_pcd_show(mc_vis, parent_pcd, color=(255, 0, 0), name="scene/parent_pcd")
             util.meshcat_pcd_show(mc_vis, child_pcd, color=(0, 0, 255), name="scene/child_pcd")
 
-        guess_rot = rot_grid[np.random.randint(rot_grid.shape[0])]
-        tf1 = np.eye(4)
-        tf1[:-1, -1] = -1.0 * np.mean(child_pcd, axis=0)
-        tf2 = np.eye(4)
-        if exp_args.eval.init_orig_ori:
-            log_warn(f"!!! USING ORIGINAL ORIENTATION AS INITIAL GUESS ORIENTATION !!!")
-        else:
-            log_warn(f"!!! USING RANDOM SO(3) ROTATION AS INITIAL GUESS ORIENTATION !!!")
-            tf2[:-1, :-1] = guess_rot
-
-        if exp_args.eval.init_parent_mean_pos:
-            log_warn(f"!!! USING PARENT MEAN AS INITIAL GUESS POSITION !!!")
-            tf3 = np.eye(4)
-            tf3[:-1, -1] = np.mean(parent_pcd, axis=0) + ((np.random.random(3) - 0.5) * 0.005)
-        else:
-            log_warn(f"!!! USING RANDOM PARENT POINT AS INITIAL GUESS POSITION !!!")
-            tf3 = np.eye(4)
-            tf3[:-1, -1] = parent_pcd[np.random.randint(parent_pcd.shape[0])] + (np.random.random(3) * 0.01)
-
-        relative_trans_guess = np.matmul(tf3, np.matmul(tf2, tf1))
-
         time.sleep(0.3)
-        if eval_dmorp:
-            child_pcd_guess = np.eye(4)
-        else:
-            child_pcd_guess = util.transform_pcd(child_pcd, relative_trans_guess)
 
-        multi_mesh_dict = dict(
-            parent_file=parent_obj_file_list,
-            parent_scale=current_parent_scale_list,
-            parent_pose=current_parent_pose_list,
-            child_file=child_obj_file_list,
-            child_scale=current_child_scale_list,
-            child_pose=current_child_pose_list,
-            multi=True,
-        )
+        relative_trans_guess = np.eye(4)
+        child_pcd_guess = util.transform_pcd(child_pcd, relative_trans_guess)
 
         inlier_parent_idx = np.where(np.max(parent_pcd, axis=1) < 3.0)[0]
         parent_pcd = parent_pcd[inlier_parent_idx]
-        infer_kwargs["gt_child_cent"] = np.matmul(relative_trans_guess, start_child_pose_mat)[:-1, -1]
 
-        # args for exporting the visualization
-        infer_kwargs["export_viz"] = args.export_viz
-        infer_kwargs["export_viz_dirname"] = args.export_viz_dirname
-        infer_kwargs["export_viz_relative_trans_guess"] = relative_trans_guess
+        # Preprocess
+        data = tmorp_model.preprocess_input_rpdiff(
+            fixed_coord=parent_pcd,
+            target_coord=child_pcd,
+        )
+        target_coord = data["target_coord"]
+        target_feat = data["target_feat"]
+        fixed_coord = data["fixed_coord"]
+        fixed_feat = data["fixed_feat"]
 
-        # args for computing + exporting coverage metrics
-        infer_kwargs["compute_coverage_scores"] = args.compute_coverage
-        infer_kwargs["out_coverage_dirname1"] = args.out_coverage_dirname + f"_{parent_class}_{child_class}"
-        infer_kwargs["out_coverage_dirname2"] = osp.join(
-            eval_save_dir, args.out_coverage_dirname + f"_{parent_class}_{child_class}"
+        # Batch sampling
+        crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
+        knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
+        crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
+        batch_size = 32
+        sample_batch, samples = tmorp_model.batch_random_sample(
+            batch_size,
+            target_coord=target_coord,
+            target_feat=target_feat,
+            fixed_coord=fixed_coord,
+            fixed_feat=fixed_feat,
+            crop_strategy=crop_strategy,
+            crop_size=crop_size,
+            knn_k=knn_k,
         )
 
-        infer_kwargs["iteration"] = iteration
+        pred_pose9d, pred_status = tmorp_model.predict(batch=sample_batch)
 
-        if eval_dmorp:
-            # Load config
-            task_name = "Dmorp"
-            root_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname((os.path.abspath(__file__))))))
-            cfg_file = os.path.join(root_path, "config", "pose_transformer_rdiff.py")
-            cfg = LazyConfig.load(cfg_file)
+        # Rank the prediction by status
+        sorted_indices = np.argsort(pred_status[:, 1])
+        sorted_indices = sorted_indices[::-1]
+        pred_pose9d = pred_pose9d[sorted_indices]
+        pred_status = pred_status[sorted_indices]
+        debug = True
 
-            # Build model
-            net_name = cfg.MODEL.NOISE_NET.NAME
-            net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
-            pose_transformer = PoseTransformerV2(**net_init_args)
-            tmorp_model = TmorpModelV2(cfg, pose_transformer)
-            model_name = tmorp_model.experiment_name()
-            noise_net_name = cfg.MODEL.NOISE_NET.NAME
-            save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints", noise_net_name)
-            save_path = os.path.join(save_dir, model_name)
-            os.makedirs(save_dir, exist_ok=True)
-
-            checkpoint_path = f"{save_path}/checkpoints"
-            # Load the best checkpoint
-            checkpoints = os.listdir(checkpoint_path)
-            sorted_checkpoints = sorted(checkpoints, key=lambda x: float(x.split("=")[-1].split(".ckpt")[0]))
-            checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
-
-            tmorp_model.load(checkpoint_file)
-
-            # Preprocess
-            data = tmorp_model.preprocess_input_rpdiff(
-                fixed_coord=parent_pcd,
-                target_coord=child_pcd,
+        pred_pose_mat_list = []
+        for j in range(1):
+            recover_pose = tmorp_model.pose_recover_rpdiff(
+                pred_pose9d[j], samples[sorted_indices[j]]["crop_center"], data
             )
-            target_coord = data["target_coord"]
-            target_feat = data["target_feat"]
-            fixed_coord = data["fixed_coord"]
-            fixed_feat = data["fixed_feat"]
+            pred_pose_mat_list.append(recover_pose)
+            if debug:
+                child_pcd_o3d = o3d.geometry.PointCloud()
+                child_pcd_o3d.points = o3d.utility.Vector3dVector(child_pcd)
+                child_pcd_o3d.paint_uniform_color([0, 1, 1])
+                child_pcd_o3d.transform(recover_pose)
+                parent_pcd_o3d = o3d.geometry.PointCloud()
+                parent_pcd_o3d.points = o3d.utility.Vector3dVector(parent_pcd)
+                o3d.visualization.draw_geometries([child_pcd_o3d, parent_pcd_o3d])
 
-            # Batch sampling
-            crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
-            knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
-            crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
-            batch_size = 32
-            sample_batch, samples = tmorp_model.batch_random_sample(
-                batch_size,
-                target_coord=target_coord,
-                target_feat=target_feat,
-                fixed_coord=fixed_coord,
-                fixed_feat=fixed_feat,
-                crop_strategy=crop_strategy,
-                crop_size=crop_size,
-                knn_k=knn_k,
-            )
-
-            pred_pose9d, pred_status = tmorp_model.predict(batch=sample_batch)
-
-            # Rank the prediction by status
-            sorted_indices = np.argsort(pred_status[:, 1])
-            sorted_indices = sorted_indices[::-1]
-            pred_pose9d = pred_pose9d[sorted_indices]
-            pred_status = pred_status[sorted_indices]
-            debug = True
-
-            pred_pose_mat_list = []
-            for j in range(1):
-                recover_pose = tmorp_model.pose_recover_rpdiff(pred_pose9d[j], samples[sorted_indices[j]]["crop_center"], data)
-                pred_pose_mat_list.append(recover_pose)
-                if debug:
-                    # Check the result
-                    fixed_pcd = o3d.geometry.PointCloud()
-                    fixed_pcd.points = o3d.utility.Vector3dVector(fixed_coord)
-                    fixed_pcd.paint_uniform_color([0, 1, 0])
-
-                    child_pcd_o3d = o3d.geometry.PointCloud()
-                    child_pcd_o3d.points = o3d.utility.Vector3dVector(child_pcd)
-                    child_pcd_o3d.paint_uniform_color([0, 1, 1])
-                    child_pcd_o3d.transform(recover_pose)
-                    parent_pcd_o3d = o3d.geometry.PointCloud()
-                    parent_pcd_o3d.points = o3d.utility.Vector3dVector(parent_pcd)
-                    o3d.visualization.draw_geometries([child_pcd_o3d, parent_pcd_o3d])
-
-            # exit(0)
-            relative_trans_pred = pred_pose_mat_list[0]
-        else:
-            # refine
-            relative_trans_pred = infer_relation_policy(
-                mc_vis=mc_vis,
-                parent_pcd=parent_pcd,
-                child_pcd=child_pcd_guess,
-                coarse_aff_model=coarse_aff_model,
-                pose_refine_model=pr_model,
-                success_model=success_model,
-                scene_mean=args.data.coarse_aff.scene_mean,
-                scene_scale=args.data.coarse_aff.scene_scale,
-                grid_pts=raster_pts,
-                rot_grid=rot_grid,
-                viz=False,
-                n_iters=exp_args.eval.n_refine_iters,
-                no_parent_crop=(not exp_args.parent_crop),
-                return_top=(not exp_args.eval.return_rand),
-                with_coll=exp_args.eval.with_coll,
-                run_affordance=exp_args.eval.run_affordance,
-                init_k_val=exp_args.eval.init_k_val,
-                no_sc_score=exp_args.eval.no_success_classifier,
-                init_parent_mean=exp_args.eval.init_parent_mean_pos,
-                init_orig_ori=exp_args.eval.init_orig_ori,
-                refine_anneal=exp_args.eval.refine_anneal,
-                mesh_dict=multi_mesh_dict,
-                add_per_iter_noise=exp_args.eval.add_per_iter_noise,
-                per_iter_noise_kwargs=exp_args.eval.per_iter_noise_kwargs,
-                variable_size_crop=exp_args.eval.variable_size_crop,
-                timestep_emb_decay_factor=exp_args.eval.timestep_emb_decay_factor,
-                **infer_kwargs,
-            )
+        # exit(0)
+        relative_trans_pred = pred_pose_mat_list[0]
 
         transformed_child1 = util.transform_pcd(child_pcd_guess, relative_trans_pred)
 
