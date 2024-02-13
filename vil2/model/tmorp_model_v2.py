@@ -382,8 +382,21 @@ class TmorpModelV2:
             "target_feat": target_feat,
             "fixed_coord": fixed_coord,
             "fixed_feat": fixed_feat,
-            "fixed_pose": fixed_pose,
-            "target_pose": target_pose,
+            "fixed_pose": np.linalg.inv(fixed_pose),
+            "target_pose": np.linalg.inv(target_pose),
             "scale_xyz": scale_xyz,
         }
         return data
+
+    def pose_recover_rpdiff(self, pred_pose9d: np.ndarray, crop_center: np.ndarray, data: dict):
+        """Recover the pose back to the original coordinate system for RPDiff"""
+        pred_pose_mat = utils.pose9d_to_mat(pred_pose9d, rot_axis=self.rot_axis)
+        T_shift = np.eye(4)
+        T_shift[:3, 3] = crop_center
+        fixed_pose = data["fixed_pose"]
+        target_pose = data["target_pose"]
+        scale_xyz = data["scale_xyz"]
+        T_scale = np.eye(4)
+        T_scale[:3, :3] = np.diag([1.0 / scale_xyz, 1.0 / scale_xyz, 1.0 / scale_xyz])
+        recover_pose = np.linalg.inv(T_scale @ fixed_pose) @ T_shift @ pred_pose_mat @ T_scale @ target_pose
+        return recover_pose

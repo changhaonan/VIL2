@@ -17,6 +17,14 @@ from vil2.vil2_utils import build_dmorp_dataset
 import random
 
 
+# Read data
+def parse_child_parent(arr):
+    pcd_dict = arr[()]
+    parent_val = pcd_dict["parent"]
+    child_val = pcd_dict["child"]
+    return parent_val, child_val
+
+
 if __name__ == "__main__":
     torch.set_float32_matmul_precision("high")
     # Parse arguments
@@ -35,6 +43,12 @@ if __name__ == "__main__":
     root_path = os.path.dirname((os.path.abspath(__file__)))
     cfg_file = os.path.join(root_path, "config", "pose_transformer_rdiff.py")
     cfg = LazyConfig.load(cfg_file)
+
+    # Use raw data
+    use_raw_data = True
+    rpdiff_path = "/home/harvey/Data/rdiff/can_in_cabinet_stack/task_name_stack_can_in_cabinet"
+    rpdiff_file_list = os.listdir(rpdiff_path)
+    rpdiff_file_list = [f for f in rpdiff_file_list if f.endswith(".npz")]
 
     # Load dataset & data loader
     train_dataset, val_dataset, test_dataset = build_dmorp_dataset(root_path, cfg)
@@ -74,19 +88,24 @@ if __name__ == "__main__":
 
     tmorp_model.load(checkpoint_file)
     for i in range(20):
-        # test_idx = np.random.randint(len(test_dataset))
-        test_idx = i
-        # Load the best checkpoint
-        test_data = test_dataset[test_idx]
-        # test_data = train_dataset[test_idx]
-        target_coord = test_data["target_coord"]
-        target_feat = test_data["target_feat"]
-        fixed_coord = test_data["fixed_coord"]
-        fixed_feat = test_data["fixed_feat"]
-        target_pose = test_data["target_pose"]
+        if not use_raw_data:
+            test_idx = i
+            # Load the best checkpoint
+            data = test_dataset[test_idx]
+        else:
+            raw_data = np.load(os.path.join(rpdiff_path, rpdiff_file_list[i]), allow_pickle=True)
+            fixed_coord_s, target_coord_s = parse_child_parent(raw_data["multi_obj_start_pcd"])
+            data = tmorp_model.preprocess_input_rpdiff(
+                fixed_coord=fixed_coord_s,
+                target_coord=target_coord_s,
+            )
+
+        target_coord = data["target_coord"]
+        target_feat = data["target_feat"]
+        fixed_coord = data["fixed_coord"]
+        fixed_feat = data["fixed_feat"]
 
         # Init crop center
-        crop_center = target_pose[:3]
         crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
         knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
         crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
@@ -116,30 +135,44 @@ if __name__ == "__main__":
         fixed_pcd = o3d.geometry.PointCloud()
         fixed_pcd.points = o3d.utility.Vector3dVector(fixed_coord)
         fixed_pcd.paint_uniform_color([0, 1, 0])
-        # o3d.visualization.draw_geometries([fixed_pcd])
 
         for j in range(3):
             print(f"Status: {pred_status[j]} for {j}-th sample")
-            vis_list = [fixed_pcd]
-            # Crop fixed
-            crop_fixed_coord = samples[sorted_indices[j]]["fixed_coord"]
-            crop_fixed_pcd = o3d.geometry.PointCloud()
-            crop_fixed_pcd.points = o3d.utility.Vector3dVector(crop_fixed_coord)
-            crop_fixed_pcd.paint_uniform_color([1, 0, 0])
-            crop_center = samples[sorted_indices[j]]["crop_center"]
-            crop_fixed_pcd.translate(crop_center)
-            vis_list.append(crop_fixed_pcd)
 
-            # Target
-            pred_pose_mat = utils.pose9d_to_mat(pred_pose9d[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
-            target_pcd = o3d.geometry.PointCloud()
-            target_pcd.points = o3d.utility.Vector3dVector(target_coord)
-            target_pcd.paint_uniform_color([0, 0, 1])
-            target_pcd.transform(pred_pose_mat)
-            target_pcd.translate(crop_center)
-            vis_list.append(target_pcd)
-
-            # Origin
+            #DEBUG: check the recovered pose
+            recover_pose = tmorp_model.pose_recover_rpdiff(pred_pose9d[j], samples[sorted_indices[j]]["crop_center"], data)
+            # DEBUG:
+            fixed_coord_o3d = o3d.geometry.PointCloud()
+            fixed_coord_o3d.points = o3d.utility.Vector3dVector(fixed_coord_s)
+            # fixed_coord_o3d.paint_uniform_color([0, 1, 0])
+            target_coord_o3d = o3d.geometry.PointCloud()
+            target_coord_o3d.points = o3d.utility.Vector3dVector(target_coord_s)
+            target_coord_o3d.paint_uniform_color([1, 1, 0])
+            target_coord_o3d.transform(recover_pose)
+            
             origin_pcd = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-            vis_list.append(origin_pcd)
-            o3d.visualization.draw_geometries(vis_list)
+            o3d.visualization.draw_geometries([origin_pcd, target_coord_o3d, fixed_coord_o3d])
+
+            # vis_list = [fixed_pcd]
+            # # Crop fixed
+            # crop_fixed_coord = samples[sorted_indices[j]]["fixed_coord"]
+            # crop_fixed_pcd = o3d.geometry.PointCloud()
+            # crop_fixed_pcd.points = o3d.utility.Vector3dVector(crop_fixed_coord)
+            # crop_fixed_pcd.paint_uniform_color([1, 0, 0])
+            # crop_center = samples[sorted_indices[j]]["crop_center"]
+            # crop_fixed_pcd.translate(crop_center)
+            # vis_list.append(crop_fixed_pcd)
+
+            # # Target
+            # pred_pose_mat = utils.pose9d_to_mat(pred_pose9d[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
+            # target_pcd = o3d.geometry.PointCloud()
+            # target_pcd.points = o3d.utility.Vector3dVector(target_coord)
+            # target_pcd.paint_uniform_color([0, 0, 1])
+            # target_pcd.transform(pred_pose_mat)
+            # target_pcd.translate(crop_center)
+            # vis_list.append(target_pcd)
+
+            # # Origin
+            # origin_pcd = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+            # vis_list.append(origin_pcd)
+            # o3d.visualization.draw_geometries(vis_list)

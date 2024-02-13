@@ -1013,15 +1013,6 @@ def main(args: config_util.AttrDict) -> None:
         infer_kwargs["iteration"] = iteration
 
         if eval_dmorp:
-            # DEBUG: Check data
-            # child_pcd_o3d = o3d.geometry.PointCloud()
-            # child_pcd_o3d.points = o3d.utility.Vector3dVector(child_pcd)
-            # child_pcd_o3d.paint_uniform_color([0, 0, 1])
-            # parent_pcd_o3d = o3d.geometry.PointCloud()
-            # parent_pcd_o3d.points = o3d.utility.Vector3dVector(parent_pcd)
-            # parent_pcd_o3d.paint_uniform_color([1, 0, 0])
-            # o3d.visualization.draw_geometries([child_pcd_o3d, parent_pcd_o3d])
-
             # Load config
             task_name = "Dmorp"
             root_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname((os.path.abspath(__file__))))))
@@ -1081,41 +1072,27 @@ def main(args: config_util.AttrDict) -> None:
             pred_pose9d = pred_pose9d[sorted_indices]
             pred_status = pred_status[sorted_indices]
             debug = True
-            if debug:
-                # Check the result
-                fixed_pcd = o3d.geometry.PointCloud()
-                fixed_pcd.points = o3d.utility.Vector3dVector(fixed_coord)
-                fixed_pcd.paint_uniform_color([0, 1, 0])
-                # o3d.visualization.draw_geometries([fixed_pcd])
 
-                for j in range(5):
-                    print(f"Status: {pred_status[j]} for {j}-th sample")
-                    vis_list = [fixed_pcd]
-                    # Crop fixed
-                    crop_fixed_coord = samples[sorted_indices[j]]["fixed_coord"]
-                    crop_fixed_pcd = o3d.geometry.PointCloud()
-                    crop_fixed_pcd.points = o3d.utility.Vector3dVector(crop_fixed_coord)
-                    crop_fixed_pcd.paint_uniform_color([1, 0, 0])
-                    crop_center = samples[sorted_indices[j]]["crop_center"]
-                    crop_fixed_pcd.translate(crop_center)
-                    vis_list.append(crop_fixed_pcd)
+            pred_pose_mat_list = []
+            for j in range(1):
+                recover_pose = tmorp_model.pose_recover_rpdiff(pred_pose9d[j], samples[sorted_indices[j]]["crop_center"], data)
+                pred_pose_mat_list.append(recover_pose)
+                if debug:
+                    # Check the result
+                    fixed_pcd = o3d.geometry.PointCloud()
+                    fixed_pcd.points = o3d.utility.Vector3dVector(fixed_coord)
+                    fixed_pcd.paint_uniform_color([0, 1, 0])
 
-                    # Target
-                    pred_pose_mat = utils.pose9d_to_mat(pred_pose9d[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
-                    target_pcd = o3d.geometry.PointCloud()
-                    target_pcd.points = o3d.utility.Vector3dVector(target_coord)
-                    target_pcd.paint_uniform_color([0, 0, 1])
-                    target_pcd.transform(pred_pose_mat)
-                    target_pcd.translate(crop_center)
-                    vis_list.append(target_pcd)
-
-                    # Origin
-                    origin_pcd = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-                    vis_list.append(origin_pcd)
-                    o3d.visualization.draw_geometries(vis_list)
+                    child_pcd_o3d = o3d.geometry.PointCloud()
+                    child_pcd_o3d.points = o3d.utility.Vector3dVector(child_pcd)
+                    child_pcd_o3d.paint_uniform_color([0, 1, 1])
+                    child_pcd_o3d.transform(recover_pose)
+                    parent_pcd_o3d = o3d.geometry.PointCloud()
+                    parent_pcd_o3d.points = o3d.utility.Vector3dVector(parent_pcd)
+                    o3d.visualization.draw_geometries([child_pcd_o3d, parent_pcd_o3d])
 
             # exit(0)
-            relative_trans_pred = utils.pose9d_to_mat(pred_pose9d[0], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
+            relative_trans_pred = pred_pose_mat_list[0]
         else:
             # refine
             relative_trans_pred = infer_relation_policy(
