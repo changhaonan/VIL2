@@ -373,7 +373,7 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False, filt
     print("Done!")
 
 
-def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, normalize: bool = False):
+def build_dataset_rpdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, normalize: bool = False):
     """Build the dataset from the rdiff data"""
     data_file_list = os.listdir(data_dir)
     data_file_list = [f for f in data_file_list if f.endswith(".npz")]
@@ -526,7 +526,16 @@ def build_dataset_rdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, norm
             pickle.dump(data_dict[split], f)
 
 
-def build_dataset_rdiff_eval(cfg, parent_pcd_f, child_pcd_f, parent_pose_s, index: int = 0, data_id: int = 0, vis: bool = False, normalize: bool = False):
+def build_dataset_rdiff_eval(
+    cfg,
+    parent_pcd_f,
+    child_pcd_f,
+    parent_pose_s,
+    index: int = 0,
+    data_id: int = 0,
+    vis: bool = False,
+    normalize: bool = False,
+):
     """Build the dataset from the rdiff online eval data"""
     grid_size = cfg.PREPROCESS.GRID_SIZE
     target_rescale = cfg.PREPROCESS.TARGET_RESCALE
@@ -548,7 +557,7 @@ def build_dataset_rdiff_eval(cfg, parent_pcd_f, child_pcd_f, parent_pose_s, inde
         # o3d.visualization.draw_geometries([target_pcd, fixed_pcd, origin])
         print(f"Target pcd has {child_pcd_f.shape[0]} points, fixed pcd has {parent_pcd_f.shape[0]} points")
         return
-    
+
     # Filter outliers
     parent_pcd_f = parent_pcd_f[np.linalg.norm(parent_pcd_f, axis=1) <= 2.0]
     child_pcd_f = child_pcd_f[np.linalg.norm(child_pcd_f, axis=1) <= 2.0]
@@ -584,11 +593,7 @@ def build_dataset_rdiff_eval(cfg, parent_pcd_f, child_pcd_f, parent_pose_s, inde
     target_transform = np.eye(4, dtype=np.float32)
     target_transform[:3, 3] = target_pcd_center
 
-    if (
-        vis
-        or target_pcd_arr.shape[0] < (num_point_lower_bound / 2)
-        or fixed_pcd_arr.shape[0] < num_point_lower_bound
-    ):
+    if vis or target_pcd_arr.shape[0] < (num_point_lower_bound / 2) or fixed_pcd_arr.shape[0] < num_point_lower_bound:
         # visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
         # visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, target_transform)
         # Visualize & Check
@@ -630,17 +635,18 @@ def build_dataset_rdiff_eval(cfg, parent_pcd_f, child_pcd_f, parent_pose_s, inde
     os.makedirs(save_path, exist_ok=True)
     print(f"Saving dataset to {save_path}...")
     save_file_path = os.path.join(
-            root_dir,
-            "test_data",
-            "dmorp_rdiff_eval",
-            f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_test{index}.pkl",
-        )
+        root_dir,
+        "test_data",
+        "dmorp_rdiff_eval",
+        f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_test{index}.pkl",
+    )
     with open(
         save_file_path,
         "wb",
     ) as f:
         pickle.dump([tmorp_data], f)
     return save_file_path
+
 
 if __name__ == "__main__":
     # Parse arguments
@@ -674,6 +680,6 @@ if __name__ == "__main__":
             data_path = os.path.join(root_dir, "test_data", "dmorp_real", f"{did:06d}")
             build_dataset_real(data_path, cfg, data_id=did, vis=vis, filter_key=filter_key)
         elif args.data_type == "rdiff":
-            build_dataset_rdiff(data_root_dir, cfg, data_id=did, vis=vis)
+            build_dataset_rpdiff(data_root_dir, cfg, data_id=did, vis=vis)
         else:
             raise NotImplementedError

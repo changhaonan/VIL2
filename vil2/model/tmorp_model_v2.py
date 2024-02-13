@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 import torch
 import torch.nn as nn
 from torch.optim.lr_scheduler import LambdaLR
-import math
+import open3d as o3d
 import os
 import torch
 import torch.nn.functional as F
@@ -20,6 +20,7 @@ import time
 from vil2.model.network.geometric import batch2offset
 from vil2.model.network.pose_transformer_v2 import PoseTransformerV2
 import vil2.utils.misc_utils as utils
+from vil2.utils.pcd_utils import normalize_pcd
 
 # DataUtils
 from vil2.data.pcd_dataset import PcdPairDataset
@@ -309,3 +310,79 @@ class TmorpModelV2:
             }
             samples.append(sample)
         return PcdPairCollator()(samples), samples
+
+    # Utility functions
+    def preprocess_input_rpdiff(self, target_coord: np.ndarray, fixed_coord: np.ndarray):
+        """Preprocess data for eval on RPDiff"""
+        # Build o3d object
+        target_pcd_o3d = o3d.geometry.PointCloud()
+        target_pcd_o3d.points = o3d.utility.Vector3dVector(target_coord)
+        target_pcd_o3d.paint_uniform_color([0, 0, 1])
+        fixed_pcd_o3d = o3d.geometry.PointCloud()
+        fixed_pcd_o3d.points = o3d.utility.Vector3dVector(fixed_coord)
+        fixed_pcd_o3d.paint_uniform_color([1, 0, 0])
+
+        # Estimate the pose of fixed coord using a rotating bbox
+        fixed_pcd_bbox = fixed_pcd_o3d.get_minimal_oriented_bounding_box()
+        fixed_pcd_bbox.color = [0, 1, 0]
+        fixed_R = fixed_pcd_bbox.R
+        fixed_t = (np.max(fixed_coord, axis=0) + np.min(fixed_coord, axis=0)) / 2
+        fixed_extent = fixed_pcd_bbox.extent
+        print(fixed_extent)
+        # Play around axis
+        fixed_R_z = np.array([0, 0, 1])
+        # Remove the axis that is parallel to the z-axis
+        fixed_R_z_dot = fixed_R_z @ fixed_R
+        fixed_R_z_idx = np.argmax(np.abs(fixed_R_z_dot))
+        fixed_R_axis = np.delete(fixed_R, fixed_R_z_idx, axis=1)
+        fixed_R_extent = np.delete(fixed_extent, fixed_R_z_idx)
+        # The one with shorter extent is the x-axis
+        fixed_R_x_idx = np.argmin(fixed_R_extent)
+        fixed_R_x = fixed_R_axis[:, fixed_R_x_idx]
+        # The other one is the y-axis
+        fixed_R_y = np.cross(fixed_R_z, fixed_R_x)
+        fixed_R = np.column_stack([fixed_R_x, fixed_R_y, fixed_R_z])
+        fixed_pose = np.eye(4)
+        fixed_pose[:3, 3] = fixed_t
+        fixed_pose[:3, :3] = fixed_R
+        target_t = (np.max(target_coord, axis=0) + np.min(target_coord, axis=0)) / 2
+        target_pose = np.eye(4)
+        target_pose[:3, 3] = target_t
+
+        # Shift the target coord to the origin
+        fixed_pcd_o3d.transform(np.linalg.inv(fixed_pose))
+        target_pcd_o3d.transform(np.linalg.inv(target_pose))
+
+        # Downsample the point cloud
+        downsample_grid_size = self.cfg.PREPROCESS.GRID_SIZE
+        fixed_pcd_o3d = fixed_pcd_o3d.voxel_down_sample(voxel_size=downsample_grid_size)
+        target_pcd_o3d = target_pcd_o3d.voxel_down_sample(voxel_size=downsample_grid_size)
+
+        # Normalize pcd
+        fixed_pcd_o3d, [target_pcd_o3d], _, scale_xyz = normalize_pcd(fixed_pcd_o3d, [target_pcd_o3d])
+
+        # Compute normal
+        fixed_pcd_o3d.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+        target_pcd_o3d.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+
+        # DEBUG:
+        # origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0)
+        # o3d.visualization.draw_geometries([target_pcd_o3d, fixed_pcd_o3d, origin])
+
+        # Build the input
+        target_coord = np.array(target_pcd_o3d.points)
+        target_normal = np.array(target_pcd_o3d.normals)
+        fixed_coord = np.array(fixed_pcd_o3d.points)
+        fixed_normal = np.array(fixed_pcd_o3d.normals)
+        target_feat = np.concatenate([target_coord, target_normal], axis=1)
+        fixed_feat = np.concatenate([fixed_coord, fixed_normal], axis=1)
+        data = {
+            "target_coord": target_coord,
+            "target_feat": target_feat,
+            "fixed_coord": fixed_coord,
+            "fixed_feat": fixed_feat,
+            "fixed_pose": fixed_pose,
+            "target_pose": target_pose,
+            "scale_xyz": scale_xyz,
+        }
+        return data
