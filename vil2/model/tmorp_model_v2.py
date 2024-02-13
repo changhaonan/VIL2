@@ -347,20 +347,21 @@ class TmorpModelV2:
         fixed_pose[:3, :3] = fixed_R
         target_t = (np.max(target_coord, axis=0) + np.min(target_coord, axis=0)) / 2
         target_pose = np.eye(4)
+        target_pose[:3, :3] = fixed_R
         target_pose[:3, 3] = target_t
 
         # Shift the target coord to the origin
         fixed_pcd_o3d.transform(np.linalg.inv(fixed_pose))
         target_pcd_o3d.transform(np.linalg.inv(target_pose))
 
+        # Normalize pcd
+        fixed_pcd_o3d, [target_pcd_o3d], _, scale_xyz = normalize_pcd(fixed_pcd_o3d, [target_pcd_o3d])
+
         # Downsample the point cloud
         downsample_grid_size = self.cfg.PREPROCESS.GRID_SIZE
         fixed_pcd_o3d = fixed_pcd_o3d.voxel_down_sample(voxel_size=downsample_grid_size)
         target_pcd_o3d = target_pcd_o3d.voxel_down_sample(voxel_size=downsample_grid_size)
-
-        # Normalize pcd
-        fixed_pcd_o3d, [target_pcd_o3d], _, scale_xyz = normalize_pcd(fixed_pcd_o3d, [target_pcd_o3d])
-
+       
         # Compute normal
         fixed_pcd_o3d.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
         target_pcd_o3d.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
@@ -370,10 +371,10 @@ class TmorpModelV2:
         # o3d.visualization.draw_geometries([target_pcd_o3d, fixed_pcd_o3d, origin])
 
         # Build the input
-        target_coord = np.array(target_pcd_o3d.points)
-        target_normal = np.array(target_pcd_o3d.normals)
-        fixed_coord = np.array(fixed_pcd_o3d.points)
-        fixed_normal = np.array(fixed_pcd_o3d.normals)
+        target_coord = np.array(target_pcd_o3d.points).astype(np.float32)
+        target_normal = np.array(target_pcd_o3d.normals).astype(np.float32)
+        fixed_coord = np.array(fixed_pcd_o3d.points).astype(np.float32)
+        fixed_normal = np.array(fixed_pcd_o3d.normals).astype(np.float32)
         target_feat = np.concatenate([target_coord, target_normal], axis=1)
         fixed_feat = np.concatenate([fixed_coord, fixed_normal], axis=1)
         data = {

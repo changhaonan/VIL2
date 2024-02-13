@@ -1028,46 +1028,6 @@ def main(args: config_util.AttrDict) -> None:
             cfg_file = os.path.join(root_path, "config", "pose_transformer_rdiff.py")
             cfg = LazyConfig.load(cfg_file)
 
-            save_file_path = build_dataset_rdiff_eval(
-                cfg=cfg,
-                parent_pcd_f=parent_pcd_original,
-                child_pcd_f=child_pcd_original,
-                parent_pose_s=multi_mesh_dict["parent_pose"][0],
-                index=0,
-            )
-            is_random_distortion = cfg.DATALOADER.AUGMENTATION.IS_RANDOM_DISTORTION
-            random_distortion_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_RATE
-            random_distortion_mag = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_MAG
-            volume_augmentation_file = cfg.DATALOADER.AUGMENTATION.VOLUME_AUGMENTATION_FILE
-            crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
-            crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
-            crop_noise = cfg.DATALOADER.AUGMENTATION.CROP_NOISE
-            noise_level = cfg.DATALOADER.AUGMENTATION.NOISE_LEVEL
-            rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
-            knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
-            volume_augmentations_path = (
-                os.path.join(root_path, "config", volume_augmentation_file)
-                if volume_augmentation_file is not None
-                else None
-            )
-            test_dataset = PcdPairDataset(
-                data_file_list=[save_file_path],
-                dataset_name="dmorp",
-                add_colors=True,
-                add_normals=True,
-                is_random_distortion=is_random_distortion,
-                random_distortion_rate=random_distortion_rate,
-                random_distortion_mag=random_distortion_mag,
-                volume_augmentations_path=volume_augmentations_path,
-                crop_pcd=False,
-                crop_size=crop_size,
-                crop_noise=crop_noise,
-                crop_strategy=crop_strategy,
-                noise_level=noise_level,
-                rot_axis=rot_axis,
-                knn_k=knn_k,
-            )
-
             # Build model
             net_name = cfg.MODEL.NOISE_NET.NAME
             net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
@@ -1080,91 +1040,79 @@ def main(args: config_util.AttrDict) -> None:
             os.makedirs(save_dir, exist_ok=True)
 
             checkpoint_path = f"{save_path}/checkpoints"
-            # Select the best checkpoint
+            # Load the best checkpoint
             checkpoints = os.listdir(checkpoint_path)
             sorted_checkpoints = sorted(checkpoints, key=lambda x: float(x.split("=")[-1].split(".ckpt")[0]))
             checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
 
+            tmorp_model.load(checkpoint_file)
+
             # Preprocess
-            tmorp_model.preprocess_input_rpdiff(
+            data = tmorp_model.preprocess_input_rpdiff(
                 fixed_coord=parent_pcd,
                 target_coord=child_pcd,
             )
+            target_coord = data["target_coord"]
+            target_feat = data["target_feat"]
+            fixed_coord = data["fixed_coord"]
+            fixed_feat = data["fixed_feat"]
 
-            tmorp_model.load(checkpoint_file)
-            for i in range(1):
-                # test_idx = np.random.randint(len(test_dataset))
-                test_idx = i
-                # Load the best checkpoint
-                test_data = test_dataset[test_idx]
-                # test_data = train_dataset[test_idx]
-                target_coord = test_data["target_coord"]
-                target_feat = test_data["target_feat"]
-                fixed_coord = test_data["fixed_coord"]
-                fixed_feat = test_data["fixed_feat"]
-                target_pose = test_data["target_pose"]
+            # Batch sampling
+            crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
+            knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
+            crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
+            batch_size = 32
+            sample_batch, samples = tmorp_model.batch_random_sample(
+                batch_size,
+                target_coord=target_coord,
+                target_feat=target_feat,
+                fixed_coord=fixed_coord,
+                fixed_feat=fixed_feat,
+                crop_strategy=crop_strategy,
+                crop_size=crop_size,
+                knn_k=knn_k,
+            )
 
-                # Init crop center
-                crop_center = target_pose[:3]
-                crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
-                knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
-                crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
+            pred_pose9d, pred_status = tmorp_model.predict(batch=sample_batch)
 
-                # Batch sampling
-                batch_size = 32
-                sample_batch, samples = tmorp_model.batch_random_sample(
-                    batch_size,
-                    target_coord=target_coord,
-                    target_feat=target_feat,
-                    fixed_coord=fixed_coord,
-                    fixed_feat=fixed_feat,
-                    crop_strategy=crop_strategy,
-                    crop_size=crop_size,
-                    knn_k=knn_k,
-                )
+            # Rank the prediction by status
+            sorted_indices = np.argsort(pred_status[:, 1])
+            sorted_indices = sorted_indices[::-1]
+            pred_pose9d = pred_pose9d[sorted_indices]
+            pred_status = pred_status[sorted_indices]
+            debug = True
+            if debug:
+                # Check the result
+                fixed_pcd = o3d.geometry.PointCloud()
+                fixed_pcd.points = o3d.utility.Vector3dVector(fixed_coord)
+                fixed_pcd.paint_uniform_color([0, 1, 0])
+                # o3d.visualization.draw_geometries([fixed_pcd])
 
-                pred_pose9d, pred_status = tmorp_model.predict(batch=sample_batch)
+                for j in range(5):
+                    print(f"Status: {pred_status[j]} for {j}-th sample")
+                    vis_list = [fixed_pcd]
+                    # Crop fixed
+                    crop_fixed_coord = samples[sorted_indices[j]]["fixed_coord"]
+                    crop_fixed_pcd = o3d.geometry.PointCloud()
+                    crop_fixed_pcd.points = o3d.utility.Vector3dVector(crop_fixed_coord)
+                    crop_fixed_pcd.paint_uniform_color([1, 0, 0])
+                    crop_center = samples[sorted_indices[j]]["crop_center"]
+                    crop_fixed_pcd.translate(crop_center)
+                    vis_list.append(crop_fixed_pcd)
 
-                # Rank the prediction by status
-                sorted_indices = np.argsort(pred_status[:, 1])
-                sorted_indices = sorted_indices[::-1]
-                pred_pose9d = pred_pose9d[sorted_indices]
-                pred_status = pred_status[sorted_indices]
-                debug = True
-                if debug:
-                    # Check the result
-                    fixed_pcd = o3d.geometry.PointCloud()
-                    fixed_pcd.points = o3d.utility.Vector3dVector(fixed_coord)
-                    fixed_pcd.paint_uniform_color([0, 1, 0])
-                    # o3d.visualization.draw_geometries([fixed_pcd])
+                    # Target
+                    pred_pose_mat = utils.pose9d_to_mat(pred_pose9d[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
+                    target_pcd = o3d.geometry.PointCloud()
+                    target_pcd.points = o3d.utility.Vector3dVector(target_coord)
+                    target_pcd.paint_uniform_color([0, 0, 1])
+                    target_pcd.transform(pred_pose_mat)
+                    target_pcd.translate(crop_center)
+                    vis_list.append(target_pcd)
 
-                    for j in range(3):
-                        print(f"Status: {pred_status[j]} for {j}-th sample")
-                        vis_list = [fixed_pcd]
-                        # Crop fixed
-                        crop_fixed_coord = samples[sorted_indices[j]]["fixed_coord"]
-                        crop_fixed_pcd = o3d.geometry.PointCloud()
-                        crop_fixed_pcd.points = o3d.utility.Vector3dVector(crop_fixed_coord)
-                        crop_fixed_pcd.paint_uniform_color([1, 0, 0])
-                        crop_center = samples[sorted_indices[j]]["crop_center"]
-                        crop_fixed_pcd.translate(crop_center)
-                        vis_list.append(crop_fixed_pcd)
-
-                        # Target
-                        pred_pose_mat = utils.pose9d_to_mat(
-                            pred_pose9d[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS
-                        )
-                        target_pcd = o3d.geometry.PointCloud()
-                        target_pcd.points = o3d.utility.Vector3dVector(target_coord)
-                        target_pcd.paint_uniform_color([0, 0, 1])
-                        target_pcd.transform(pred_pose_mat)
-                        target_pcd.translate(crop_center)
-                        vis_list.append(target_pcd)
-
-                        # Origin
-                        origin_pcd = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-                        vis_list.append(origin_pcd)
-                        o3d.visualization.draw_geometries(vis_list)
+                    # Origin
+                    origin_pcd = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+                    vis_list.append(origin_pcd)
+                    o3d.visualization.draw_geometries(vis_list)
 
             # exit(0)
             relative_trans_pred = utils.pose9d_to_mat(pred_pose9d[0], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
