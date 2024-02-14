@@ -601,8 +601,8 @@ if __name__ == "__main__":
         dataset_folder = "dmorp_real"
     elif "struct" in cfg.ENV.GOAL_TYPE:
         dataset_folder = "dmorp_struct"
-    elif "rdiff" in cfg.ENV.GOAL_TYPE:
-        dataset_folder = "dmorp_rdiff"
+    elif "rpdiff" in cfg.ENV.GOAL_TYPE:
+        dataset_folder = "dmorp_rpdiff"
     else:
         dataset_folder = "dmorp_faster"
 

@@ -29,7 +29,7 @@ if __name__ == "__main__":
     # Load config
     task_name = "Dmorp"
     root_path = os.path.dirname((os.path.abspath(__file__)))
-    cfg_file = os.path.join(root_path, "config", "pose_transformer_rdiff.py")
+    cfg_file = os.path.join(root_path, "config", "pose_transformer_rpdiff.py")
     cfg = LazyConfig.load(cfg_file)
     
     # Load dataset & data loader

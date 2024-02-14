@@ -850,7 +850,7 @@ def main(args: config_util.AttrDict) -> None:
         sorted_indices = sorted_indices[::-1]
         pred_pose9d = pred_pose9d[sorted_indices]
         pred_status = pred_status[sorted_indices]
-        debug = True
+        debug = False
 
         pred_pose_mat_list = []
         for j in range(1):
