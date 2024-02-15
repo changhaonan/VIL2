@@ -40,6 +40,8 @@ class PcdPairDataset(Dataset):
         volume_augmentations_path: Optional[str] = None,
         image_augmentations_path: Optional[str] = None,
         is_elastic_distortion: bool = False,
+        elastic_distortion_granularity: float = 1.0,
+        elastic_distortion_magnitude: float = 1.0,
         is_random_distortion: bool = False,
         random_distortion_rate: float = 0.2,
         random_distortion_mag: float = 0.01,
@@ -56,6 +58,8 @@ class PcdPairDataset(Dataset):
         self.add_colors = add_colors
         self.add_normals = add_normals
         self.is_elastic_distortion = is_elastic_distortion
+        self.elastic_distortion_granularity = elastic_distortion_granularity
+        self.elastic_distortion_magnitude = elastic_distortion_magnitude
         self.is_random_distortion = is_random_distortion
         self.random_distortion_rate = random_distortion_rate
         self.random_distortion_mag = random_distortion_mag
@@ -102,7 +106,9 @@ class PcdPairDataset(Dataset):
     def augment_pcd_instance(self, coordinate, normal, color, label, pose, disable_rot: bool = False):
         """Augment a single point cloud instance."""
         if self.is_elastic_distortion:
-            coordinate = elastic_distortion(coordinate, 0.1, 0.1)
+            coordinate = elastic_distortion(
+                coordinate, self.elastic_distortion_granularity, self.elastic_distortion_magnitude
+            )
         if self.is_random_distortion:
             coordinate, color, normal, label = random_around_points(
                 coordinate,
@@ -575,12 +581,14 @@ if __name__ == "__main__":
     split = "test"
     task_name = "Dmorp"
     root_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    cfg_file = os.path.join(root_path, "config", "pose_transformer_rdiff.py")
+    cfg_file = os.path.join(root_path, "config", "pose_transformer_rpdiff.py")
     cfg = LazyConfig.load(cfg_file)
 
     # Test data loader
     pcd_size = cfg.MODEL.PCD_SIZE
     is_elastic_distortion = cfg.DATALOADER.AUGMENTATION.IS_ELASTIC_DISTORTION
+    elastic_distortion_granularity = cfg.DATALOADER.AUGMENTATION.ELASTIC_DISTORTION_GRANULARITY
+    elastic_distortion_magnitude = cfg.DATALOADER.AUGMENTATION.ELASTIC_DISTORTION_MAGNITUDE
     is_random_distortion = cfg.DATALOADER.AUGMENTATION.IS_RANDOM_DISTORTION
     random_distortion_rate = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_RATE
     random_distortion_mag = cfg.DATALOADER.AUGMENTATION.RANDOM_DISTORTION_MAG
@@ -627,6 +635,8 @@ if __name__ == "__main__":
         add_colors=True,
         add_normals=True,
         is_elastic_distortion=True,
+        elastic_distortion_granularity=elastic_distortion_granularity,
+        elastic_distortion_magnitude=elastic_distortion_magnitude,
         is_random_distortion=is_random_distortion,
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
@@ -651,8 +661,10 @@ if __name__ == "__main__":
         fixed_coord = data["fixed_coord"]
         fixed_feat = data["fixed_feat"]
         target_pose = data["target_pose"]
-        print("Target pose: ", target_pose)
-        print(f"Number of target points: {len(target_coord)}, Number of fixed points: {len(fixed_coord)}")
+        is_valid_crop = data["is_valid_crop"]
+        print(
+            f"Number of target points: {len(target_coord)}, Number of fixed points: {len(fixed_coord)}, Crop valid: {is_valid_crop}"
+        )
 
         target_color = np.zeros_like(target_coord)
         target_color[:, 0] = 1

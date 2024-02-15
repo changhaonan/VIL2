@@ -7,7 +7,7 @@ ENV = dict(
     GOAL_TYPE="rpdiff",  # rpdiff
 )
 PREPROCESS = dict(
-    GRID_SIZE=0.025,
+    GRID_SIZE=0.15,
     TARGET_RESCALE=3.0,
     NUM_POINT_LOW_BOUND=40,
     NUM_POINT_HIGH_BOUND=400,
@@ -18,14 +18,16 @@ DATALOADER = dict(
     NUM_WORKERS=8,  # Set to 0 if using ilab
     AUGMENTATION=dict(
         IS_ELASTIC_DISTORTION=True,
+        ELASTIC_DISTORTION_GRANULARITY=1.0,
+        ELASTIC_DISTORTION_MAGNITUDE=1.0,
         IS_RANDOM_DISTORTION=True,
         RANDOM_DISTORTION_RATE=0.2,
-        RANDOM_DISTORTION_MAG=0.01,
+        RANDOM_DISTORTION_MAG=0.1,
         VOLUME_AUGMENTATION_FILE="va_rotation.yaml",  # None
         RANDOM_SEGMENT_DROP_RATE=0.15,
         CROP_PCD=True,
-        CROP_SIZE=0.2,
-        CROP_NOISE=0.1,
+        CROP_SIZE=2.0,
+        CROP_NOISE=0.5,
         CROP_STRATEGY="knn_bbox",  # bbox, radius, knn
         RANDOM_CROP_PROB=0.5,
         NOISE_LEVEL=0.5,
@@ -61,7 +63,7 @@ MODEL = dict(
             ),
             TRANSFORMERV2=dict(
                 # Point transformer network
-                grid_sizes=[0.035, 0.06],
+                grid_sizes=[0.3, 0.5],
                 depths=[2, 3, 3],
                 dec_depths=[1, 1],  # V2
                 # dec_depths=[2, 2],  # V3
@@ -77,7 +79,6 @@ MODEL = dict(
     ),
     TIME_EMB_DIM=128,
     RETRAIN=True,
-    # PCD_SIZE=512,
     PCD_SIZE=2048,
     TRAIN_SPLIT=0.7,
     VAL_SPLIT=0.2,
@@ -90,29 +91,9 @@ MODEL = dict(
         CANONICALIZE=False,
     ),
     DATASET_CONFIG="s25000-c1-r0.5",  # "s1000-c200-r0.5",  # "s300-c20-r0.5", #"s500-c20-r0.5" #"s1000-c1-r0.5", # "s250-c40-r2", # "s100-c20-r2",
-    SAVE_FIG=True,
-    VISUALIZE=False,
-    MAX_SCENE_SIZE=4,
-    ACTION_DIM=3 + 1,  # 6d pose/ 3d translation + time stamp
-    VISION_ENCODER=dict(
-        NAME="resnet18",
-        PRETRAINED=True,
-    ),
-    SEMANTIC_FEAT_DIM=10,
-    AGGREGATE_TYPE="sum",  # mean, max, sum
-    AGGREGATE_LIST=["POSE"],
-    SEMANTIC_FEAT_TYPE="one_hot",  # random, clip, one_hot,
-    RECON_DATA_STAMP=False,  # reconstruct data stamp
-    RECON_SEMANTIC_FEATURE=False,  # reconstruct semantic feature
-    RECON_POSE=True,  # reconstruct pose
-    COND_GEOMETRY_FEATURE=True,
-    COND_SEMANTIC_FEATURE=False,
-    GUIDE_DATA_CONSISTENCY=True,
-    GUIDE_SEMANTIC_CONSISTENCY=False,
-    USE_POSITIONAL_EMBEDDING=True,
-    GMM=dict(
-        N_COMPONENTS=5,
-    ),
+    NUM_GRID=5,
+    SAMPLE_SIZE=64,
+    SAMPLE_STRATEGY="grid",  # random, grid
 )
 LOGGER = dict(
     PROJECT="tns",

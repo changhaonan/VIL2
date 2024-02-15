@@ -26,18 +26,24 @@ def visualize_tensor_pcd(pcd: torch.Tensor):
     o3d.visualization.draw_geometries([pcd])
 
 
-def normalize_pcd(pcd_anchor, pcd_list):
+def normalize_pcd(pcd_anchor, pcd_target, do_scaling: bool = True):
     # Normalize to unit cube
     pcd_center = (pcd_anchor.get_max_bound() + pcd_anchor.get_min_bound()) / 2
     pcd_anchor = pcd_anchor.translate(-pcd_center)
     scale_xyz = pcd_anchor.get_max_bound() - pcd_anchor.get_min_bound()
     scale_xyz = np.max(scale_xyz)
+    if not do_scaling:
+        scale_xyz = 1.0
     pcd_anchor = pcd_anchor.scale(1 / scale_xyz, center=np.array([0, 0, 0]))
 
     # Normalize the child point clouds
-    normalized_pcd_list = []
-    for pcd in pcd_list:
-        pcd = pcd.translate(-pcd_center)
-        pcd = pcd.scale(1 / scale_xyz, center=np.array([0, 0, 0]))
-        normalized_pcd_list.append(pcd)
-    return pcd_anchor, normalized_pcd_list, pcd_center, scale_xyz
+    pcd_target = pcd_target.translate(-pcd_center)
+    normalize_pcd_target = pcd_target.scale(1 / scale_xyz, center=np.array([0, 0, 0]))
+    return pcd_anchor, normalize_pcd_target, pcd_center, scale_xyz
+
+
+def check_collision(pcd_anchor: np.ndarray, pcd_target: np.ndarray, threshold=0.01):
+    """Check if there existing collision between two point clouds."""
+    dists = np.linalg.norm(pcd_anchor[:, None, :] - pcd_target[None, :, :], axis=-1)
+    min_dists = np.min(dists, axis=1)
+    return np.any(min_dists < threshold)

@@ -48,21 +48,20 @@ def read_scene_hdf5(fixed_hdf5, target_hdf5, intrinsic_file):
     return target_color, target_depth, fixed_color, fixed_depth, intrinsic
 
 
-def normalize_pcd(pcd_anchor, pcd_list):
+def normalize_pcd(pcd_anchor, pcd_target, do_scaling: bool = True):
     # Normalize to unit cube
     pcd_center = (pcd_anchor.get_max_bound() + pcd_anchor.get_min_bound()) / 2
     pcd_anchor = pcd_anchor.translate(-pcd_center)
     scale_xyz = pcd_anchor.get_max_bound() - pcd_anchor.get_min_bound()
     scale_xyz = np.max(scale_xyz)
+    if not do_scaling:
+        scale_xyz = 1.0
     pcd_anchor = pcd_anchor.scale(1 / scale_xyz, center=np.array([0, 0, 0]))
 
     # Normalize the child point clouds
-    normalized_pcd_list = []
-    for pcd in pcd_list:
-        pcd = pcd.translate(-pcd_center)
-        pcd = pcd.scale(1 / scale_xyz, center=np.array([0, 0, 0]))
-        normalized_pcd_list.append(pcd)
-    return pcd_anchor, normalized_pcd_list, pcd_center, scale_xyz
+    pcd_target = pcd_target.translate(-pcd_center)
+    normalize_pcd_target = pcd_target.scale(1 / scale_xyz, center=np.array([0, 0, 0]))
+    return pcd_anchor, normalize_pcd_target, pcd_center, scale_xyz
 
 
 def visualize_pcd_with_open3d(
@@ -373,7 +372,7 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False, filt
     print("Done!")
 
 
-def build_dataset_rpdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, normalize: bool = False):
+def build_dataset_rpdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, do_scaling: bool = True):
     """Build the dataset from the rpdiff data"""
     data_file_list = os.listdir(data_dir)
     data_file_list = [f for f in data_file_list if f.endswith(".npz")]
@@ -450,7 +449,10 @@ def build_dataset_rpdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, nor
             np.linalg.inv(parent_pose_s)
         )
 
-        fixed_pcd, [target_pcd], _, __ = normalize_pcd(fixed_pcd, [target_pcd])
+        # fixed_pcd, target_pcd, _, __ = normalize_pcd(fixed_pcd, target_pcd, do_scaling=do_scaling)
+        target_pcd, fixed_pcd, _, __ = normalize_pcd(
+            target_pcd, fixed_pcd, do_scaling=do_scaling
+        )  # Normalize to target
 
         # Compute normal
         target_pcd_center = (target_pcd.get_max_bound() + target_pcd.get_min_bound()) / 2
@@ -548,11 +550,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
     data_root_dir = args.data_root_dir
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    cfg_file = os.path.join(root_dir, "config", "pose_transformer_rdiff.py")
+    cfg_file = os.path.join(root_dir, "config", "pose_transformer_rpdiff.py")
     cfg = LazyConfig.load(cfg_file)
     data_id = args.data_id
     filter_key = args.filter_key
     vis = args.vis
+    do_scaling = True
     # vis = True
 
     dtset = []
@@ -565,6 +568,6 @@ if __name__ == "__main__":
             data_path = os.path.join(root_dir, "test_data", "dmorp_real", f"{did:06d}")
             build_dataset_real(data_path, cfg, data_id=did, vis=vis, filter_key=filter_key)
         elif args.data_type == "rpdiff":
-            build_dataset_rpdiff(data_root_dir, cfg, data_id=did, vis=vis)
+            build_dataset_rpdiff(data_root_dir, cfg, data_id=did, vis=vis, do_scaling=do_scaling)
         else:
             raise NotImplementedError

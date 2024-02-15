@@ -2,12 +2,12 @@ rotation:
   prob: 1.0
 translation:
   prob: 1.0
-  min_x: -0.03
-  max_x: 0.03
-  min_y: -0.03 
-  max_y: 0.03
-  min_z: -0.03
-  max_z: 0.03
+  min_x: -0.3
+  max_x: 0.3
+  min_y: -0.3 
+  max_y: 0.3
+  min_z: -0.3
+  max_z: 0.3
 segment_drop:
   prob: 1.0
   

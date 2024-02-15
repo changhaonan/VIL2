@@ -37,19 +37,9 @@ from vil2.external.rpdiff.utils.eval_gen_utils import (
     safeRemoveConstraint,
 )
 
-from vil2.external.rpdiff.utils.relational_policy.multistep_pose_regression import policy_inference_methods_dict
-from vil2.external.rpdiff.model.coarse_affordance import CoarseAffordanceVoxelRot
-from vil2.external.rpdiff.model.transformer.policy import (
-    NSMTransformerSingleTransformationRegression,
-    NSMTransformerSingleTransformationRegressionCVAE,
-    NSMTransformerSingleSuccessClassifier,
-)
 from vil2.model.network.pose_transformer_v2 import PoseTransformerV2
 from vil2.model.tmorp_model_v2 import TmorpModelV2
 import open3d as o3d
-import vil2.utils.misc_utils as utils
-from vil2.data_gen.preprocess_data import build_dataset_rdiff_eval
-from vil2.data.pcd_dataset import PcdPairDataset
 
 
 def check_ckpt_load_latest(ckpt_path: str) -> str:
@@ -134,7 +124,7 @@ def main(args: config_util.AttrDict) -> None:
     # Load Dmorps model
     task_name = "Dmorp"
     root_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname((os.path.abspath(__file__))))))
-    cfg_file = os.path.join(root_path, "config", "pose_transformer_rdiff.py")
+    cfg_file = os.path.join(root_path, "config", "pose_transformer_rpdiff.py")
     cfg = LazyConfig.load(cfg_file)
 
     # Build model
@@ -155,6 +145,7 @@ def main(args: config_util.AttrDict) -> None:
     checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
 
     tmorp_model.load(checkpoint_file)
+    tmorp_model.lightning_pose_transformer.to("cuda")  # Move to GPU
 
     #####################################################################################
     # load all the multi class mesh info
@@ -831,9 +822,13 @@ def main(args: config_util.AttrDict) -> None:
         crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
         knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
         crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
-        batch_size = 32
+        num_grid = cfg.MODEL.NUM_GRID
+        sample_size = cfg.MODEL.SAMPLE_SIZE
+        sample_strategy = cfg.MODEL.SAMPLE_STRATEGY
+        # Batch sampling
         sample_batch, samples = tmorp_model.batch_random_sample(
-            batch_size,
+            sample_size,
+            sample_strategy=sample_strategy,
             target_coord=target_coord,
             target_feat=target_feat,
             fixed_coord=fixed_coord,
@@ -841,6 +836,7 @@ def main(args: config_util.AttrDict) -> None:
             crop_strategy=crop_strategy,
             crop_size=crop_size,
             knn_k=knn_k,
+            num_grid=num_grid,
         )
 
         pred_pose9d, pred_status = tmorp_model.predict(batch=sample_batch)
@@ -1230,6 +1226,17 @@ def main(args: config_util.AttrDict) -> None:
             #########################################################################
 
         place_success = np.all(np.asarray(list(success_crit_dict.values())))
+
+        # Save the pcd for testing if not successful
+        if not place_success:
+            eval_fail_dir = osp.join(eval_save_dir, "failed")
+            util.safe_makedirs(eval_fail_dir)
+            np.savez(
+                osp.join(eval_fail_dir, f"trial_{iteration}_failed.npz"),
+                parent_pcd=parent_pcd_original,
+                child_pcd=child_pcd_original,
+                final_child_pcd=final_child_pcd,
+            )
 
         place_success_list.append(place_success)
         log_str = "Iteration: %d, " % iteration

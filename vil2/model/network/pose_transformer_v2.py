@@ -114,7 +114,17 @@ class PoseTransformerV2(nn.Module):
         pose_token = self.pose_embedding.weight[0].unsqueeze(0).expand(target_feat.size(0), -1)
         status_token = self.status_embedding.weight[0].unsqueeze(0).expand(target_feat.size(0), -1)
         target_feat = torch.cat((pose_token[:, None, :], status_token[:, None, :], target_feat), dim=1)
-        target_feat_mask = torch.cat((torch.ones_like(target_feat_mask[:, :2]), target_feat_mask), dim=1)
+        target_feat_mask = torch.cat(
+            (
+                torch.ones(
+                    [target_feat_mask.shape[0], 2],
+                    dtype=target_feat_mask.dtype,
+                    device=target_feat_mask.device,
+                ),
+                target_feat_mask,
+            ),
+            dim=1,
+        )
         target_feat_padding_mask = target_feat_mask == 0
 
         # Check the existence of nan
