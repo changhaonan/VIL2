@@ -1,4 +1,5 @@
 # Most simplified version of obj_dp experiment
+TSAK_NAME = "stack_can_in_cabinet"
 ENV = dict(
     NUM_OBJ=8,
     NUM_STRUCTURE=4,
@@ -7,7 +8,7 @@ ENV = dict(
     GOAL_TYPE="rpdiff",  # rpdiff
 )
 PREPROCESS = dict(
-    GRID_SIZE=0.15,
+    GRID_SIZE=0.1,
     TARGET_RESCALE=3.0,
     NUM_POINT_LOW_BOUND=40,
     NUM_POINT_HIGH_BOUND=400,

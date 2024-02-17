@@ -19,6 +19,12 @@ if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--seed", type=int, default=0)
     argparser.add_argument("--random_index", type=int, default=0)
+    argparser.add_argument(
+        "--task_name",
+        type=str,
+        default="book_in_bookshelf",
+        help="stack_can_in_cabinet, book_in_bookshelf, mug_on_rack_multi",
+    )
     args = argparser.parse_args()
     # Set seed
     torch.manual_seed(args.seed)
@@ -27,11 +33,11 @@ if __name__ == "__main__":
     random.seed(args.seed)
 
     # Load config
-    task_name = "Dmorp"
+    task_name = args.task_name
     root_path = os.path.dirname((os.path.abspath(__file__)))
-    cfg_file = os.path.join(root_path, "config", "pose_transformer_rpdiff.py")
+    cfg_file = os.path.join(root_path, "config", f"pose_transformer_rpdiff_{task_name}.py")
     cfg = LazyConfig.load(cfg_file)
-    
+
     # Load dataset & data loader
     train_dataset, val_dataset, test_dataset = build_dmorp_dataset(root_path, cfg)
 

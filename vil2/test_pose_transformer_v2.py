@@ -31,6 +31,12 @@ if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--seed", type=int, default=0)
     argparser.add_argument("--random_index", type=int, default=0)
+    argparser.add_argument(
+        "--task_name",
+        type=str,
+        default="book_in_bookshelf",
+        help="stack_can_in_cabinet, book_in_bookshelf, mug_on_rack_multi",
+    )
     args = argparser.parse_args()
     # Set seed
     torch.manual_seed(args.seed)
@@ -38,14 +44,20 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
 
     # Load config
-    task_name = "Dmorp"
+    task_name = args.task_name
     root_path = os.path.dirname((os.path.abspath(__file__)))
-    cfg_file = os.path.join(root_path, "config", "pose_transformer_rpdiff.py")
+    cfg_file = os.path.join(root_path, "config", f"pose_transformer_rpdiff_{task_name}.py")
     cfg = LazyConfig.load(cfg_file)
 
     # Use raw data
-    data_format = "rpdiff_fail"  # "rpdiff_fail" or "raw", "test"
-    rpdiff_path = "/home/harvey/Data/rdiff/can_in_cabinet_stack/task_name_stack_can_in_cabinet"
+    # Prepare path
+    data_path_dict = {
+        "stack_can_in_cabinet": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/can_in_cabinet_stack/task_name_stack_can_in_cabinet",
+        "book_in_bookshelf": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/book_on_bookshelf_double_view_rnd_ori/task_name_book_in_bookshelf",
+        "mug_on_rack_multi": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/mug_on_rack_multi_large_proc_gen_demos/task_name_mug_on_rack_multi",
+    }
+    data_format = "raw"  # "rpdiff_fail" or "raw", "test"
+    rpdiff_path = data_path_dict[task_name]
     rpdiff_file_list = os.listdir(rpdiff_path)
     rpdiff_file_list = [f for f in rpdiff_file_list if f.endswith(".npz")]
 
@@ -68,11 +80,12 @@ if __name__ == "__main__":
     )
 
     # Test dataset
-    failed_data_path = (
-        "/home/harvey/Project/VIL2/vil2/external/rpdiff/eval_data/eval_data/can_on_cabinet_nosc/seed_0/failed"
-    )
-    failed_data_list = os.listdir(failed_data_path)
-    failed_data_list = [os.path.join(failed_data_path, f) for f in failed_data_list if f.endswith(".npz")]
+    if data_format == "rpdiff_fail":
+        failed_data_path = (
+            "/home/harvey/Project/VIL2/vil2/external/rpdiff/eval_data/eval_data/can_on_cabinet_nosc/seed_0/failed"
+        )
+        failed_data_list = os.listdir(failed_data_path)
+        failed_data_list = [os.path.join(failed_data_path, f) for f in failed_data_list if f.endswith(".npz")]
 
     # Build model
     net_name = cfg.MODEL.NOISE_NET.NAME
@@ -94,14 +107,14 @@ if __name__ == "__main__":
 
     tmorp_model.load(checkpoint_file)
     for i in range(20):
-        i = 2  # 7 looks strange
+        i = 2
         if data_format == "test":
-            test_idx = i
-            # Load the best checkpoint
-            data = test_dataset[test_idx]
+            sample_batch = next(iter(test_data_loader))
         elif data_format == "raw":
             raw_data = np.load(os.path.join(rpdiff_path, rpdiff_file_list[i]), allow_pickle=True)
             fixed_coord_s, target_coord_s = parse_child_parent(raw_data["multi_obj_start_pcd"])
+            fixed_pose_s, target_pose_s = parse_child_parent(raw_data["multi_obj_start_obj_pose"])
+            fixed_pose_f, target_pose_f = parse_child_parent(raw_data["multi_obj_final_obj_pose"])
             data = tmorp_model.preprocess_input_rpdiff(
                 fixed_coord=fixed_coord_s,
                 target_coord=target_coord_s,
@@ -156,36 +169,36 @@ if __name__ == "__main__":
         fixed_pcd.points = o3d.utility.Vector3dVector(fixed_coord)
         fixed_pcd.paint_uniform_color([0, 1, 0])
 
-        # # Check crop sampling
-        # for j in range(sample_size):
-        #     print(f"Status: {pred_status[j]} for {j}-th sample")
-        #     vis_list = [fixed_pcd]
-        #     # Crop fixed
-        #     crop_fixed_coord = samples[sorted_indices[j]]["fixed_coord"]
-        #     crop_fixed_pcd = o3d.geometry.PointCloud()
-        #     crop_fixed_pcd.points = o3d.utility.Vector3dVector(crop_fixed_coord)
-        #     crop_fixed_pcd.paint_uniform_color([1, 0, 0])
-        #     crop_center = samples[sorted_indices[j]]["crop_center"]
-        #     crop_fixed_pcd.translate(crop_center)
-        #     vis_list.append(crop_fixed_pcd)
+        # Check crop sampling
+        for j in range(sample_size):
+            print(f"Status: {pred_status[j]} for {j}-th sample")
+            vis_list = [fixed_pcd]
+            # Crop fixed
+            crop_fixed_coord = samples[sorted_indices[j]]["fixed_coord"]
+            crop_fixed_pcd = o3d.geometry.PointCloud()
+            crop_fixed_pcd.points = o3d.utility.Vector3dVector(crop_fixed_coord)
+            crop_fixed_pcd.paint_uniform_color([1, 0, 0])
+            crop_center = samples[sorted_indices[j]]["crop_center"]
+            crop_fixed_pcd.translate(crop_center)
+            vis_list.append(crop_fixed_pcd)
 
-        #     # Target
-        #     pred_pose_mat = utils.pose9d_to_mat(pred_pose9d[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
-        #     target_pcd = o3d.geometry.PointCloud()
-        #     target_pcd.points = o3d.utility.Vector3dVector(target_coord)
-        #     target_pcd.paint_uniform_color([0, 0, 1])
-        #     target_pcd.transform(pred_pose_mat)
-        #     target_pcd.translate(crop_center)
-        #     vis_list.append(target_pcd)
+            # Target
+            pred_pose_mat = utils.pose9d_to_mat(pred_pose9d[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
+            target_pcd = o3d.geometry.PointCloud()
+            target_pcd.points = o3d.utility.Vector3dVector(target_coord)
+            target_pcd.paint_uniform_color([0, 0, 1])
+            target_pcd.transform(pred_pose_mat)
+            target_pcd.translate(crop_center)
+            vis_list.append(target_pcd)
 
-        #     crop_center_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
-        #     crop_center_sphere.translate(crop_center)
-        #     vis_list.append(crop_center_sphere)
+            crop_center_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.01)
+            crop_center_sphere.translate(crop_center)
+            vis_list.append(crop_center_sphere)
 
-        #     # Origin
-        #     origin_pcd = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-        #     vis_list.append(origin_pcd)
-        #     o3d.visualization.draw_geometries(vis_list)
+            # Origin
+            origin_pcd = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+            vis_list.append(origin_pcd)
+            o3d.visualization.draw_geometries(vis_list)
 
         for j in range(3):
             print(f"Status: {pred_status[j]} for {j}-th sample")

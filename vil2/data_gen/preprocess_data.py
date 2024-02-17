@@ -52,8 +52,7 @@ def normalize_pcd(pcd_anchor, pcd_target, do_scaling: bool = True):
     # Normalize to unit cube
     pcd_center = (pcd_anchor.get_max_bound() + pcd_anchor.get_min_bound()) / 2
     pcd_anchor = pcd_anchor.translate(-pcd_center)
-    scale_xyz = pcd_anchor.get_max_bound() - pcd_anchor.get_min_bound()
-    scale_xyz = np.max(scale_xyz)
+    scale_xyz = np.linalg.norm(pcd_anchor.get_max_bound() - pcd_anchor.get_min_bound())  # Diagonal length
     if not do_scaling:
         scale_xyz = 1.0
     pcd_anchor = pcd_anchor.scale(1 / scale_xyz, center=np.array([0, 0, 0]))
@@ -372,12 +371,11 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False, filt
     print("Done!")
 
 
-def build_dataset_rpdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, do_scaling: bool = True):
+def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_scaling: bool = True):
     """Build the dataset from the rpdiff data"""
     data_file_list = os.listdir(data_dir)
     data_file_list = [f for f in data_file_list if f.endswith(".npz")]
     grid_size = cfg.PREPROCESS.GRID_SIZE
-    target_rescale = cfg.PREPROCESS.TARGET_RESCALE
     rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
     num_point_lower_bound = cfg.PREPROCESS.NUM_POINT_LOW_BOUND
     # Split info
@@ -414,121 +412,126 @@ def build_dataset_rpdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, do_
         parent_pcd_s, child_pcd_s = parse_child_parent(data["multi_obj_start_pcd"])
         # parent_pcd_s, child_pcd_s = parse_child_parent(data["multi_obj_final_pcd"])
         parent_pose_s, child_pose_s = parse_child_parent(data["multi_obj_start_obj_pose"])
-        parent_pose_f, child_pose_f = parse_child_parent(data["multi_obj_final_obj_pose"])
-        # Transform pose to matrix
-        parent_pose_s = pose7d_to_mat(parent_pose_s)
-        child_pose_s = pose7d_to_mat(child_pose_s)
-        child_pose_f = pose7d_to_mat(child_pose_f)
+        _, child_pose_f = parse_child_parent(data["multi_obj_final_obj_pose"])
 
-        if child_pcd_s.shape[0] <= num_point_lower_bound or parent_pcd_s.shape[0] <= num_point_lower_bound:
-            # target_pcd = o3d.geometry.PointCloud()
-            # target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
-            # target_pcd.paint_uniform_color([1.0, 0.706, 0.0])
-            # fixed_pcd = o3d.geometry.PointCloud()
-            # fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
-            # origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
-            # o3d.visualization.draw_geometries([target_pcd, fixed_pcd, origin])
-            print(f"Target pcd has {child_pcd_s.shape[0]} points, fixed pcd has {parent_pcd_s.shape[0]} points")
-            continue
+        if task_name == "stack_can_in_cabinet" or task_name == "book_in_bookshelf":
+            parent_pose_s = [parent_pose_s]
+            child_pose_f = [child_pose_f]
+            child_pose_s = [child_pose_s]
 
-        # Filter outliers
-        parent_pcd_s = parent_pcd_s[np.linalg.norm(parent_pcd_s, axis=1) <= 2.0]
-        child_pcd_s = child_pcd_s[np.linalg.norm(child_pcd_s, axis=1) <= 2.0]
+        for i in range(len(parent_pose_s)):
+            # Transform pose to matrix
+            parent_mat_s = pose7d_to_mat(parent_pose_s[i])
+            child_mat_s = pose7d_to_mat(child_pose_s[0])
+            child_mat_f = pose7d_to_mat(child_pose_f[0])
 
-        # Rescale the target pcd in case that there are not enough points after voxel downsampling
-        # Shift all points to the origin
-        target_pcd = o3d.geometry.PointCloud()
-        target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
+            if child_pcd_s.shape[0] <= num_point_lower_bound or parent_pcd_s.shape[0] <= num_point_lower_bound:
+                # target_pcd = o3d.geometry.PointCloud()
+                # target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
+                # target_pcd.paint_uniform_color([1.0, 0.706, 0.0])
+                # fixed_pcd = o3d.geometry.PointCloud()
+                # fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
+                # origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
+                # o3d.visualization.draw_geometries([target_pcd, fixed_pcd, origin])
+                print(f"Target pcd has {child_pcd_s.shape[0]} points, fixed pcd has {parent_pcd_s.shape[0]} points")
+                continue
 
-        fixed_pcd = o3d.geometry.PointCloud()
-        fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
-        fixed_pcd.transform(np.linalg.inv(parent_pose_s))
+            # Filter outliers
+            parent_pcd_s = parent_pcd_s[np.linalg.norm(parent_pcd_s, axis=1) <= 2.0]
+            child_pcd_s = child_pcd_s[np.linalg.norm(child_pcd_s, axis=1) <= 2.0]
 
-        # Sample & Compute normal
-        target_pcd.transform(np.linalg.inv(child_pose_s)).transform(child_pose_f).transform(
-            np.linalg.inv(parent_pose_s)
-        )
-
-        # fixed_pcd, target_pcd, _, __ = normalize_pcd(fixed_pcd, target_pcd, do_scaling=do_scaling)
-        target_pcd, fixed_pcd, _, __ = normalize_pcd(
-            target_pcd, fixed_pcd, do_scaling=do_scaling
-        )  # Normalize to target
-
-        # Compute normal
-        target_pcd_center = (target_pcd.get_max_bound() + target_pcd.get_min_bound()) / 2
-        target_pcd.translate(-target_pcd_center)
-        # Rescale the target pcd in case that there are not enough points after voxel downsampling
-        # target_pcd.scale(target_rescale, center=np.array([0, 0, 0]))  # FIXME: will this bring systematic error?
-
-        target_pcd = target_pcd.voxel_down_sample(grid_size)
-        fixed_pcd = fixed_pcd.voxel_down_sample(grid_size)
-        target_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05, max_nn=30))
-        target_pcd_arr = np.hstack((np.array(target_pcd.points), np.array(target_pcd.normals)))
-        fixed_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-        fixed_pcd_arr = np.hstack((np.array(fixed_pcd.points), np.array(fixed_pcd.normals)))
-
-        # Move target to center
-        target_transform = np.eye(4, dtype=np.float32)
-        target_transform[:3, 3] = target_pcd_center
-
-        if (
-            vis
-            or target_pcd_arr.shape[0] < (num_point_lower_bound / 2)
-            or fixed_pcd_arr.shape[0] < num_point_lower_bound
-        ):
-            visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
-            visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, target_transform)
-            # # Visualize & Check
-            # raw_target_pcd = o3d.geometry.PointCloud()
-            # raw_target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
-            # raw_target_pcd.transform(np.linalg.inv(parent_pose_s))
-            # raw_target_pcd.paint_uniform_color([0.0, 0.651, 0.929])
-            # raw_fixed_pcd = o3d.geometry.PointCloud()
-            # raw_fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
-            # raw_fixed_pcd.transform(np.linalg.inv(parent_pose_s))
-            # origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
-            # o3d.visualization.draw_geometries([raw_target_pcd, raw_fixed_pcd, origin])
-            print(f"Target pcd has {target_pcd_arr.shape[0]} points, fixed pcd has {fixed_pcd_arr.shape[0]} points")
-            continue
-
-        # DEBUG: sanity check
-        if np.max(np.abs(target_pcd_arr[:, :3])) == 0 or np.max(np.abs(fixed_pcd_arr[:, :3])) == 0:
-            print("Zero pcd found")
-            # Check raw pcd
-            vis_list = []
+            # Rescale the target pcd in case that there are not enough points after voxel downsampling
+            # Shift all points to the origin
             target_pcd = o3d.geometry.PointCloud()
             target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
-            vis_list.append(target_pcd)
+
             fixed_pcd = o3d.geometry.PointCloud()
             fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
-            vis_list.append(fixed_pcd)
-            o3d.visualization.draw_geometries(vis_list)
-            continue
+            fixed_pcd.transform(np.linalg.inv(parent_mat_s))
 
-        tmorp_data = {
-            "target": target_pcd_arr,
-            "fixed": fixed_pcd_arr,
-            "target_label": np.array([0]),
-            "fixed_label": np.array([1]),
-            "9dpose": utils.mat_to_pose9d(target_transform, rot_axis=rot_axis),
-            "data_id": data_id,
-        }
-        for split, split_list in split_dict.items():
-            if data_file in split_list:
-                data_dict[split].append(tmorp_data)
-                break
+            # Sample & Compute normal
+            target_pcd.transform(np.linalg.inv(child_mat_s)).transform(child_mat_f).transform(
+                np.linalg.inv(parent_mat_s)
+            )
+
+            # fixed_pcd, target_pcd, _, __ = normalize_pcd(fixed_pcd, target_pcd, do_scaling=do_scaling)
+            target_pcd, fixed_pcd, _, __ = normalize_pcd(
+                target_pcd, fixed_pcd, do_scaling=do_scaling
+            )  # Normalize to target
+
+            # Compute normal
+            target_pcd_center = (target_pcd.get_max_bound() + target_pcd.get_min_bound()) / 2
+            target_pcd.translate(-target_pcd_center)
+            # Rescale the target pcd in case that there are not enough points after voxel downsampling
+            # target_pcd.scale(target_rescale, center=np.array([0, 0, 0]))  # FIXME: will this bring systematic error?
+
+            target_pcd = target_pcd.voxel_down_sample(grid_size)
+            fixed_pcd = fixed_pcd.voxel_down_sample(grid_size)
+            target_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05, max_nn=30))
+            target_pcd_arr = np.hstack((np.array(target_pcd.points), np.array(target_pcd.normals)))
+            fixed_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+            fixed_pcd_arr = np.hstack((np.array(fixed_pcd.points), np.array(fixed_pcd.normals)))
+
+            # Move target to center
+            target_transform = np.eye(4, dtype=np.float32)
+            target_transform[:3, 3] = target_pcd_center
+
+            if (
+                vis
+                or target_pcd_arr.shape[0] < (num_point_lower_bound / 2)
+                or fixed_pcd_arr.shape[0] < num_point_lower_bound
+            ):
+                visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, np.eye(4, dtype=np.float32))
+                visualize_pcd_with_open3d(target_pcd_arr, fixed_pcd_arr, target_transform)
+                # # Visualize & Check
+                # raw_target_pcd = o3d.geometry.PointCloud()
+                # raw_target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
+                # raw_target_pcd.transform(np.linalg.inv(parent_mat_s))
+                # raw_target_pcd.paint_uniform_color([0.0, 0.651, 0.929])
+                # raw_fixed_pcd = o3d.geometry.PointCloud()
+                # raw_fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
+                # raw_fixed_pcd.transform(np.linalg.inv(parent_mat_s))
+                # origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
+                # o3d.visualization.draw_geometries([raw_target_pcd, raw_fixed_pcd, origin])
+                print(f"Target pcd has {target_pcd_arr.shape[0]} points, fixed pcd has {fixed_pcd_arr.shape[0]} points")
+                continue
+
+            # DEBUG: sanity check
+            if np.max(np.abs(target_pcd_arr[:, :3])) == 0 or np.max(np.abs(fixed_pcd_arr[:, :3])) == 0:
+                print("Zero pcd found")
+                # Check raw pcd
+                vis_list = []
+                target_pcd = o3d.geometry.PointCloud()
+                target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
+                vis_list.append(target_pcd)
+                fixed_pcd = o3d.geometry.PointCloud()
+                fixed_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
+                vis_list.append(fixed_pcd)
+                o3d.visualization.draw_geometries(vis_list)
+                continue
+
+            tmorp_data = {
+                "target": target_pcd_arr,
+                "fixed": fixed_pcd_arr,
+                "target_label": np.array([0]),
+                "fixed_label": np.array([1]),
+                "9dpose": utils.mat_to_pose9d(target_transform, rot_axis=rot_axis),
+            }
+            for split, split_list in split_dict.items():
+                if data_file in split_list:
+                    data_dict[split].append(tmorp_data)
+                    break
 
     print("Len of dtset:", len(data_dict["train"]), len(data_dict["val"]), len(data_dict["test"]))
     # Save the dtset into a .pkl file
-    os.makedirs(os.path.join(root_dir, "test_data", "dmorp_rpdiff"), exist_ok=True)
+    export_dir = os.path.join(root_dir, "test_data", "dmorp_rpdiff", task_name)
+    os.makedirs(export_dir, exist_ok=True)
     for split, split_list in split_dict.items():
         print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_rpdiff')}...")
         with open(
             os.path.join(
-                root_dir,
-                "test_data",
-                "dmorp_rpdiff",
-                f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
+                export_dir,
+                f"diffusion_dataset_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
             ),
             "wb",
         ) as f:
@@ -538,36 +541,40 @@ def build_dataset_rpdiff(data_dir, cfg, data_id: int = 0, vis: bool = False, do_
 if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_id", type=int, nargs="+", default=[0])
     parser.add_argument(
-        "--data_root_dir",
+        "--task_name",
         type=str,
-        default="/home/harvey/Data/rdiff/can_in_cabinet_stack/task_name_stack_can_in_cabinet",
+        default="book_in_bookshelf",
+        help="stack_can_in_cabinet, book_in_bookshelf, mug_on_rack_multi",
     )
     parser.add_argument("--data_type", type=str, default="rpdiff")
     parser.add_argument("--filter_key", type=str, default=None)
     parser.add_argument("--vis", action="store_true")
     args = parser.parse_args()
-    data_root_dir = args.data_root_dir
+    # Prepare path
+    data_path_dict = {
+        "stack_can_in_cabinet": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/can_in_cabinet_stack/task_name_stack_can_in_cabinet",
+        "book_in_bookshelf": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/book_on_bookshelf_double_view_rnd_ori/task_name_book_in_bookshelf",
+        "mug_on_rack_multi": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/mug_on_rack_multi_large_proc_gen_demos/task_name_mug_on_rack_multi",
+    }
+    task_name = args.task_name
+    data_dir = data_path_dict[task_name]
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    cfg_file = os.path.join(root_dir, "config", "pose_transformer_rpdiff.py")
+    cfg_file = os.path.join(root_dir, "config", f"pose_transformer_rpdiff_{task_name}.py")
     cfg = LazyConfig.load(cfg_file)
-    data_id = args.data_id
     filter_key = args.filter_key
     vis = args.vis
     do_scaling = True
-    # vis = True
+    vis = True
 
     dtset = []
-    for did in data_id:
-        print(f"Processing data {did}...")
-        if args.data_type == "pyrender":
-            data_path = os.path.join(root_dir, "test_data", "dmorp_faster", f"{did:06d}")
-            build_dataset_pyrender(data_path, cfg, data_id=did, vis=vis)
-        elif args.data_type == "real":
-            data_path = os.path.join(root_dir, "test_data", "dmorp_real", f"{did:06d}")
-            build_dataset_real(data_path, cfg, data_id=did, vis=vis, filter_key=filter_key)
-        elif args.data_type == "rpdiff":
-            build_dataset_rpdiff(data_root_dir, cfg, data_id=did, vis=vis, do_scaling=do_scaling)
-        else:
-            raise NotImplementedError
+    if args.data_type == "pyrender":
+        data_path = os.path.join(root_dir, "test_data", "dmorp_faster", f"{0:06d}")
+        build_dataset_pyrender(data_path, cfg, data_id=0, vis=vis)
+    elif args.data_type == "real":
+        data_path = os.path.join(root_dir, "test_data", "dmorp_real", f"{0:06d}")
+        build_dataset_real(data_path, cfg, data_id=0, vis=vis, filter_key=filter_key)
+    elif args.data_type == "rpdiff":
+        build_dataset_rpdiff(data_dir, cfg, task_name=task_name, vis=vis, do_scaling=do_scaling)
+    else:
+        raise NotImplementedError

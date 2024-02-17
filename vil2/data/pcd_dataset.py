@@ -50,7 +50,8 @@ class PcdPairDataset(Dataset):
         crop_noise: float = 0.1,
         crop_strategy: str = "knn",
         random_crop_prob: float = 0.5,
-        noise_level: float = 0.1,
+        rot_noise_level: float = 0.1,
+        trans_noise_level: float = 0.1,
         rot_axis: str = "xy",
         **kwargs,
     ):
@@ -69,7 +70,8 @@ class PcdPairDataset(Dataset):
         self.crop_strategy = crop_strategy
         self.knn_k = kwargs.get("knn_k", 20)
         self.random_crop_prob = random_crop_prob
-        self.noise_level = noise_level  # number of noise levels
+        self.rot_noise_level = rot_noise_level
+        self.trans_noise_level = trans_noise_level
         if volume_augmentations_path is not None:
             self.volume_augmentations = Box(yaml.load(open(volume_augmentations_path, "r"), Loader=yaml.FullLoader))
         else:
@@ -122,7 +124,7 @@ class PcdPairDataset(Dataset):
         if self.volume_augmentations is not None:
             # do the below only with some probability
             if "rotation" in self.volume_augmentations.keys() and not disable_rot:
-                max_angle = np.pi * self.noise_level
+                max_angle = np.pi * self.rot_noise_level
                 if random() < self.volume_augmentations.rotation.prob:
                     angle = np.random.uniform(-max_angle, max_angle)
                     coordinate, normal, color, pose = rotate_around_axis(
@@ -140,18 +142,18 @@ class PcdPairDataset(Dataset):
                 if random() < self.volume_augmentations.translation.prob:
                     random_offset = np.random.rand(1, 3)
                     random_offset[0, 0] = np.random.uniform(
-                        self.volume_augmentations.translation.min_x * self.noise_level,
-                        self.volume_augmentations.translation.max_x * self.noise_level,
+                        self.volume_augmentations.translation.min_x * self.trans_noise_level,
+                        self.volume_augmentations.translation.max_x * self.trans_noise_level,
                         size=(1,),
                     )
                     random_offset[0, 1] = np.random.uniform(
-                        self.volume_augmentations.translation.min_y * self.noise_level,
-                        self.volume_augmentations.translation.max_y * self.noise_level,
+                        self.volume_augmentations.translation.min_y * self.trans_noise_level,
+                        self.volume_augmentations.translation.max_y * self.trans_noise_level,
                         size=(1,),
                     )
                     random_offset[0, 2] = np.random.uniform(
-                        self.volume_augmentations.translation.min_z * self.noise_level,
-                        self.volume_augmentations.translation.max_z * self.noise_level,
+                        self.volume_augmentations.translation.min_z * self.trans_noise_level,
+                        self.volume_augmentations.translation.max_z * self.trans_noise_level,
                         size=(1,),
                     )
                     coordinate, normal, color, pose = random_translation(
@@ -239,8 +241,6 @@ class PcdPairDataset(Dataset):
                 crop_size = np.clip(
                     crop_size, a_min=target_radius, a_max=None
                 )  # Cannot be smaller than the target radius
-                x_min, y_min, z_min = crop_center - crop_size
-                x_max, y_max, z_max = crop_center + crop_size
                 fixed_indices = PcdPairDataset.crop(
                     pcd=fixed_coord,
                     crop_center=crop_center,
@@ -271,8 +271,15 @@ class PcdPairDataset(Dataset):
 
         if self.mode == "train" or self.mode == "val":
             # Apply translation disturbance after cropping
-            fixed_disturbance = (np.random.rand(3) * 2 - 1.0) * self.noise_level * 0.1
-            target_disturbance = (np.random.rand(3) * 2 - 1.0) * self.noise_level * 0.1
+            x_min, y_min, z_min = target_coord.min(axis=0)
+            x_max, y_max, z_max = target_coord.max(axis=0)
+            x_range, y_range, z_range = x_max - x_min, y_max - y_min, z_max - z_min
+            fixed_disturbance = (
+                (np.random.rand(3) * 2 - 1.0) * self.trans_noise_level * np.array([x_range, y_range, z_range])
+            )
+            target_disturbance = (
+                (np.random.rand(3) * 2 - 1.0) * self.trans_noise_level * np.array([x_range, y_range, z_range])
+            )
             fixed_shift = np.eye(4)
             fixed_shift[:3, 3] = -fixed_disturbance
             fixed_pose = fixed_pose @ fixed_shift
@@ -386,6 +393,18 @@ class PcdPairDataset(Dataset):
             knn_pcd = pcd[knn_indices]
             x_min, y_min, z_min = knn_pcd.min(axis=0)
             x_max, y_max, z_max = knn_pcd.max(axis=0)
+            return crop_bbox(pcd, x_min, y_min, z_min, x_max, y_max, z_max)
+        elif crop_strategy == "knn_bbox_max":
+            # Get knn first, and then crop the max bbox
+            knn_k = kwargs.get("knn_k", 20)
+            ref_points = kwargs.get("ref_points", pcd)
+            knn_indices = crop_knn(pcd, ref_points, crop_center, k=knn_k)
+            knn_pcd = pcd[knn_indices]
+            x_min, y_min, z_min = knn_pcd.min(axis=0)
+            x_max, y_max, z_max = knn_pcd.max(axis=0)
+            bbox_size = np.max([x_max - x_min, y_max - y_min, z_max - z_min])
+            x_min, y_min, z_min = crop_center - bbox_size / 2
+            x_max, y_max, z_max = crop_center + bbox_size / 2
             return crop_bbox(pcd, x_min, y_min, z_min, x_max, y_max, z_max)
         else:
             raise ValueError("Invalid crop strategy")
@@ -579,9 +598,9 @@ if __name__ == "__main__":
 
     dataset_name = "dmorp_rdiff"
     split = "test"
-    task_name = "Dmorp"
     root_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    cfg_file = os.path.join(root_path, "config", "pose_transformer_rpdiff.py")
+    task_name = "book_in_bookshelf"  # "stack_can_in_cabinet, book_in_bookshelf, mug_on_rack_multi"
+    cfg_file = os.path.join(root_path, "config", f"pose_transformer_rpdiff_{task_name}.py")
     cfg = LazyConfig.load(cfg_file)
 
     # Test data loader
@@ -598,7 +617,8 @@ if __name__ == "__main__":
     crop_strategy = cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
     random_crop_prob = cfg.DATALOADER.AUGMENTATION.RANDOM_CROP_PROB
     crop_noise = cfg.DATALOADER.AUGMENTATION.CROP_NOISE
-    noise_level = cfg.DATALOADER.AUGMENTATION.NOISE_LEVEL
+    rot_noise_level = cfg.DATALOADER.AUGMENTATION.ROT_NOISE_LEVEL
+    trans_noise_level = cfg.DATALOADER.AUGMENTATION.TRANS_NOISE_LEVEL
     rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
     knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
 
@@ -622,7 +642,8 @@ if __name__ == "__main__":
             root_path,
             "test_data",
             dataset_folder,
-            f"diffusion_dataset_0_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
+            task_name,
+            f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
         )
     print("Data loaded from: ", data_file_dict)
 
@@ -630,11 +651,11 @@ if __name__ == "__main__":
         os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     )
     dataset = PcdPairDataset(
-        data_file_list=[data_file_dict["test"]],
+        data_file_list=[data_file_dict["train"]],
         dataset_name="dmorp",
         add_colors=True,
         add_normals=True,
-        is_elastic_distortion=True,
+        is_elastic_distortion=is_elastic_distortion,
         elastic_distortion_granularity=elastic_distortion_granularity,
         elastic_distortion_magnitude=elastic_distortion_magnitude,
         is_random_distortion=is_random_distortion,
@@ -646,10 +667,12 @@ if __name__ == "__main__":
         crop_noise=crop_noise,
         crop_strategy=crop_strategy,
         random_crop_prob=random_crop_prob,
-        noise_level=noise_level,
+        rot_noise_level=rot_noise_level,
+        trans_noise_level=trans_noise_level,
         rot_axis=rot_axis,
         knn_k=knn_k,
     )
+    dataset.set_mode("train")
 
     # Test data augmentation
     for i in range(20):
