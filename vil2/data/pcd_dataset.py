@@ -105,12 +105,10 @@ class PcdPairDataset(Dataset):
         fixed_label = data["fixed_label"]
         return target_pcd, fixed_pcd, target_label, fixed_label, pose
 
-    def augment_pcd_instance(self, coordinate, normal, color, label, pose, disable_rot: bool = False):
+    def augment_pcd_instance(self, coordinate, normal, color, label, pose, disable_rot: bool = False, noise_scale: float = 1.0):
         """Augment a single point cloud instance."""
         if self.is_elastic_distortion:
-            coordinate = elastic_distortion(
-                coordinate, self.elastic_distortion_granularity, self.elastic_distortion_magnitude
-            )
+            coordinate = elastic_distortion(coordinate, self.elastic_distortion_granularity, self.elastic_distortion_magnitude)
         if self.is_random_distortion:
             coordinate, color, normal, label = random_around_points(
                 coordinate,
@@ -124,7 +122,7 @@ class PcdPairDataset(Dataset):
         if self.volume_augmentations is not None:
             # do the below only with some probability
             if "rotation" in self.volume_augmentations.keys() and not disable_rot:
-                max_angle = np.pi * self.rot_noise_level
+                max_angle = np.pi * self.rot_noise_level * noise_scale
                 if random() < self.volume_augmentations.rotation.prob:
                     angle = np.random.uniform(-max_angle, max_angle)
                     coordinate, normal, color, pose = rotate_around_axis(
@@ -139,21 +137,22 @@ class PcdPairDataset(Dataset):
                         center_point=None,
                     )
             if "translation" in self.volume_augmentations.keys():
+                trans_noise_level = noise_scale * self.trans_noise_level
                 if random() < self.volume_augmentations.translation.prob:
                     random_offset = np.random.rand(1, 3)
                     random_offset[0, 0] = np.random.uniform(
-                        self.volume_augmentations.translation.min_x * self.trans_noise_level,
-                        self.volume_augmentations.translation.max_x * self.trans_noise_level,
+                        self.volume_augmentations.translation.min_x * trans_noise_level,
+                        self.volume_augmentations.translation.max_x * trans_noise_level,
                         size=(1,),
                     )
                     random_offset[0, 1] = np.random.uniform(
-                        self.volume_augmentations.translation.min_y * self.trans_noise_level,
-                        self.volume_augmentations.translation.max_y * self.trans_noise_level,
+                        self.volume_augmentations.translation.min_y * trans_noise_level,
+                        self.volume_augmentations.translation.max_y * trans_noise_level,
                         size=(1,),
                     )
                     random_offset[0, 2] = np.random.uniform(
-                        self.volume_augmentations.translation.min_z * self.trans_noise_level,
-                        self.volume_augmentations.translation.max_z * self.trans_noise_level,
+                        self.volume_augmentations.translation.min_z * trans_noise_level,
+                        self.volume_augmentations.translation.max_z * trans_noise_level,
                         size=(1,),
                     )
                     coordinate, normal, color, pose = random_translation(
@@ -207,13 +206,16 @@ class PcdPairDataset(Dataset):
         fixed_pose = np.eye(4)
 
         if self.mode == "train" or self.mode == "val":
+            noise_scale = 0.1 if random() < 0.5 else 1.0
+            is_nearby = True if noise_scale < 1.0 else False
             # Augment data
-            target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(
-                target_coord, target_normal, target_color, None, target_pose
-            )
+            target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(target_coord, target_normal, target_color, None, target_pose, noise_scale=noise_scale)
             fixed_coord, fixed_normal, fixed_color, _, fixed_pose = self.augment_pcd_instance(
-                fixed_coord, fixed_normal, fixed_color, None, fixed_pose, disable_rot=True
+                fixed_coord, fixed_normal, fixed_color, None, fixed_pose, disable_rot=True, noise_scale=noise_scale
             )  # Disable rotation for fixed pcd
+        else:
+            noise_scale = 1.0
+            is_nearby = True
 
         # Crop pcd to focus
         is_valid_crop = True
@@ -230,17 +232,13 @@ class PcdPairDataset(Dataset):
                     crop_center = target_pose[:3, 3] + np.random.rand(3) * 2 * self.crop_noise - self.crop_noise
                     is_valid_crop = True
                 else:
-                    crop_center = np.random.rand(3) * (
-                        np.array([x_max, y_max, z_max]) - np.array([x_min, y_min, z_min])
-                    ) + np.array([x_min, y_min, z_min])
+                    crop_center = np.random.rand(3) * (np.array([x_max, y_max, z_max]) - np.array([x_min, y_min, z_min])) + np.array([x_min, y_min, z_min])
                     if np.linalg.norm(crop_center - target_pose[:3, 3]) < self.crop_noise * np.sqrt(3):
                         is_valid_crop = True
                     else:
                         is_valid_crop = False
                 crop_size = (0.5 * np.random.rand(3) + 0.5) * self.crop_size
-                crop_size = np.clip(
-                    crop_size, a_min=target_radius, a_max=None
-                )  # Cannot be smaller than the target radius
+                crop_size = np.clip(crop_size, a_min=target_radius, a_max=None)  # Cannot be smaller than the target radius
                 fixed_indices = PcdPairDataset.crop(
                     pcd=fixed_coord,
                     crop_center=crop_center,
@@ -274,12 +272,8 @@ class PcdPairDataset(Dataset):
             x_min, y_min, z_min = target_coord.min(axis=0)
             x_max, y_max, z_max = target_coord.max(axis=0)
             x_range, y_range, z_range = x_max - x_min, y_max - y_min, z_max - z_min
-            fixed_disturbance = (
-                (np.random.rand(3) * 2 - 1.0) * self.trans_noise_level * np.array([x_range, y_range, z_range])
-            )
-            target_disturbance = (
-                (np.random.rand(3) * 2 - 1.0) * self.trans_noise_level * np.array([x_range, y_range, z_range])
-            )
+            fixed_disturbance = (np.random.rand(3) * 2 - 1.0) * self.trans_noise_level * np.array([x_range, y_range, z_range])
+            target_disturbance = (np.random.rand(3) * 2 - 1.0) * self.trans_noise_level * np.array([x_range, y_range, z_range])
             fixed_shift = np.eye(4)
             fixed_shift[:3, 3] = -fixed_disturbance
             fixed_pose = fixed_pose @ fixed_shift
@@ -303,29 +297,6 @@ class PcdPairDataset(Dataset):
             fixed_feat.append(fixed_normal)
         target_feat = np.concatenate(target_feat, axis=-1)
         fixed_feat = np.concatenate(fixed_feat, axis=-1)
-
-        # # Visualize
-        # vis_list = []
-        # raw_fixed_pcd_o3d = o3d.geometry.PointCloud()
-        # raw_fixed_pcd_o3d.points = o3d.utility.Vector3dVector(raw_fixed_coord)
-        # raw_fixed_pcd_o3d.paint_uniform_color([0.1, 0.1, 0.7])
-        # vis_list.append(raw_fixed_pcd_o3d)
-        # target_pcd_o3d = o3d.geometry.PointCloud()
-        # target_pcd_o3d.points = o3d.utility.Vector3dVector(target_coord)
-        # target_pcd_o3d.paint_uniform_color([0.7, 0.1, 0.1])
-        # vis_list.append(target_pcd_o3d)
-        # fixed_pcd_o3d = o3d.geometry.PointCloud()
-        # fixed_pcd_o3d.points = o3d.utility.Vector3dVector(fixed_coord)
-        # fixed_pcd_o3d.paint_uniform_color([0.1, 0.7, 0.1])
-        # vis_list.append(fixed_pcd_o3d)
-        # target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=self.rot_axis)
-        # target_pcd_shift_o3d = o3d.geometry.PointCloud()
-        # target_pcd_shift_o3d.points = o3d.utility.Vector3dVector(target_coord)
-        # target_pcd_shift_o3d.paint_uniform_color([0.7, 0.1, 0.7])
-        # target_pcd_shift_o3d.transform(target_pose_mat)
-        # vis_list.append(target_pcd_shift_o3d)
-        # print(f"Crop is valid: {is_valid_crop}")
-        # o3d.visualization.draw_geometries(vis_list)
 
         # DEBUG: sanity check
         if fixed_coord.shape[0] == 0 or np.max(np.abs(fixed_coord)) == 0:
@@ -356,6 +327,7 @@ class PcdPairDataset(Dataset):
             "fixed_pose": fixed_pose.astype(np.float32),
             "fixed_label": fixed_label.astype(np.int64),
             "is_valid_crop": np.array([is_valid_crop]).astype(np.int64),
+            "is_nearby": np.array([is_nearby]).astype(np.int64),
         }
 
     @staticmethod
@@ -647,9 +619,7 @@ if __name__ == "__main__":
         )
     print("Data loaded from: ", data_file_dict)
 
-    volume_augmentations_path = (
-        os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
-    )
+    volume_augmentations_path = os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     dataset = PcdPairDataset(
         data_file_list=[data_file_dict["train"]],
         dataset_name="dmorp",
@@ -685,9 +655,7 @@ if __name__ == "__main__":
         fixed_feat = data["fixed_feat"]
         target_pose = data["target_pose"]
         is_valid_crop = data["is_valid_crop"]
-        print(
-            f"Number of target points: {len(target_coord)}, Number of fixed points: {len(fixed_coord)}, Crop valid: {is_valid_crop}"
-        )
+        print(f"Number of target points: {len(target_coord)}, Number of fixed points: {len(fixed_coord)}, Crop valid: {is_valid_crop}")
 
         target_color = np.zeros_like(target_coord)
         target_color[:, 0] = 1

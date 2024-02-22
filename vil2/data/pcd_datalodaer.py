@@ -14,6 +14,7 @@ class PcdPairCollator:
             "target_batch_index": [],
             "fixed_batch_index": [],
             "is_valid_crop": [],
+            "is_nearby": [],
         }
         for sample_id, item in enumerate(samples):
             target["target_coord"].append(item["target_coord"])  # (N, 3)
@@ -24,6 +25,7 @@ class PcdPairCollator:
             target["fixed_batch_index"].append(np.full([len(item["fixed_coord"])], fill_value=sample_id))  # (M,)
             target["target_pose"].append(item["target_pose"][None, :])  #
             target["is_valid_crop"].append(item["is_valid_crop"])
+            target["is_nearby"].append(item["is_nearby"])
 
         return {k: torch.from_numpy(np.concatenate(v)) for k, v in target.items()}
 

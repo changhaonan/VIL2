@@ -1,6 +1,6 @@
 # Most simplified version of obj_dp experiment
 ENV = dict(
-    TASK_NAME = "book_in_bookshelf",
+    TASK_NAME="book_in_bookshelf",
     NUM_OBJ=8,
     NUM_STRUCTURE=4,
     SEMANTIC_FEAT_DIM=10,
@@ -29,7 +29,7 @@ DATALOADER = dict(
         CROP_PCD=True,
         CROP_SIZE=0.75,
         CROP_NOISE=0.3,
-        CROP_STRATEGY="knn_bbox",  # bbox, radius, knn, knn_bbox, knn_bbox_max
+        CROP_STRATEGY="knn_bbox_max",  # bbox, radius, knn, knn_bbox, knn_bbox_max
         RANDOM_CROP_PROB=0.5,
         ROT_NOISE_LEVEL=0.8,
         TRANS_NOISE_LEVEL=0.1,
@@ -47,7 +47,7 @@ MODEL = dict(
     DIFFUSION_PROCESS="ddpm",
     NUM_DIFFUSION_ITERS=100,
     NOISE_NET=dict(
-        NAME="TRANSFORMERV2",
+        NAME="TRANSFORMERV3",
         INIT_ARGS=dict(
             TRANSFORMER=dict(
                 pcd_input_dim=6,  # 3 + 3 + 3
@@ -64,6 +64,20 @@ MODEL = dict(
                 translation_only=True,
             ),
             TRANSFORMERV2=dict(
+                # Point transformer network
+                grid_sizes=[0.15, 0.3],
+                depths=[2, 3, 3],
+                dec_depths=[1, 1],  # V2
+                # dec_depths=[2, 2],  # V3
+                hidden_dims=[128, 256, 512],  # V2
+                # n_heads=[4, 8, 8],  # V2
+                n_heads=[8, 16, 16],  # V3
+                ks=[16, 24, 32],
+                in_dim=6,
+                fusion_projection_dim=512,  # V2
+                # Joint transformer network
+            ),
+            TRANSFORMERV3=dict(
                 # Point transformer network
                 grid_sizes=[0.15, 0.3],
                 depths=[2, 3, 3],

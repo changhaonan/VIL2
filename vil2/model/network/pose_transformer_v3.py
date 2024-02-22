@@ -20,6 +20,7 @@ from vil2.model.network.geometric import (
 from timm.models.layers import DropPath
 from vil2.model.network.genpose_modules import Linear
 from vil2.utils.pcd_utils import visualize_tensor_pcd
+import open3d as o3d
 
 
 class KnnTransformerDecoder(nn.Module):
@@ -125,12 +126,8 @@ class PoseTransformerV3(nn.Module):
         self.k_fine = 16
         self.rot_axis = "yz"
         # Encode pcd features
-        self.target_pcd_transformer = PointTransformerNetwork(
-            grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=False
-        )
-        self.fixed_pcd_transformer = PointTransformerNetwork(
-            grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=False
-        )
+        self.target_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=False)
+        self.fixed_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=False)
         # Pcd decoders
         self.coarse_pcd_decoder = KnnTransformerDecoder(num_layers=2, embed_channels=hidden_dims[-1], n_heads=8)
         self.fine_pcd_decoder = KnnTransformerDecoder(num_layers=2, embed_channels=hidden_dims[0], n_heads=8)
@@ -170,13 +167,9 @@ class PoseTransformerV3(nn.Module):
         """
         Encode target and fixed pcd to features
         """
-        target_points, all_target_points, target_cluster_indexes = self.target_pcd_transformer(
-            target_points, return_full=True
-        )
+        target_points, all_target_points, target_cluster_indexes = self.target_pcd_transformer(target_points, return_full=True)
         # Encode fixed pcd
-        fixed_points, all_fixed_points, fixed_cluster_indexes = self.fixed_pcd_transformer(
-            fixed_points, return_full=True
-        )
+        fixed_points, all_fixed_points, fixed_cluster_indexes = self.fixed_pcd_transformer(fixed_points, return_full=True)
         # Check the existence of nan
         if torch.isnan(target_points[1]).any() or torch.isnan(fixed_points[1]).any():
             print("Nan exists in the feature")
@@ -222,17 +215,35 @@ class PoseTransformerV3(nn.Module):
         return pose_pred, status_pred
 
     def predict_fine(
-        self, all_target_points: list[torch.Tensor], all_fixed_points: list[list[torch.Tensor]], pose_pred: torch.Tensor
+        self,
+        all_target_points: list[torch.Tensor],
+        all_fixed_points: list[list[torch.Tensor]],
+        pose_pred: torch.Tensor | None,
     ):
         fixed_coord, fixed_feat, fixed_offset = all_fixed_points[-1]  # Use the first layer
         target_coord, target_feat, target_offset = all_target_points[-1]  # Use the first layer
-        # reposition
         target_batch_index = offset2batch(target_offset)
-        target_batch_coord, target_batch_mask = to_dense_batch(target_coord, target_batch_index)
-        target_batch_coord = self.reposition(
-            target_batch_coord, pose_pred.detach(), rot_axis=self.rot_axis
-        )  # Detach pose_pred
-        target_coord, _ = to_flat_batch(target_batch_coord, target_batch_mask)
+        if pose_pred is not None:
+            # reposition
+            target_batch_coord, target_batch_mask = to_dense_batch(target_coord, target_batch_index)
+            target_batch_coord = self.reposition(target_batch_coord, pose_pred.detach(), rot_axis=self.rot_axis)  # Detach pose_pred
+            target_coord, _ = to_flat_batch(target_batch_coord, target_batch_mask)
+
+        # # [DEBUG]: Visualize local structure
+        # fixed_batch_index = offset2batch(fixed_offset)
+        # fixed_batch_coord, fixed_batch_mask = to_dense_batch(fixed_coord, fixed_batch_index)
+
+        # check_idx = 1
+        # fixed_pcd_np = fixed_batch_coord[check_idx].detach().cpu().numpy()
+        # target_pcd_np = target_batch_coord[check_idx].detach().cpu().numpy()
+        # fixed_pcd_o3d = o3d.geometry.PointCloud()
+        # fixed_pcd_o3d.points = o3d.utility.Vector3dVector(fixed_pcd_np)
+        # fixed_pcd_o3d.paint_uniform_color([0, 1, 0])
+        # target_pcd_o3d = o3d.geometry.PointCloud()
+        # target_pcd_o3d.points = o3d.utility.Vector3dVector(target_pcd_np)
+        # target_pcd_o3d.paint_uniform_color([0, 0, 1])
+        # o3d.visualization.draw_geometries([fixed_pcd_o3d, target_pcd_o3d])
+
         # Do pcd decoder
         self_knn_indexes, self_knn_dists = knn(
             target_coord,

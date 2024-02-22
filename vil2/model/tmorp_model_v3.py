@@ -39,124 +39,123 @@ class LitPoseTransformerV3(L.LightningModule):
         self.start_time = time.time()
         # Logging
         self.batch_size = cfg.DATALOADER.BATCH_SIZE
-        self.coarse_fine_ratio = 0.0
+        self.coarse_fine_ratio = 1.0
 
     def training_step(self, batch, batch_idx):
         pose9d = batch["target_pose"].to(torch.float32)
         is_valid_crop = batch["is_valid_crop"].to(torch.long)
+        is_nearby = batch["is_nearby"].to(torch.long)
         pred_coarse_pose9d, pred_coarse_status, pred_fine_pose9d, pred_fine_status = self.forward(batch)
 
         # compute loss
         status_coarse_loss = F.cross_entropy(pred_coarse_status, is_valid_crop)
-        status_fine_loss = F.cross_entropy(pred_fine_status, is_valid_crop)
+
         # mask out invalid crops
         pose9d_valid = pose9d[is_valid_crop == 1]
+        pose9d_valid_small_noise = pose9d[(is_nearby == 1) & (is_valid_crop == 1)]
         pose9d_pred_coarse_valid = pred_coarse_pose9d[is_valid_crop == 1]
         trans_coarse_loss = F.mse_loss(pose9d_pred_coarse_valid[:, :3], pose9d_valid[:, :3])
         rx_coarse_loss = F.mse_loss(pose9d_pred_coarse_valid[:, 3:6], pose9d_valid[:, 3:6])
         ry_coarse_loss = F.mse_loss(pose9d_pred_coarse_valid[:, 6:9], pose9d_valid[:, 6:9])
-        pose9d_pred_fine_valid = pred_fine_pose9d[is_valid_crop == 1]
-        trans_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, :3], pose9d_valid[:, :3])
-        rx_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, 3:6], pose9d_valid[:, 3:6])
-        ry_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, 6:9], pose9d_valid[:, 6:9])
+        pose9d_pred_fine_valid = pred_fine_pose9d[(is_nearby == 1) & (is_valid_crop == 1)]  # Only compare nearby
+        trans_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, :3], pose9d_valid_small_noise[:, :3])
+        rx_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, 3:6], pose9d_valid_small_noise[:, 3:6])
+        ry_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, 6:9], pose9d_valid_small_noise[:, 6:9])
         # sum
         loss_coarse = trans_coarse_loss + rx_coarse_loss + ry_coarse_loss + 0.1 * status_coarse_loss
-        loss_fine = trans_fine_loss + rx_fine_loss + ry_fine_loss + 0.1 * status_fine_loss
+        loss_fine = trans_fine_loss + rx_fine_loss + ry_fine_loss
         loss = loss_coarse + loss_fine * self.coarse_fine_ratio
         # log
-        self.log("tr_c_status_loss", status_coarse_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("tr_c_trans_loss", trans_coarse_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("tr_c_rx_loss", rx_coarse_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("tr_c_ry_loss", ry_coarse_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("tr_f_status_loss", status_fine_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("tr_f_trans_loss", trans_fine_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("tr_f_rx_loss", rx_fine_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("tr_f_ry_loss", ry_fine_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("train_c_loss", loss_coarse, sync_dist=True, batch_size=self.batch_size)
-        self.log("train_f_loss", loss_fine, sync_dist=True, batch_size=self.batch_size)
-        self.log("train_loss", loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("status_train_c", status_coarse_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("trans_train_c", trans_coarse_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("rx_train_c", rx_coarse_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("ry_train_c", ry_coarse_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("trans_train_f", trans_fine_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("rx_train_f", rx_fine_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("ry_train_f", ry_fine_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("loss_train_c", loss_coarse, sync_dist=True, batch_size=self.batch_size)
+        self.log("loss_train_f", loss_fine, sync_dist=True, batch_size=self.batch_size)
+        self.log("loss_train", loss, sync_dist=True, batch_size=self.batch_size)
         elapsed_time = (time.time() - self.start_time) / 3600
-        self.log("train_runtime(hrs)", elapsed_time, sync_dist=True, batch_size=self.batch_size)
+        self.log("runtime_train (hrs)", elapsed_time, sync_dist=True, batch_size=self.batch_size)
         return loss
 
     def test_step(self, batch, batch_idx):
         pose9d = batch["target_pose"].to(torch.float32)
         is_valid_crop = batch["is_valid_crop"].to(torch.long)
+        is_nearby = batch["is_nearby"].to(torch.long)
         pred_coarse_pose9d, pred_coarse_status, pred_fine_pose9d, pred_fine_status = self.forward(batch)
 
         # compute loss
         status_coarse_loss = F.cross_entropy(pred_coarse_status, is_valid_crop)
-        status_fine_loss = F.cross_entropy(pred_fine_status, is_valid_crop)
+
         # mask out invalid crops
         pose9d_valid = pose9d[is_valid_crop == 1]
+        pose9d_valid_small_noise = pose9d[(is_nearby == 1) & (is_valid_crop == 1)]
         pose9d_pred_coarse_valid = pred_coarse_pose9d[is_valid_crop == 1]
         trans_coarse_loss = F.mse_loss(pose9d_pred_coarse_valid[:, :3], pose9d_valid[:, :3])
         rx_coarse_loss = F.mse_loss(pose9d_pred_coarse_valid[:, 3:6], pose9d_valid[:, 3:6])
         ry_coarse_loss = F.mse_loss(pose9d_pred_coarse_valid[:, 6:9], pose9d_valid[:, 6:9])
-        pose9d_pred_fine_valid = pred_fine_pose9d[is_valid_crop == 1]
-        trans_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, :3], pose9d_valid[:, :3])
-        rx_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, 3:6], pose9d_valid[:, 3:6])
-        ry_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, 6:9], pose9d_valid[:, 6:9])
+        pose9d_pred_fine_valid = pred_fine_pose9d[(is_nearby == 1) & (is_valid_crop == 1)]  # Only compare nearby
+        trans_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, :3], pose9d_valid_small_noise[:, :3])
+        rx_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, 3:6], pose9d_valid_small_noise[:, 3:6])
+        ry_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, 6:9], pose9d_valid_small_noise[:, 6:9])
         # sum
         loss_coarse = trans_coarse_loss + rx_coarse_loss + ry_coarse_loss + 0.1 * status_coarse_loss
-        loss_fine = trans_fine_loss + rx_fine_loss + ry_fine_loss + 0.1 * status_fine_loss
+        loss_fine = trans_fine_loss + rx_fine_loss + ry_fine_loss
         loss = loss_coarse + loss_fine * self.coarse_fine_ratio
-
         # log
-        self.log("te_c_status_loss", status_coarse_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("te_c_trans_loss", trans_coarse_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("te_c_rx_loss", rx_coarse_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("te_c_ry_loss", ry_coarse_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("te_f_status_loss", status_fine_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("te_f_trans_loss", trans_fine_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("te_f_rx_loss", rx_fine_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("te_f_ry_loss", ry_fine_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("test_c_loss", loss_coarse, sync_dist=True, batch_size=self.batch_size)
-        self.log("test_f_loss", loss_fine, sync_dist=True, batch_size=self.batch_size)
-        self.log("test_loss", loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("status_test_c", status_coarse_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("trans_test_c", trans_coarse_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("rx_test_c", rx_coarse_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("ry_test_c", ry_coarse_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("trans_test_f", trans_fine_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("rx_test_f", rx_fine_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("ry_test_f", ry_fine_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("loss_test_c", loss_coarse, sync_dist=True, batch_size=self.batch_size)
+        self.log("loss_test_f", loss_fine, sync_dist=True, batch_size=self.batch_size)
+        self.log("loss_test", loss, sync_dist=True, batch_size=self.batch_size)
         elapsed_time = (time.time() - self.start_time) / 3600
-        self.log("test_runtime(hrs)", elapsed_time, sync_dist=True, batch_size=self.batch_size)
-
+        self.log("runtime_test (hrs)", elapsed_time, sync_dist=True, batch_size=self.batch_size)
         return loss
 
     def validation_step(self, batch, batch_idx):
         pose9d = batch["target_pose"].to(torch.float32)
         is_valid_crop = batch["is_valid_crop"].to(torch.long)
+        is_nearby = batch["is_nearby"].to(torch.long)
         pred_coarse_pose9d, pred_coarse_status, pred_fine_pose9d, pred_fine_status = self.forward(batch)
 
         # compute loss
         status_coarse_loss = F.cross_entropy(pred_coarse_status, is_valid_crop)
-        status_fine_loss = F.cross_entropy(pred_fine_status, is_valid_crop)
+
         # mask out invalid crops
         pose9d_valid = pose9d[is_valid_crop == 1]
+        pose9d_valid_small_noise = pose9d[(is_nearby == 1) & (is_valid_crop == 1)]
         pose9d_pred_coarse_valid = pred_coarse_pose9d[is_valid_crop == 1]
         trans_coarse_loss = F.mse_loss(pose9d_pred_coarse_valid[:, :3], pose9d_valid[:, :3])
         rx_coarse_loss = F.mse_loss(pose9d_pred_coarse_valid[:, 3:6], pose9d_valid[:, 3:6])
         ry_coarse_loss = F.mse_loss(pose9d_pred_coarse_valid[:, 6:9], pose9d_valid[:, 6:9])
-        pose9d_pred_fine_valid = pred_fine_pose9d[is_valid_crop == 1]
-        trans_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, :3], pose9d_valid[:, :3])
-        rx_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, 3:6], pose9d_valid[:, 3:6])
-        ry_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, 6:9], pose9d_valid[:, 6:9])
+        pose9d_pred_fine_valid = pred_fine_pose9d[(is_nearby == 1) & (is_valid_crop == 1)]  # Only compare nearby
+        trans_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, :3], pose9d_valid_small_noise[:, :3])
+        rx_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, 3:6], pose9d_valid_small_noise[:, 3:6])
+        ry_fine_loss = F.mse_loss(pose9d_pred_fine_valid[:, 6:9], pose9d_valid_small_noise[:, 6:9])
         # sum
         loss_coarse = trans_coarse_loss + rx_coarse_loss + ry_coarse_loss + 0.1 * status_coarse_loss
-        loss_fine = trans_fine_loss + rx_fine_loss + ry_fine_loss + 0.1 * status_fine_loss
+        loss_fine = trans_fine_loss + rx_fine_loss + ry_fine_loss
         loss = loss_coarse + loss_fine * self.coarse_fine_ratio
-
         # log
-        self.log("va_c_status_loss", status_coarse_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("va_c_trans_loss", trans_coarse_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("va_c_rx_loss", rx_coarse_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("va_c_ry_loss", ry_coarse_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("va_f_status_loss", status_fine_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("va_f_trans_loss", trans_fine_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("va_f_rx_loss", rx_fine_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("va_f_ry_loss", ry_fine_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("val_c_loss", loss_coarse, sync_dist=True, batch_size=self.batch_size)
-        self.log("val_f_loss", loss_fine, sync_dist=True, batch_size=self.batch_size)
-        self.log("val_loss", loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("status_val_c", status_coarse_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("trans_val_c", trans_coarse_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("rx_val_c", rx_coarse_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("ry_val_c", ry_coarse_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("trans_val_f", trans_fine_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("rx_val_f", rx_fine_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("ry_val_f", ry_fine_loss, sync_dist=True, batch_size=self.batch_size)
+        self.log("loss_val_c", loss_coarse, sync_dist=True, batch_size=self.batch_size)
+        self.log("loss_val_f", loss_fine, sync_dist=True, batch_size=self.batch_size)
+        self.log("loss_val", loss, sync_dist=True, batch_size=self.batch_size)
         elapsed_time = (time.time() - self.start_time) / 3600
-        self.log("val_runtime(hrs)", elapsed_time, sync_dist=True, batch_size=self.batch_size)
-
+        self.log("runtime_val (hrs)", elapsed_time, sync_dist=True, batch_size=self.batch_size)
         return loss
 
     def forward(self, batch) -> Any:
@@ -173,16 +172,14 @@ class LitPoseTransformerV3(L.LightningModule):
         fixed_points = [fixed_coord, fixed_feat, fixed_offset]
 
         # Compute conditional features
-        all_enc_target_points, all_enc_fixed_points = self.pose_transformer.encode_cond(
-            target_points, fixed_points
-        )
+        all_enc_target_points, all_enc_fixed_points = self.pose_transformer.encode_cond(target_points, fixed_points)
 
         # forward
         pred_coarse_pose9d, pred_coarse_status = self.pose_transformer.predict_coarse(
             all_enc_target_points, all_enc_fixed_points
         )
         pred_fine_pose9d, pred_fine_status = self.pose_transformer.predict_fine(
-            all_enc_target_points, all_enc_fixed_points, pred_coarse_pose9d
+            all_enc_target_points, all_enc_fixed_points, None
         )
         return (
             pred_coarse_pose9d.to(torch.float32),
@@ -206,9 +203,10 @@ class LitPoseTransformerV3(L.LightningModule):
         scheduler = LambdaLR(optimizer, lr_lambda=lr_foo)
         return [optimizer], [scheduler]
 
-    def on_train_epoch_start(self):
-        self.coarse_fine_ratio = min((self.current_epoch / 100) * 0.1, 1.0)
-        self.log("coarse_fine_ratio", self.coarse_fine_ratio, sync_dist=True, batch_size=self.batch_size)
+    # Utility functions
+    def batch_pose9d_delta(self, pose9d_pred_coarse, pose9d_gt):
+        """Compute the delta of pose9d in batch-wise"""
+        pass
 
 
 class TmorpModelV3:
@@ -228,7 +226,7 @@ class TmorpModelV3:
     def train(self, num_epochs: int, train_data_loader, val_data_loader, save_path: str):
         # Checkpoint callback
         checkpoint_callback = ModelCheckpoint(
-            monitor="val_loss",
+            monitor="loss_val",
             dirpath=os.path.join(save_path, "checkpoints"),
             filename="Tmorp_modelV2-{epoch:02d}-{val_loss:.2f}",
             save_top_k=3,

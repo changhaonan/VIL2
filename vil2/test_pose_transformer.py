@@ -9,8 +9,8 @@ import argparse
 import vil2.utils.misc_utils as utils
 from vil2.data.pcd_dataset import PcdPairDataset
 from vil2.data.pcd_datalodaer import PcdPairCollator
-from vil2.model.network.pose_transformer_v2 import PoseTransformerV2
-from vil2.model.tmorp_model_v2 import TmorpModelV2
+from vil2.model.network.pose_transformer_v3 import PoseTransformerV3
+from vil2.model.tmorp_model_v3 import TmorpModelV3
 from detectron2.config import LazyConfig
 from torch.utils.data.dataset import random_split
 from vil2.vil2_utils import build_dmorp_dataset
@@ -90,8 +90,8 @@ if __name__ == "__main__":
     # Build model
     net_name = cfg.MODEL.NOISE_NET.NAME
     net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
-    pose_transformer = PoseTransformerV2(**net_init_args)
-    tmorp_model = TmorpModelV2(cfg, pose_transformer)
+    pose_transformer = PoseTransformerV3(**net_init_args)
+    tmorp_model = TmorpModelV3(cfg, pose_transformer)
 
     model_name = tmorp_model.experiment_name()
     noise_net_name = cfg.MODEL.NOISE_NET.NAME
@@ -108,7 +108,7 @@ if __name__ == "__main__":
     tmorp_model.load(checkpoint_file)
     for i in range(20):
         batch = next(iter(test_data_loader))
-        pred_pose9d, pred_status = tmorp_model.predict(batch=batch, target_pose=batch["target_pose"].cpu().numpy())
+        pred_pose9d_coarse, pred_status_coarse, pred_pose9d_fine, pred_status_fine = tmorp_model.predict(batch=batch, target_pose=batch["target_pose"].cpu().numpy())
 
         # # Rank the prediction by status
         # sorted_indices = np.argsort(pred_status[:, 1])
@@ -119,8 +119,8 @@ if __name__ == "__main__":
         # Check the results
         target_batch_idx = batch["target_batch_index"]
         fixed_batch_idx = batch["fixed_batch_index"]
-        for j in range(pred_pose9d.shape[0]):
-            print(f"Prediction status: {pred_status[j]}")
+        for j in range(pred_pose9d_coarse.shape[0]):
+            print(f"Prediction status: {pred_status_fine[j]}")
             target_idx = target_batch_idx == j
             fixed_idx = fixed_batch_idx == j
             target_coord = batch["target_coord"][target_idx].cpu().numpy()
@@ -131,7 +131,7 @@ if __name__ == "__main__":
             target_pcd_o3d = o3d.geometry.PointCloud()
             target_pcd_o3d.points = o3d.utility.Vector3dVector(target_coord)
             target_pcd_o3d.paint_uniform_color([0.0, 0.0, 1.0])
-            pred_pose_mat = utils.pose9d_to_mat(pred_pose9d[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
+            pred_pose_mat = utils.pose9d_to_mat(pred_pose9d_coarse[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
             target_pcd_o3d.transform(pred_pose_mat)
 
             gt_target_pcd_o3d = o3d.geometry.PointCloud()
@@ -145,9 +145,9 @@ if __name__ == "__main__":
 
             # target_pcd_o3d.transform(target_pose_mat)
             # Check numerical difference
-            trans_loss = np.linalg.norm(pred_pose9d[j, :3] - target_pose[:3])
-            rx_loss = np.linalg.norm(pred_pose9d[j, 3:6] - target_pose[3:6])
-            ry_loss = np.linalg.norm(pred_pose9d[j, 6:9] - target_pose[6:9])
+            trans_loss = np.linalg.norm(pred_pose9d_coarse[j, :3] - target_pose[:3])
+            rx_loss = np.linalg.norm(pred_pose9d_coarse[j, 3:6] - target_pose[3:6])
+            ry_loss = np.linalg.norm(pred_pose9d_coarse[j, 6:9] - target_pose[6:9])
             print(f"Translation loss: {trans_loss}, Rotation loss: {rx_loss}, {ry_loss}")
 
             fixed_pcd_o3d = o3d.geometry.PointCloud()

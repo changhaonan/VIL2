@@ -122,9 +122,7 @@ def padoffset(offset, L):
 
 def pad_dense_batch(dense_pts, mask, to_length):
     delta = to_length - len(dense_pts)
-    dense_pts = torch.cat(
-        [dense_pts, torch.zeros((delta,) + dense_pts.shape[1:], dtype=dense_pts.dtype, device=dense_pts.device)]
-    )
+    dense_pts = torch.cat([dense_pts, torch.zeros((delta,) + dense_pts.shape[1:], dtype=dense_pts.dtype, device=dense_pts.device)])
     mask = torch.cat([mask, torch.zeros((delta,) + mask.shape[1:], dtype=mask.dtype, device=mask.device)])
     return dense_pts, mask
 
@@ -224,9 +222,7 @@ def fps_by_sizes(x, offset, sampled_offset, return_points=False, force_cpu=True)
     dense_sample_x, dense_sample_indices = p3dops.sample_farthest_points(dense_x, length, sampled_length)
     if force_cpu:
         dense_sample_x, dense_sample_indices = dense_sample_x.to(device), dense_sample_indices.to(device)
-    dense_sample_indices += (torch.cat([torch.zeros([1], device=x.device, dtype=offset.dtype), offset[:-1]])).view(
-        -1, 1
-    )
+    dense_sample_indices += (torch.cat([torch.zeros([1], device=x.device, dtype=offset.dtype), offset[:-1]])).view(-1, 1)
 
     dense_sample_x = dense_sample_x.flatten(0, 1)
     dense_sample_indices = dense_sample_indices.flatten()
@@ -271,9 +267,7 @@ def knn(query, base, k, query_offset=None, base_offset=None, pad_offset=False):
     -1 will be returned if the corresponding base has fewer than k points
     """
     if len(query) == 0:
-        return torch.zeros([0, k], device=query.device, dtype=torch.long), torch.zeros(
-            [0, k], device=query.device, dtype=torch.float32
-        )
+        return torch.zeros([0, k], device=query.device, dtype=torch.long), torch.zeros([0, k], device=query.device, dtype=torch.float32)
 
     if query_offset is None:
         query_offset = torch.as_tensor([len(base)]).to(base.device)
@@ -287,9 +281,7 @@ def knn(query, base, k, query_offset=None, base_offset=None, pad_offset=False):
     assert len(base_offset) == len(query_offset)
     bs = len(base_offset)
 
-    dense_query, dense_query_mask, query_length = to_dense_batch(
-        query, query_offset, return_length=True, input_offset=True
-    )
+    dense_query, dense_query_mask, query_length = to_dense_batch(query, query_offset, return_length=True, input_offset=True)
     dense_base, _, base_length = to_dense_batch(base, base_offset, return_length=True, input_offset=True)
     dists, idx, _ = p3dops.knn_points(dense_query, dense_base, query_length, base_length, K=k)
     idx += (torch.cat([torch.zeros([1], device=base.device, dtype=base_offset.dtype), base_offset[:-1]])).view(-1, 1, 1)
@@ -327,9 +319,7 @@ def knn_gather(idx, feat, coord=None, with_coord=False, gather_coord=None):
         mask = torch.sign(idx + 1)
         if gather_coord is None:
             gather_coord = coord[:-1]
-        grouped_coord = coord[idx.view(-1).long(), :].view(m, nsample, 3) - gather_coord.unsqueeze(
-            1
-        )  # (m, num_sample, 3) normalization
+        grouped_coord = coord[idx.view(-1).long(), :].view(m, nsample, 3) - gather_coord.unsqueeze(1)  # (m, num_sample, 3) normalization
         grouped_coord = torch.einsum("n s c, n s -> n s c", grouped_coord, mask)  # (m, num_sample, 3)
         return grouped_feat, grouped_coord
     else:
@@ -444,9 +434,7 @@ class GroupedVectorAttention(nn.Module):
         self.softmax = nn.Softmax(dim=1)
         self.attn_drop = nn.Dropout(attn_drop_rate)
 
-    def forward(
-        self, feat=None, coord=None, knn_indexes=None, query_feat=None, context_feat=None, context_coord=None
-    ):  # [156806, 48]
+    def forward(self, feat=None, coord=None, knn_indexes=None, query_feat=None, context_feat=None, context_coord=None):  # [156806, 48]
         is_cross = context_feat is not None
         query_feat = fallback(query_feat, feat)
         context_feat = fallback(context_feat, feat)
@@ -456,9 +444,7 @@ class GroupedVectorAttention(nn.Module):
             self.linear_k(context_feat),
             self.linear_v(context_feat),
         )
-        key, pos = knn_gather(
-            knn_indexes, key, context_coord, with_coord=True, gather_coord=coord if is_cross else None
-        )  # (torch.Size([156806, 16, 48])
+        key, pos = knn_gather(knn_indexes, key, context_coord, with_coord=True, gather_coord=coord if is_cross else None)  # (torch.Size([156806, 16, 48])
         value = knn_gather(knn_indexes, value, context_coord, with_coord=False)  # torch.Size([156806, 16, 48]))
         relation_qk = key - query.unsqueeze(1)  # [156806, 16, 48] - [156806, 1, 48] =  [156806, 16, 48]
         if self.pe_multiplier:
@@ -515,11 +501,7 @@ class KnnTransformer(nn.Module):
         if feat is not None:
             identity = feat
             feat = self.act(self.norm1(self.fc1(feat)))
-            feat = (
-                self.attn(feat, coord, knn_indexes)
-                if not self.enable_checkpoint
-                else checkpoint(self.attn, feat, coord, knn_indexes, use_reentrant=True)
-            )
+            feat = self.attn(feat, coord, knn_indexes) if not self.enable_checkpoint else checkpoint(self.attn, feat, coord, knn_indexes, use_reentrant=True)
         else:
             identity = query_feat
             feat = self.act(self.norm1(self.fc1(query_feat)))
@@ -532,9 +514,7 @@ class KnnTransformer(nn.Module):
                     knn_indexes=knn_indexes,
                 )
                 if not self.enable_checkpoint
-                else checkpoint(
-                    self.attn, coord, None, knn_indexes, feat, context_feat, context_coord, use_reentrant=True
-                )
+                else checkpoint(self.attn, coord, None, knn_indexes, feat, context_feat, context_coord, use_reentrant=True)
             )
 
         feat = self.act(self.norm2(feat))
@@ -631,12 +611,8 @@ class DualSoftmaxReposition(nn.Module):
             return conf_matrix
 
     def forward(self, feat_a, coord_a, batch_index_a, feat_b, coord_b, batch_index_b, input_offset=False):
-        conf_matrix = self.match(
-            feat_a, coord_a, batch_index_a, feat_b, coord_b, batch_index_b, input_offset=input_offset
-        )
-        R, t, condition = self.arun(
-            conf_matrix, coord_a, batch_index_a, coord_b, batch_index_b, input_offset=input_offset
-        )
+        conf_matrix = self.match(feat_a, coord_a, batch_index_a, feat_b, coord_b, batch_index_b, input_offset=input_offset)
+        R, t, condition = self.arun(conf_matrix, coord_a, batch_index_a, coord_b, batch_index_b, input_offset=input_offset)
         result = {"conf_matrix": conf_matrix, "transformation": {"condition": condition, "R": R, "t": t}}
         return R, t, result
 
@@ -660,9 +636,7 @@ class DualSoftmaxReposition(nn.Module):
         coord_b_sampled = coord_b[b_index, idx_b.view(-1)].view(bsize, max_N, -1)
 
         try:
-            R, t, condition = batch_arun(
-                self._detach(coord_a_sampled), self._detach(coord_b_sampled), self._detach(w[..., None])
-            )
+            R, t, condition = batch_arun(self._detach(coord_a_sampled), self._detach(coord_b_sampled), self._detach(w[..., None]))
         except:  # fail to get valid solution, this usually happens at the early stage of training
             R = torch.eye(3)[None].repeat(bsize, 1, 1).type_as(conf_matrix).to(device)
             t = torch.zeros(3, 1)[None].repeat(bsize, 1, 1).type_as(conf_matrix).to(device)
@@ -768,9 +742,7 @@ class KnnAttentionPool(nn.Module):
             return_knn_indexes=True,
             reduction=self.reduction,
         )
-        pooled_feat_attn = self.attn(
-            query_feat=pooled_feat, coord=pooled_coord, context_coord=coord, context_feat=feat, knn_indexes=knn_indexes
-        )
+        pooled_feat_attn = self.attn(query_feat=pooled_feat, coord=pooled_coord, context_coord=coord, context_feat=feat, knn_indexes=knn_indexes)
         return pooled_coord, pooled_feat_attn, pooled_offset, pooled_indices
 
 
@@ -824,9 +796,7 @@ class BaseTransformerNetwork(nn.Module):
         super().__init__()
         self.skip_repo = skip_repo
         self.layer_types = layer_types
-        assert len([l for l in layer_types if not any([l.startswith(el) for el in self.NON_MODULE_LAYERS])]) == len(
-            blocks
-        )
+        assert len([l for l in layer_types if not any([l.startswith(el) for el in self.NON_MODULE_LAYERS])]) == len(blocks)
         blocks = [nn.ModuleList(blk) if isinstance(blk, (list, tuple)) else blk for blk in blocks]
         self.blocks = nn.ModuleList(blocks)
 
@@ -957,18 +927,12 @@ class VoxelPooling(nn.Module):
             torch.cat([batch.new_zeros(1), torch.cumsum(batch.bincount(), dim=0)]),  # [     0,  76806, 156806]
             reduce="min",
         )  # [2, 3]
-        cluster = voxel_grid(  # torch_geometric
-            pos=coord - start[batch], size=self.grid_size, batch=batch, start=0  # grid_size = 0.1
-        )
+        cluster = voxel_grid(pos=coord - start[batch], size=self.grid_size, batch=batch, start=0)  # torch_geometric  # grid_size = 0.1
         unique, cluster, counts = torch.unique(cluster, sorted=True, return_inverse=True, return_counts=True)
         _, sorted_cluster_indices = torch.sort(cluster, stable=True)
-        idx_ptr = torch.cat(
-            [counts.new_zeros(1), torch.cumsum(counts, dim=0)]
-        )  # [     0,      3,      9,  ..., 156796, 156800, 156806]
+        idx_ptr = torch.cat([counts.new_zeros(1), torch.cumsum(counts, dim=0)])  # [     0,      3,      9,  ..., 156796, 156800, 156806]
         coord = segment_csr(coord[sorted_cluster_indices], idx_ptr, reduce="mean")  # pooling
-        feat = segment_csr(
-            feat[sorted_cluster_indices], idx_ptr, reduce="max"
-        )  # the segment csr and voxel grid is the key operation for pooling
+        feat = segment_csr(feat[sorted_cluster_indices], idx_ptr, reduce="max")  # the segment csr and voxel grid is the key operation for pooling
         batch = batch[idx_ptr[:-1]]
         offset = batch2offset(batch)
         # segment_csr(flow[indices], idx_ptr, reduce='mean')
@@ -1223,6 +1187,89 @@ class PointDecoder(nn.Module):
     def forward(self, points, skip_points, cluster):
         points = self.up(points, skip_points, cluster)
         return self.blocks(points)
+
+
+class KnnTransformerDecoder(nn.Module):
+    def __init__(
+        self,
+        num_layers,
+        embed_channels,
+        n_heads,
+        qkv_bias=True,
+        pe_multiplier=False,
+        pe_bias=True,
+        attn_drop_rate=0.0,
+        drop_path_rate=0.0,
+        enable_checkpoint=False,
+    ) -> None:
+        super().__init__()
+        self.num_layers = num_layers
+        self.embed_channels = embed_channels
+        self.n_heads = n_heads
+        self.qkv_bias = qkv_bias
+        self.pe_multiplier = pe_multiplier
+        self.pe_bias = pe_bias
+        self.attn_drop_rate = attn_drop_rate
+        self.drop_path_rate = drop_path_rate
+        self.enable_checkpoint = enable_checkpoint
+        # Module
+        self.self_attns = nn.ModuleList()
+        self.cross_attns = nn.ModuleList()
+        for i in range(num_layers):
+            self.self_attns.append(
+                KnnTransformer(
+                    embed_channels,
+                    n_heads,
+                    qkv_bias=qkv_bias,
+                    pe_multiplier=pe_multiplier,
+                    pe_bias=pe_bias,
+                    attn_drop_rate=attn_drop_rate,
+                    drop_path_rate=drop_path_rate,
+                    enable_checkpoint=enable_checkpoint,
+                )
+            )
+            self.cross_attns.append(
+                KnnTransformer(
+                    embed_channels,
+                    n_heads,
+                    qkv_bias=qkv_bias,
+                    pe_multiplier=pe_multiplier,
+                    pe_bias=pe_bias,
+                    attn_drop_rate=attn_drop_rate,
+                    drop_path_rate=drop_path_rate,
+                    enable_checkpoint=enable_checkpoint,
+                )
+            )
+        # MLP
+        self.fc1 = nn.Linear(embed_channels, embed_channels, bias=False)
+        self.fc3 = nn.Linear(embed_channels, embed_channels, bias=False)
+        self.norm1 = PointBatchNorm(embed_channels)
+        self.norm2 = PointBatchNorm(embed_channels)
+        self.norm3 = PointBatchNorm(embed_channels)
+        self.act = nn.ReLU(inplace=True)
+        self.drop_path = DropPath(drop_path_rate) if drop_path_rate > 0.0 else nn.Identity()
+
+    def forward(self, feat, coord, knn_indexes, cross_knn_indexes, context_feat, context_coord):
+        for i in range(self.num_layers):
+            feat = self.act(self.norm1(self.fc1(feat)))
+            # Self attention
+            sattn = self.self_attns[i](feat=feat, coord=coord, knn_indexes=knn_indexes)
+            feat = feat + self.drop_path(sattn)
+            feat = self.norm1(feat)
+            # Crop attention
+            cattn = self.cross_attns[i](
+                feat=None,
+                query_feat=feat,
+                coord=coord,
+                context_feat=context_feat,
+                context_coord=context_coord,
+                knn_indexes=cross_knn_indexes,
+            )
+            feat = feat + self.drop_path(cattn)
+            # MLP
+            proj = self.norm3(self.fc3(self.act(self.norm2(feat))))
+            feat = feat + self.drop_path(proj)
+        return feat
 
 
 class PointTransformerNetwork(nn.Module):
