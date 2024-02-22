@@ -63,14 +63,14 @@ if __name__ == "__main__":
         target_normal = test_data["target_normal"]
         target_color = test_data["target_color"]
         target_label = test_data["target_label"]
-        fixed_coord = test_data["fixed_coord"]
-        fixed_normal = test_data["fixed_normal"]
-        fixed_color = test_data["fixed_color"]
-        fixed_label = test_data["fixed_label"]
+        anchor_coord = test_data["anchor_coord"]
+        anchor_normal = test_data["anchor_normal"]
+        anchor_color = test_data["anchor_color"]
+        anchor_label = test_data["anchor_label"]
         target_pcd_arr = np.concatenate([target_coord, target_normal, target_color], axis=-1)
-        fixed_pcd_arr = np.concatenate([fixed_coord, fixed_normal, fixed_color], axis=-1)
+        anchor_pcd_arr = np.concatenate([anchor_coord, anchor_normal, anchor_color], axis=-1)
         target_label = test_data["target_label"]
-        fixed_label = test_data["fixed_label"]
+        anchor_label = test_data["anchor_label"]
         target_pose = test_data["target_pose"]
         converge_step = test_data["converge_step"]
 
@@ -82,26 +82,26 @@ if __name__ == "__main__":
         target_pcd_arr[:, 3:6] = (pred_pose_mat[:3, :3] @ target_pcd_arr[:, 3:6].T).T  # normal
         # Move both back to center
         target_pcd_arr[:, :3] -= np.mean(target_pcd_arr[:, :3], axis=0)
-        fixed_pcd_arr[:, :3] -= np.mean(fixed_pcd_arr[:, :3], axis=0)
+        anchor_pcd_arr[:, :3] -= np.mean(anchor_pcd_arr[:, :3], axis=0)
         pred_pose_mat = dmorp_model.predict(
             target_pcd_arr=target_pcd_arr,
-            fixed_pcd_arr=fixed_pcd_arr,
+            anchor_pcd_arr=anchor_pcd_arr,
             target_label=target_label,
-            fixed_label=fixed_label,
+            anchor_label=anchor_label,
             target_pose=target_pose,
         )
 
         # Check the prediction
         utils.visualize_pcd_list(
-            [target_coord, fixed_coord],
-            [target_normal, fixed_normal],
-            [target_color, fixed_color],
+            [target_coord, anchor_coord],
+            [target_normal, anchor_normal],
+            [target_color, anchor_color],
             [np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
         )
 
         utils.visualize_pcd_list(
-            [target_coord, fixed_coord],
-            [target_normal, fixed_normal],
-            [target_color, fixed_color],
+            [target_coord, anchor_coord],
+            [target_normal, anchor_normal],
+            [target_color, anchor_color],
             [pred_pose_mat, np.eye(4, dtype=np.float32)],
         )

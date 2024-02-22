@@ -7,22 +7,24 @@ class PcdPairCollator:
     def __call__(self, samples):
         target = {
             "target_coord": [],
+            "target_coord_goal": [],
             "target_feat": [],
-            "fixed_coord": [],
-            "fixed_feat": [],
+            "anchor_coord": [],
+            "anchor_feat": [],
             "target_pose": [],
             "target_batch_index": [],
-            "fixed_batch_index": [],
+            "anchor_batch_index": [],
             "is_valid_crop": [],
             "is_nearby": [],
         }
         for sample_id, item in enumerate(samples):
             target["target_coord"].append(item["target_coord"])  # (N, 3)
+            target["target_coord_goal"].append(item["target_coord_goal"])  # (N, 3)
             target["target_feat"].append(item["target_feat"])  # (N, 3)
             target["target_batch_index"].append(np.full([len(item["target_coord"])], fill_value=sample_id))  # (N,)
-            target["fixed_coord"].append(item["fixed_coord"])  # (M, 3)
-            target["fixed_feat"].append(item["fixed_feat"])  # (M, 3)
-            target["fixed_batch_index"].append(np.full([len(item["fixed_coord"])], fill_value=sample_id))  # (M,)
+            target["anchor_coord"].append(item["anchor_coord"])  # (M, 3)
+            target["anchor_feat"].append(item["anchor_feat"])  # (M, 3)
+            target["anchor_batch_index"].append(np.full([len(item["anchor_coord"])], fill_value=sample_id))  # (M,)
             target["target_pose"].append(item["target_pose"][None, :])  #
             target["is_valid_crop"].append(item["is_valid_crop"])
             target["is_nearby"].append(item["is_nearby"])
@@ -56,10 +58,10 @@ if __name__ == "__main__":
     collate_fn = PcdPairCollator()
     for d in DataLoader(dataset, collate_fn=collate_fn, batch_size=4):
         print(d["target_batch_index"].shape)
-        print(d["fixed_batch_index"].shape)
+        print(d["anchor_batch_index"].shape)
         print(d["target_coord"].shape)
         print(d["target_feat"].shape)
-        print(d["fixed_coord"].shape)
-        print(d["fixed_feat"].shape)
+        print(d["anchor_coord"].shape)
+        print(d["anchor_feat"].shape)
         print(d["target_pose"].shape)
         break

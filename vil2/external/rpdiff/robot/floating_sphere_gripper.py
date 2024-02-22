@@ -147,18 +147,18 @@ class FloatingHandDriven:
         Build the mapping from the joint name to joint index.
         """
         self.jnt_to_id = {}
-        self.non_fixed_jnt_names = []
+        self.non_anchor_jnt_names = []
         for i in range(p.getNumJoints(self.hand_id)):
             info = p.getJointInfo(self.hand_id, i)
             jnt_name = info[1].decode('UTF-8')
             self.jnt_to_id[jnt_name] = info[0]
             if info[2] != p.JOINT_FIXED:
-                self.non_fixed_jnt_names.append(jnt_name)
+                self.non_anchor_jnt_names.append(jnt_name)
 
-        self._ik_jds = [self._ik_jd] * len(self.non_fixed_jnt_names)
+        self._ik_jds = [self._ik_jd] * len(self.non_anchor_jnt_names)
         self.ee_link_id = self.jnt_to_id[self.ee_link_jnt]
         self.arm_jnt_ids = [self.jnt_to_id[jnt] for jnt in self.arm_jnt_names]
-        self.arm_jnt_ik_ids = [self.non_fixed_jnt_names.index(jnt)
+        self.arm_jnt_ik_ids = [self.non_anchor_jnt_names.index(jnt)
                                for jnt in self.arm_jnt_names]
 
     def go_home(self, ignore_physics=False):

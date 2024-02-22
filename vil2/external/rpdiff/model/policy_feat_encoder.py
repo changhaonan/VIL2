@@ -14,7 +14,7 @@ class LocalAbstractPolicy(nn.Module):
     (consisting of the 3D coordinates of the shape pair and their corresponding
     per-point features from a potentially pre-trained encoder)
     """
-    def __init__(self, n_pts: int, pn_pts: int=None, cn_pts: int=None, fixed_scaling: float=None):
+    def __init__(self, n_pts: int, pn_pts: int=None, cn_pts: int=None, anchor_scaling: float=None):
         super().__init__()
         self.n_pts = n_pts
         self.pn_pts = pn_pts
@@ -36,7 +36,7 @@ class LocalAbstractPolicy(nn.Module):
 
         self.predict_offset = False
         self.out_trans_offset = None
-        self.fixed_scaling = fixed_scaling
+        self.anchor_scaling = anchor_scaling
 
     def set_predict_offset(self, predict_offset):
         self.predict_offset = predict_offset
@@ -111,8 +111,8 @@ class LocalAbstractPolicy(nn.Module):
         # scale up to approximate unit bounding box, for each obj
         # vn_child_scaling = 1 / ((cpcd_cent.max(1)[0].max(-1)[0] - cpcd_cent.min(1)[0].min(-1)[0]) / 2.0)
         vn_parent_scaling = 1 / ((ppcd_cent.max(1)[0].max(-1)[0] - ppcd_cent.min(1)[0].min(-1)[0]) / 2.0)
-        if self.fixed_scaling is not None:
-            vn_parent_scaling = torch.Tensor([self.fixed_scaling]).repeat(B).float().cuda()
+        if self.anchor_scaling is not None:
+            vn_parent_scaling = torch.Tensor([self.anchor_scaling]).repeat(B).float().cuda()
         ppcd_cent = ppcd_cent * vn_parent_scaling[:, None, None].repeat(1, Np, 1)
         cpcd_cent = cpcd_cent * vn_parent_scaling[:, None, None].repeat(1, Nc, 1)
         
@@ -186,8 +186,8 @@ class LocalAbstractPolicy(nn.Module):
 
 class LocalAbstractSuccessClassifier(LocalAbstractPolicy):
     def __init__(self, n_pts: int, pn_pts: int=None, cn_pts: int=None, 
-                 sigmoid: bool=True, fixed_scaling: float=None):
-        super().__init__(n_pts=n_pts, pn_pts=pn_pts, cn_pts=cn_pts, fixed_scaling=fixed_scaling)
+                 sigmoid: bool=True, anchor_scaling: float=None):
+        super().__init__(n_pts=n_pts, pn_pts=pn_pts, cn_pts=cn_pts, anchor_scaling=anchor_scaling)
         self.sigmoid = sigmoid
 
     def _build_output_heads(self, pooled_dim: int, hidden_dim: int):

@@ -244,8 +244,8 @@ class FullRelationPointcloudPolicyDataset(Dataset):
         self.single_rot = False and debug_mode
         if self.single_offset_debug:
             print('!! Using single trans/rot for debugging !!')
-        self.fixed_perm = debug_mode
-        if self.fixed_perm:
+        self.anchor_perm = debug_mode
+        if self.anchor_perm:
             print('!!! Using fixed permutation of the point clouds! !!')
 
         self.aff_out_viz = None

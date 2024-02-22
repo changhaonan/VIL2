@@ -133,7 +133,7 @@ optimizer:
         use_schedule: True
     use_schedule: False
     schedule:
-        fixed_lr: False
+        anchor_lr: False
         min_lr: 1.0e-6
         warmup_epochs: 50
     AdamW:

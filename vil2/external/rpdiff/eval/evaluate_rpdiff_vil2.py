@@ -810,13 +810,13 @@ def main(args: config_util.AttrDict) -> None:
 
         # Preprocess
         data = tmorp_model.preprocess_input_rpdiff(
-            fixed_coord=parent_pcd,
+            anchor_coord=parent_pcd,
             target_coord=child_pcd,
         )
         target_coord = data["target_coord"]
         target_feat = data["target_feat"]
-        fixed_coord = data["fixed_coord"]
-        fixed_feat = data["fixed_feat"]
+        anchor_coord = data["anchor_coord"]
+        anchor_feat = data["anchor_feat"]
 
         # Batch sampling
         crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
@@ -831,8 +831,8 @@ def main(args: config_util.AttrDict) -> None:
             sample_strategy=sample_strategy,
             target_coord=target_coord,
             target_feat=target_feat,
-            fixed_coord=fixed_coord,
-            fixed_feat=fixed_feat,
+            anchor_coord=anchor_coord,
+            anchor_feat=anchor_feat,
             crop_strategy=crop_strategy,
             crop_size=crop_size,
             knn_k=knn_k,

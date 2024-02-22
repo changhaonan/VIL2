@@ -24052,23 +24052,23 @@ static void __Pyx_Raise(PyObject *type, PyObject *value, PyObject *tb, PyObject 
         goto bad;
     }
     if (cause) {
-        PyObject *fixed_cause;
+        PyObject *anchor_cause;
         if (cause == Py_None) {
-            fixed_cause = NULL;
+            anchor_cause = NULL;
         } else if (PyExceptionClass_Check(cause)) {
-            fixed_cause = PyObject_CallObject(cause, NULL);
-            if (fixed_cause == NULL)
+            anchor_cause = PyObject_CallObject(cause, NULL);
+            if (anchor_cause == NULL)
                 goto bad;
         } else if (PyExceptionInstance_Check(cause)) {
-            fixed_cause = cause;
-            Py_INCREF(fixed_cause);
+            anchor_cause = cause;
+            Py_INCREF(anchor_cause);
         } else {
             PyErr_SetString(PyExc_TypeError,
                             "exception causes must derive from "
                             "BaseException");
             goto bad;
         }
-        PyException_SetCause(value, fixed_cause);
+        PyException_SetCause(value, anchor_cause);
     }
     PyErr_SetObject(type, value);
     if (tb) {

@@ -112,28 +112,28 @@ if __name__ == "__main__":
             sample_batch = next(iter(test_data_loader))
         elif data_format == "raw":
             raw_data = np.load(os.path.join(rpdiff_path, rpdiff_file_list[i]), allow_pickle=True)
-            fixed_coord_s, target_coord_s = parse_child_parent(raw_data["multi_obj_start_pcd"])
-            fixed_pose_s, target_pose_s = parse_child_parent(raw_data["multi_obj_start_obj_pose"])
-            fixed_pose_f, target_pose_f = parse_child_parent(raw_data["multi_obj_final_obj_pose"])
+            anchor_coord_s, target_coord_s = parse_child_parent(raw_data["multi_obj_start_pcd"])
+            anchor_pose_s, target_pose_s = parse_child_parent(raw_data["multi_obj_start_obj_pose"])
+            anchor_pose_f, target_pose_f = parse_child_parent(raw_data["multi_obj_final_obj_pose"])
             data = tmorp_model.preprocess_input_rpdiff(
-                fixed_coord=fixed_coord_s,
+                anchor_coord=anchor_coord_s,
                 target_coord=target_coord_s,
             )
         elif data_format == "rpdiff_fail":
             failed_data_file = failed_data_list[i]
             failed_data = np.load(failed_data_file, allow_pickle=True)
-            fixed_coord_s = failed_data["parent_pcd"]
+            anchor_coord_s = failed_data["parent_pcd"]
             target_coord_s = failed_data["child_pcd"]
             final_child_pcd = failed_data["final_child_pcd"]
             data = tmorp_model.preprocess_input_rpdiff(
-                fixed_coord=fixed_coord_s,
+                anchor_coord=anchor_coord_s,
                 target_coord=target_coord_s,
             )
 
         target_coord = data["target_coord"]
         target_feat = data["target_feat"]
-        fixed_coord = data["fixed_coord"]
-        fixed_feat = data["fixed_feat"]
+        anchor_coord = data["anchor_coord"]
+        anchor_feat = data["anchor_feat"]
 
         # Init crop center
         crop_size = cfg.DATALOADER.AUGMENTATION.CROP_SIZE
@@ -148,8 +148,8 @@ if __name__ == "__main__":
             sample_strategy=sample_strategy,
             target_coord=target_coord,
             target_feat=target_feat,
-            fixed_coord=fixed_coord,
-            fixed_feat=fixed_feat,
+            anchor_coord=anchor_coord,
+            anchor_feat=anchor_feat,
             crop_strategy=crop_strategy,
             crop_size=crop_size,
             knn_k=knn_k,
@@ -165,22 +165,22 @@ if __name__ == "__main__":
         pred_status = pred_status[sorted_indices]
 
         # Check the result
-        fixed_pcd = o3d.geometry.PointCloud()
-        fixed_pcd.points = o3d.utility.Vector3dVector(fixed_coord)
-        fixed_pcd.paint_uniform_color([0, 1, 0])
+        anchor_pcd = o3d.geometry.PointCloud()
+        anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord)
+        anchor_pcd.paint_uniform_color([0, 1, 0])
 
         # Check crop sampling
         for j in range(sample_size):
             print(f"Status: {pred_status[j]} for {j}-th sample")
-            vis_list = [fixed_pcd]
+            vis_list = [anchor_pcd]
             # Crop fixed
-            crop_fixed_coord = samples[sorted_indices[j]]["fixed_coord"]
-            crop_fixed_pcd = o3d.geometry.PointCloud()
-            crop_fixed_pcd.points = o3d.utility.Vector3dVector(crop_fixed_coord)
-            crop_fixed_pcd.paint_uniform_color([1, 0, 0])
+            crop_anchor_coord = samples[sorted_indices[j]]["anchor_coord"]
+            crop_anchor_pcd = o3d.geometry.PointCloud()
+            crop_anchor_pcd.points = o3d.utility.Vector3dVector(crop_anchor_coord)
+            crop_anchor_pcd.paint_uniform_color([1, 0, 0])
             crop_center = samples[sorted_indices[j]]["crop_center"]
-            crop_fixed_pcd.translate(crop_center)
-            vis_list.append(crop_fixed_pcd)
+            crop_anchor_pcd.translate(crop_center)
+            vis_list.append(crop_anchor_pcd)
 
             # Target
             pred_pose_mat = utils.pose9d_to_mat(pred_pose9d[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
@@ -208,13 +208,13 @@ if __name__ == "__main__":
                 pred_pose9d[j], samples[sorted_indices[j]]["crop_center"], data
             )
             # DEBUG:
-            fixed_coord_o3d = o3d.geometry.PointCloud()
-            fixed_coord_o3d.points = o3d.utility.Vector3dVector(fixed_coord_s)
-            # fixed_coord_o3d.paint_uniform_color([0, 1, 0])
+            anchor_coord_o3d = o3d.geometry.PointCloud()
+            anchor_coord_o3d.points = o3d.utility.Vector3dVector(anchor_coord_s)
+            # anchor_coord_o3d.paint_uniform_color([0, 1, 0])
             target_coord_o3d = o3d.geometry.PointCloud()
             target_coord_o3d.points = o3d.utility.Vector3dVector(target_coord_s)
             target_coord_o3d.paint_uniform_color([1, 1, 0])
             target_coord_o3d.transform(recover_pose)
 
             origin_pcd = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-            o3d.visualization.draw_geometries([origin_pcd, target_coord_o3d, fixed_coord_o3d])
+            o3d.visualization.draw_geometries([origin_pcd, target_coord_o3d, anchor_coord_o3d])

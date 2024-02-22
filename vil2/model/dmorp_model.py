@@ -543,7 +543,7 @@ class DmorpModel:
             noise_sample = torch.randn((pose9d.shape[0], pose9d.shape[1]), device="cuda")
             if consider_only_one_pair:
                 target_random = target[random_index].unsqueeze(0).repeat(sample_size, 1, 1)
-                fixed_random = fixed[random_index].unsqueeze(0).repeat(sample_size, 1, 1)
+                anchor_random = fixed[random_index].unsqueeze(0).repeat(sample_size, 1, 1)
 
             with torch.no_grad():
                 self.nets.eval()
@@ -553,7 +553,7 @@ class DmorpModel:
                         torch.from_numpy(np.repeat(t, noise_sample.shape[0])).long().to("cuda")
                     )  # num_samples is config.eval.batch_size
                     if consider_only_one_pair:
-                        residual = self.nets.noise_pred_net(noise_sample, t, target_random, fixed_random)
+                        residual = self.nets.noise_pred_net(noise_sample, t, target_random, anchor_random)
                     else:
                         residual = self.nets.noise_pred_net(noise_sample, t, target, fixed)
                     noise_sample = self.noise_scheduler.step(residual, t[0], noise_sample).prev_sample
@@ -577,7 +577,7 @@ class DmorpModel:
                 if consider_only_one_pair:
                     visualize_pcd_with_open3d(
                         target_random[random_index].detach().cpu().numpy(),
-                        fixed_random[random_index].detach().cpu().numpy(),
+                        anchor_random[random_index].detach().cpu().numpy(),
                         pred_transform_matrix,
                     )
                     pass

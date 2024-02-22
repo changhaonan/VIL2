@@ -17,6 +17,7 @@ PREPROCESS = dict(
 DATALOADER = dict(
     BATCH_SIZE=32,
     NUM_WORKERS=8,  # Set to 0 if using ilab
+    ADD_NORMALS=False,
     AUGMENTATION=dict(
         IS_ELASTIC_DISTORTION=False,
         ELASTIC_DISTORTION_GRANULARITY=1.0,
@@ -30,7 +31,7 @@ DATALOADER = dict(
         CROP_SIZE=0.75,
         CROP_NOISE=0.3,
         CROP_STRATEGY="knn_bbox_max",  # bbox, radius, knn, knn_bbox, knn_bbox_max
-        RANDOM_CROP_PROB=0.5,
+        RANDOM_CROP_PROB=0.0,
         ROT_NOISE_LEVEL=0.8,
         TRANS_NOISE_LEVEL=0.1,
         ROT_AXIS="yz",
@@ -47,7 +48,7 @@ MODEL = dict(
     DIFFUSION_PROCESS="ddpm",
     NUM_DIFFUSION_ITERS=100,
     NOISE_NET=dict(
-        NAME="TRANSFORMERV3",
+        NAME="PCDNOISENET",
         INIT_ARGS=dict(
             TRANSFORMER=dict(
                 pcd_input_dim=6,  # 3 + 3 + 3
@@ -90,6 +91,16 @@ MODEL = dict(
                 in_dim=6,
                 fusion_projection_dim=512,  # V2
                 # Joint transformer network
+            ),
+            PCDNOISENET=dict(
+                grid_sizes=[0.15, 0.3],
+                depths=[2, 3, 3],
+                dec_depths=[1, 1],
+                hidden_dims=[128, 256, 512],
+                n_heads=[8, 16, 16],
+                ks=[16, 24, 32],
+                in_dim=3,
+                fusion_projection_dim=512,
             ),
         ),
     ),

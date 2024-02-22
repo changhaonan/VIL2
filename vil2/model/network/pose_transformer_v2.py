@@ -38,7 +38,7 @@ class PoseTransformerV2(nn.Module):
             in_dim,
             skip_dec=True,
         )
-        self.fixed_pcd_transformer = PointTransformerNetwork(
+        self.anchor_pcd_transformer = PointTransformerNetwork(
             grid_sizes,  # (2)
             depths,  # (3)
             dec_depths,  # (2)
@@ -87,24 +87,24 @@ class PoseTransformerV2(nn.Module):
     def encode_cond(
         self,
         target_points,
-        fixed_points,
+        anchor_points,
     ):
         """
         Encode target and fixed pcd to features
         """
         target_points = self.target_pcd_transformer(target_points)
         # Encode fixed pcd
-        fixed_points, all_fixed_points, cluster_indexes = self.fixed_pcd_transformer(fixed_points, return_full=True)
+        anchor_points, all_anchor_points, cluster_indexes = self.anchor_pcd_transformer(anchor_points, return_full=True)
         # DEBUG:
         # Check the existence of nan
-        if torch.isnan(target_points[1]).any() or torch.isnan(fixed_points[1]).any():
+        if torch.isnan(target_points[1]).any() or torch.isnan(anchor_points[1]).any():
             print("Nan exists in the feature")
-        return target_points, all_fixed_points, cluster_indexes
+        return target_points, all_anchor_points, cluster_indexes
 
     def forward(
         self,
         target_points: list[torch.Tensor],
-        all_fixed_points: list[list[torch.Tensor]],
+        all_anchor_points: list[list[torch.Tensor]],
     ) -> torch.Tensor:
         target_coord, target_feat, target_offset = target_points
         # Convert to batch & mask
@@ -136,26 +136,26 @@ class PoseTransformerV2(nn.Module):
         # visualize_tensor_pcd(target_coord_batch[0])
         # Refine pose tokens
         for i in range(len(self.refine_decoders)):
-            fixed_coord, fixed_feat, fixed_offset = all_fixed_points[i]
-            fixed_batch_index = offset2batch(fixed_offset)
-            fixed_feat, fixed_feat_mask = to_dense_batch(fixed_feat, fixed_batch_index)
-            fixed_feat_padding_mask = fixed_feat_mask == 0
-            if target_feat.shape[0] != fixed_feat.shape[0]:
-                print("fixed_offset:")
-                print(fixed_offset)
+            anchor_coord, anchor_feat, anchor_offset = all_anchor_points[i]
+            anchor_batch_index = offset2batch(anchor_offset)
+            anchor_feat, anchor_feat_mask = to_dense_batch(anchor_feat, anchor_batch_index)
+            anchor_feat_padding_mask = anchor_feat_mask == 0
+            if target_feat.shape[0] != anchor_feat.shape[0]:
+                print("anchor_offset:")
+                print(anchor_offset)
                 print("target_offset:")
                 print(target_offset)
                 print(
-                    f"target_feat: {target_feat.shape}, fixed_feat: {fixed_feat.shape}, target_mask: {target_feat_padding_mask.shape}, fixed_mask: {fixed_feat_padding_mask.shape}"
+                    f"target_feat: {target_feat.shape}, anchor_feat: {anchor_feat.shape}, target_mask: {target_feat_padding_mask.shape}, anchor_mask: {anchor_feat_padding_mask.shape}"
                 )
                 print("Batch size mismatch")
             target_feat = self.refine_decoders[i](
                 target_feat,
-                fixed_feat,
+                anchor_feat,
                 tgt_mask=None,
                 memory_mask=None,
                 tgt_key_padding_mask=target_feat_padding_mask,
-                memory_key_padding_mask=fixed_feat_padding_mask,
+                memory_key_padding_mask=anchor_feat_padding_mask,
             )
             if torch.isnan(target_feat).any():
                 print("Nan exists in the feature")
@@ -164,18 +164,18 @@ class PoseTransformerV2(nn.Module):
                     if torch.isnan(target_feat[j]).any():
                         print(f"Batch {j} has nan")
                         # Check fixed pcd of that batch
-                        fixed_coord_raw, fixed_feat_raw, fixed_offset_raw = all_fixed_points[2]
-                        fixed_batch_raw = offset2batch(fixed_offset_raw)
-                        fixed_coord_batch, mask = to_dense_batch(fixed_coord_raw, fixed_batch_raw)
-                        visualize_tensor_pcd(fixed_coord_batch[j])
+                        anchor_coord_raw, anchor_feat_raw, anchor_offset_raw = all_anchor_points[2]
+                        anchor_batch_raw = offset2batch(anchor_offset_raw)
+                        anchor_coord_batch, mask = to_dense_batch(anchor_coord_raw, anchor_batch_raw)
+                        visualize_tensor_pcd(anchor_coord_batch[j])
             target_feat = self.conv1x1[i](target_feat.permute(0, 2, 1)).permute(0, 2, 1)
             # DEBUG:
             # Check the existence of nan
             if torch.isnan(target_feat).any():
                 print("Nan exists in the feature")
             # DEBUG:
-            # fixed_coord_batch, mask = to_dense_batch(fixed_coord, fixed_batch_index)
-            # visualize_tensor_pcd(fixed_coord_batch[0])
+            # anchor_coord_batch, mask = to_dense_batch(anchor_coord, anchor_batch_index)
+            # visualize_tensor_pcd(anchor_coord_batch[0])
 
         # Decode pose & status
         pose_pred = self.pose_decoder(target_feat[:, 0, :])

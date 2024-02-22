@@ -54,21 +54,21 @@ if __name__ == "__main__":
             target_coord = batch["target_coord"].to(device)
             target_feat = batch["target_feat"].to(device)
             target_batch_idx = batch["target_batch_index"].to(device)
-            fixed_coord = batch["fixed_coord"].to(device)
-            fixed_feat = batch["fixed_feat"].to(device)
-            fixed_batch_idx = batch["fixed_batch_index"].to(device)
+            anchor_coord = batch["anchor_coord"].to(device)
+            anchor_feat = batch["anchor_feat"].to(device)
+            anchor_batch_idx = batch["anchor_batch_index"].to(device)
 
             target_offset = batch2offset(target_batch_idx)
-            fixed_offset = batch2offset(fixed_batch_idx)
+            anchor_offset = batch2offset(anchor_batch_idx)
             target_points = [target_coord, target_feat, target_offset]
-            fixed_points = [fixed_coord, fixed_feat, fixed_offset]
+            anchor_points = [anchor_coord, anchor_feat, anchor_offset]
 
             # Assemble batch
-            batch_fixed_feat, mask = to_dense_batch(fixed_feat, fixed_batch_idx)
+            batch_anchor_feat, mask = to_dense_batch(anchor_feat, anchor_batch_idx)
 
             # Encode feature
             enc_target_points = pct(target_points)
-            enc_fixed_points, all_enc_fixed_points, cluster_indexes = pct(fixed_points, return_full=True)
+            enc_anchor_points, all_enc_anchor_points, cluster_indexes = pct(anchor_points, return_full=True)
 
             enc_target_coord, enc_target_feat, enc_target_offset = enc_target_points
             # Convert to batch & mask
@@ -78,17 +78,17 @@ if __name__ == "__main__":
                 (torch.ones_like(tenc_target_feat_mask[:, :1]), tenc_target_feat_mask), dim=1
             )
 
-            for enc_fixed_point in all_enc_fixed_points:
-                enc_fixed_coord, enc_fixed_feat, enc_fixed_offset = enc_fixed_point
-                enc_fixed_batch_index = offset2batch(enc_fixed_offset)
-                enc_fixed_feat, enc_fixed_feat_mask = to_dense_batch(enc_fixed_feat, enc_fixed_batch_index)
-                enc_fixed_feat_mask = enc_fixed_feat_mask == 0
+            for enc_anchor_point in all_enc_anchor_points:
+                enc_anchor_coord, enc_anchor_feat, enc_anchor_offset = enc_anchor_point
+                enc_anchor_batch_index = offset2batch(enc_anchor_offset)
+                enc_anchor_feat, enc_anchor_feat_mask = to_dense_batch(enc_anchor_feat, enc_anchor_batch_index)
+                enc_anchor_feat_mask = enc_anchor_feat_mask == 0
                 print(
-                    f"enc_target_feat: {enc_target_feat.shape}, enc_fixed_feat: {enc_fixed_feat.shape}, fixed_feat: {batch_fixed_feat.shape}, enc_target_mask: {enc_target_feat_mask.shape}, enc_fixed_mask: {enc_fixed_feat_mask.shape}"
+                    f"enc_target_feat: {enc_target_feat.shape}, enc_anchor_feat: {enc_anchor_feat.shape}, anchor_feat: {batch_anchor_feat.shape}, enc_target_mask: {enc_target_feat_mask.shape}, enc_anchor_mask: {enc_anchor_feat_mask.shape}"
                 )
-                if enc_fixed_feat.shape[0] != batch_fixed_feat.shape[0]:
-                    print(fixed_offset)
+                if enc_anchor_feat.shape[0] != batch_anchor_feat.shape[0]:
+                    print(anchor_offset)
                     print(target_offset)
 
             # Release memory
-            del target_coord, target_feat, target_batch_idx, fixed_coord, fixed_feat, fixed_batch_idx
+            del target_coord, target_feat, target_batch_idx, anchor_coord, anchor_feat, anchor_batch_idx

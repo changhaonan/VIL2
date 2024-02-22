@@ -24,6 +24,7 @@ def build_dmorp_dataset(root_path, cfg):
     trans_noise_level = cfg.DATALOADER.AUGMENTATION.TRANS_NOISE_LEVEL
     rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
     knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
+    add_normals = cfg.DATALOADER.ADD_NORMALS
     # Load dataset & data loader
     if cfg.ENV.GOAL_TYPE == "multimodal":
         dataset_folder = "dmorp_multimodal"
@@ -48,14 +49,12 @@ def build_dmorp_dataset(root_path, cfg):
             f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
         )
     print("Data loaded from: ", data_file_dict)
-    volume_augmentations_path = (
-        os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
-    )
+    volume_augmentations_path = os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     train_dataset = PcdPairDataset(
         data_file_list=[data_file_dict["train"]],
         dataset_name="dmorp",
         add_colors=True,
-        add_normals=True,
+        add_normals=add_normals,
         is_elastic_distortion=is_elastic_distortion,
         elastic_distortion_granularity=elastic_distortion_granularity,
         elastic_distortion_magnitude=elastic_distortion_magnitude,
@@ -77,7 +76,7 @@ def build_dmorp_dataset(root_path, cfg):
         data_file_list=[data_file_dict["val"]],
         dataset_name="dmorp",
         add_colors=True,
-        add_normals=True,
+        add_normals=add_normals,
         is_elastic_distortion=is_elastic_distortion,
         elastic_distortion_granularity=elastic_distortion_granularity,
         elastic_distortion_magnitude=elastic_distortion_magnitude,
@@ -99,7 +98,7 @@ def build_dmorp_dataset(root_path, cfg):
         data_file_list=[data_file_dict["test"]],
         dataset_name="dmorp",
         add_colors=True,
-        add_normals=True,
+        add_normals=add_normals,
         is_elastic_distortion=False,
         elastic_distortion_granularity=elastic_distortion_granularity,
         elastic_distortion_magnitude=elastic_distortion_magnitude,

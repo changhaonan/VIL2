@@ -13,25 +13,26 @@ class PcdNoiseNet(nn.Module):
 
     def __init__(self, grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, fusion_projection_dim, **kwargs) -> None:
         super().__init__()
+        num_denoise_layers = kwargs.get("denoise_layers", 3)
         # Module
-        half_hidden_dims = [int(hd / 2) for hd in hidden_dims]
-        self.target_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, half_hidden_dims, n_heads, ks, in_dim, skip_dec=True)
-        self.anchor_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=False)
+        self.target_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=True)
+        self.anchor_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=True)
         self.denoise_decoders = nn.ModuleList()
         self.conv1x1 = nn.ModuleList()
-        self.linear_proj = nn.Linear(hidden_dims[0], 3)
-        for i in range(len(hidden_dims) - 1):
-            refine_encoder_layer = TransformerDecoderLayer(
-                d_model=hidden_dims[i + 1],
-                nhead=n_heads[i],
-                dim_feedforward=hidden_dims[i + 1] * 4,
+        self.linear_proj_up = nn.Linear(6, hidden_dims[-1])
+        self.linear_proj_down = nn.Linear(hidden_dims[-1], 3)
+        for i in range(num_denoise_layers):
+            decoder_layer = TransformerDecoderLayer(
+                d_model=hidden_dims[-1],
+                nhead=n_heads[-1],
+                dim_feedforward=hidden_dims[-1] * 4,
                 dropout=0.1,
                 activation="relu",
                 batch_first=True,
             )
-            denoise_decoder = TransformerDecoder(refine_encoder_layer, num_layers=dec_depths[i])
+            denoise_decoder = TransformerDecoder(decoder_layer, num_layers=dec_depths[-1])
             self.denoise_decoders.insert(0, denoise_decoder)
-            self.conv1x1.insert(0, nn.Conv1d(hidden_dims[i + 1], hidden_dims[i], 1))
+            self.conv1x1.insert(0, nn.Conv1d(hidden_dims[-1], hidden_dims[-1], 1))
 
         # Diffusion related
         max_timestep = kwargs.get("max_timestep", 200)
@@ -43,8 +44,8 @@ class PcdNoiseNet(nn.Module):
         Args:
             anchor_points (list[torch.Tensor]): coord, point, offset
         """
-        anchor_points, all_anchor_points, anchor_cluster_indexes = self.anchor_pcd_transformer(anchor_points, return_full=True)
-        return anchor_points, all_anchor_points, anchor_cluster_indexes
+        anchor_points = self.anchor_pcd_transformer(anchor_points)
+        return anchor_points
 
     def encode_target(self, target_points: list[torch.Tensor]) -> torch.Tensor:
         """
@@ -55,50 +56,46 @@ class PcdNoiseNet(nn.Module):
         target_points = self.target_pcd_transformer(target_points)
         return target_points
 
-    def forward(self, target_points: list[torch.Tensor], target_coord_t: torch.tensor, all_anchor_points: list[list[torch.Tensor]], t: int) -> torch.Tensor:
+    def forward(self, target_coord_t: torch.tensor, target_points: list[torch.Tensor], anchor_points: list[list[torch.Tensor]], t: int) -> torch.Tensor:
         """
         Args:
             target_points (torch.Tensor): encoded target point cloud
             target_coord_t (torch.Tensor): target coordinate at t
-            all_anchor_points (torch.Tensor): anchor point cloud in pyramid
+            anchor_points (torch.Tensor): anchor point cloud in pyramid
             t (int): diffusion time step
         """
-        target_coord, target_feat_c, target_offset = target_points  # Encode canonical target
         # Convert to batch & mask
-        target_batch_index = offset2batch(target_offset)
-        target_feat_c, target_feat_mask = to_dense_batch(target_feat_c, target_batch_index)
-
+        anchor_coord, anchor_feat, anchor_offset = anchor_points  # Encode anchor
         time_token = self.time_embedding(t)
-        target_feat_mask = torch.cat(
+        anchor_batch_index = offset2batch(anchor_offset)
+        anchor_feat, anchor_feat_mask = to_dense_batch(anchor_feat, anchor_batch_index)
+        anchor_feat = torch.cat((time_token, anchor_feat), dim=1)
+        anchor_feat_mask = torch.cat(
             (
                 torch.ones(
-                    [target_feat_mask.shape[0], 1],
-                    dtype=target_feat_mask.dtype,
-                    device=target_feat_mask.device,
+                    [anchor_feat_mask.shape[0], 1],
+                    dtype=anchor_feat_mask.dtype,
+                    device=anchor_feat_mask.device,
                 ),
-                target_feat_mask,
+                anchor_feat_mask,
             ),
             dim=1,
         )
+        anchor_feat_padding_mask = anchor_feat_mask == 0
+
+        # Use coord as feature: We need involve conanical feature or coord
+        target_coord, target_feat_c, target_offset = target_points  # Encode canonical target
+        target_coord_t = torch.cat((target_coord, target_coord_t), dim=1)
+        target_batch_index = offset2batch(target_offset)
+        target_feat_t, target_feat_mask = to_dense_batch(target_coord_t, target_batch_index)
+        target_feat_t = self.linear_proj_up(target_feat_t)
         target_feat_padding_mask = target_feat_mask == 0
 
-        # Encode feat at t
-        target_points_t = [target_coord, target_coord_t, target_offset]
-        target_feat_t = self.encode_target(target_points_t)
-        target_feat_t, _ = to_dense_batch(target_feat_t, target_batch_index)
-        target_feat_t = torch.cat((target_feat_c, target_feat_t), dim=-1)  # (B, N, C + C)
-        target_feat_t = torch.cat((time_token[None, None, :].expand(target_feat_t.size(0), target_feat_t.size(1), -1), target_feat_t), dim=1)
-
         # Sanity check
-        if torch.isnan(target_feat_c).any():
+        if torch.isnan(anchor_feat).any():
             print("Nan exists in the feature")
 
         for i in range(len(self.denoise_decoders)):
-            anchor_coord, anchor_feat, anchor_offset = all_anchor_points[i]
-            anchor_batch_index = offset2batch(anchor_offset)
-            anchor_feat, anchor_feat_mask = to_dense_batch(anchor_feat, anchor_batch_index)
-            anchor_feat_padding_mask = anchor_feat_mask == 0
-            assert target_feat_t.shape[0] == anchor_feat.shape[0], f"Batch size mismatch: {target_feat_c.shape[0]} != {anchor_feat.shape[0]}"
             target_feat_t = self.denoise_decoders[i](
                 target_feat_t,
                 anchor_feat,
@@ -113,6 +110,5 @@ class PcdNoiseNet(nn.Module):
                 print("Nan exists in the feature")
 
         # Decode pos
-        target_feat_t = target_feat_t[:, 1:]  # Remove time token
-        target_pos_noise_t = self.linear_proj(target_feat_t)
+        target_pos_noise_t = self.linear_proj_down(target_feat_t)
         return target_pos_noise_t

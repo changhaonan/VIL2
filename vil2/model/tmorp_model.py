@@ -33,15 +33,15 @@ class LitPoseTransformer(L.LightningModule):
         target_normal = batch["target_normal"].to(torch.float32)
         target_color = batch["target_color"].to(torch.float32)
         target_label = batch["target_label"].to(torch.long)
-        fixed_coord = batch["fixed_coord"].to(torch.float32)
-        fixed_normal = batch["fixed_normal"].to(torch.float32)
-        fixed_color = batch["fixed_color"].to(torch.float32)
-        fixed_label = batch["fixed_label"].to(torch.long)
+        anchor_coord = batch["anchor_coord"].to(torch.float32)
+        anchor_normal = batch["anchor_normal"].to(torch.float32)
+        anchor_color = batch["anchor_color"].to(torch.float32)
+        anchor_label = batch["anchor_label"].to(torch.long)
         pose9d = batch["target_pose"].to(torch.float32)
         converge_step = batch["converge_step"].to(torch.long)
         # Compute conditional features
         cond_feat = self.pose_transformer.encode_cond(
-            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
+            target_coord, target_normal, target_color, target_label, anchor_coord, anchor_normal, anchor_color, anchor_label
         )
         # forward
         pose9d_pred = self.pose_transformer(cond_feat, converge_step)
@@ -65,15 +65,15 @@ class LitPoseTransformer(L.LightningModule):
         target_normal = batch["target_normal"].to(torch.float32)
         target_color = batch["target_color"].to(torch.float32)
         target_label = batch["target_label"].to(torch.long)
-        fixed_coord = batch["fixed_coord"].to(torch.float32)
-        fixed_normal = batch["fixed_normal"].to(torch.float32)
-        fixed_color = batch["fixed_color"].to(torch.float32)
-        fixed_label = batch["fixed_label"].to(torch.long)
+        anchor_coord = batch["anchor_coord"].to(torch.float32)
+        anchor_normal = batch["anchor_normal"].to(torch.float32)
+        anchor_color = batch["anchor_color"].to(torch.float32)
+        anchor_label = batch["anchor_label"].to(torch.long)
         pose9d = batch["target_pose"].to(torch.float32)
         converge_step = batch["converge_step"].to(torch.long)
         # Compute conditional features
         cond_feat = self.pose_transformer.encode_cond(
-            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
+            target_coord, target_normal, target_color, target_label, anchor_coord, anchor_normal, anchor_color, anchor_label
         )
         # forward
         pose9d_pred = self.pose_transformer(cond_feat, converge_step)
@@ -96,15 +96,15 @@ class LitPoseTransformer(L.LightningModule):
         target_normal = batch["target_normal"].to(torch.float32)
         target_color = batch["target_color"].to(torch.float32)
         target_label = batch["target_label"].to(torch.long)
-        fixed_coord = batch["fixed_coord"].to(torch.float32)
-        fixed_normal = batch["fixed_normal"].to(torch.float32)
-        fixed_color = batch["fixed_color"].to(torch.float32)
-        fixed_label = batch["fixed_label"].to(torch.long)
+        anchor_coord = batch["anchor_coord"].to(torch.float32)
+        anchor_normal = batch["anchor_normal"].to(torch.float32)
+        anchor_color = batch["anchor_color"].to(torch.float32)
+        anchor_label = batch["anchor_label"].to(torch.long)
         pose9d = batch["target_pose"].to(torch.float32)
         converge_step = batch["converge_step"].to(torch.long)
         # Compute conditional features
         cond_feat = self.pose_transformer.encode_cond(
-            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
+            target_coord, target_normal, target_color, target_label, anchor_coord, anchor_normal, anchor_color, anchor_label
         )
         # forward
         pose9d_pred = self.pose_transformer(cond_feat, converge_step)
@@ -127,14 +127,14 @@ class LitPoseTransformer(L.LightningModule):
         target_normal = batch["target_normal"].to(torch.float32)
         target_color = batch["target_color"].to(torch.float32)
         target_label = batch["target_label"].to(torch.long)
-        fixed_coord = batch["fixed_coord"].to(torch.float32)
-        fixed_normal = batch["fixed_normal"].to(torch.float32)
-        fixed_color = batch["fixed_color"].to(torch.float32)
-        fixed_label = batch["fixed_label"].to(torch.long)
+        anchor_coord = batch["anchor_coord"].to(torch.float32)
+        anchor_normal = batch["anchor_normal"].to(torch.float32)
+        anchor_color = batch["anchor_color"].to(torch.float32)
+        anchor_label = batch["anchor_label"].to(torch.long)
         converge_step = batch["converge_step"].to(torch.long)
         # Compute conditional features
         cond_feat = self.pose_transformer.encode_cond(
-            target_coord, target_normal, target_color, target_label, fixed_coord, fixed_normal, fixed_color, fixed_label
+            target_coord, target_normal, target_color, target_label, anchor_coord, anchor_normal, anchor_color, anchor_label
         )
         # forward
         pose9d_pred = self.pose_transformer(cond_feat, converge_step)
@@ -208,25 +208,25 @@ class TmorpModel:
     def predict(
         self,
         target_pcd_arr: np.ndarray,
-        fixed_pcd_arr: np.ndarray,
+        anchor_pcd_arr: np.ndarray,
         target_label: np.ndarray,
-        fixed_label: np.ndarray,
+        anchor_label: np.ndarray,
         converge_step: np.ndarray,
         target_pose=None,
     ) -> Any:
         self.lightning_pose_transformer.eval()
         # Assemble batch
-        assert target_pcd_arr.shape[0] == fixed_pcd_arr.shape[0]
-        assert target_pcd_arr.shape[1] == fixed_pcd_arr.shape[1] == 9
+        assert target_pcd_arr.shape[0] == anchor_pcd_arr.shape[0]
+        assert target_pcd_arr.shape[1] == anchor_pcd_arr.shape[1] == 9
         batch = {
             "target_coord": target_pcd_arr[None, :, :3],
             "target_normal": target_pcd_arr[None, :, 3:6],
             "target_color": target_pcd_arr[None, :, 6:],
             "target_label": target_label[None, :],
-            "fixed_coord": fixed_pcd_arr[None, :, :3],
-            "fixed_normal": fixed_pcd_arr[None, :, 3:6],
-            "fixed_color": fixed_pcd_arr[None, :, 6:],
-            "fixed_label": fixed_label[None, :],
+            "anchor_coord": anchor_pcd_arr[None, :, :3],
+            "anchor_normal": anchor_pcd_arr[None, :, 3:6],
+            "anchor_color": anchor_pcd_arr[None, :, 6:],
+            "anchor_label": anchor_label[None, :],
             "converge_step": converge_step[None, :],
         }
         # Put to torch

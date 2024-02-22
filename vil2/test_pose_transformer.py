@@ -118,13 +118,13 @@ if __name__ == "__main__":
 
         # Check the results
         target_batch_idx = batch["target_batch_index"]
-        fixed_batch_idx = batch["fixed_batch_index"]
+        anchor_batch_idx = batch["anchor_batch_index"]
         for j in range(pred_pose9d_coarse.shape[0]):
             print(f"Prediction status: {pred_status_fine[j]}")
             target_idx = target_batch_idx == j
-            fixed_idx = fixed_batch_idx == j
+            anchor_idx = anchor_batch_idx == j
             target_coord = batch["target_coord"][target_idx].cpu().numpy()
-            fixed_coord = batch["fixed_coord"][fixed_idx].cpu().numpy()
+            anchor_coord = batch["anchor_coord"][anchor_idx].cpu().numpy()
             target_pose = batch["target_pose"][j].cpu().numpy()
             target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
             # Visualize the results
@@ -150,8 +150,8 @@ if __name__ == "__main__":
             ry_loss = np.linalg.norm(pred_pose9d_coarse[j, 6:9] - target_pose[6:9])
             print(f"Translation loss: {trans_loss}, Rotation loss: {rx_loss}, {ry_loss}")
 
-            fixed_pcd_o3d = o3d.geometry.PointCloud()
-            fixed_pcd_o3d.points = o3d.utility.Vector3dVector(fixed_coord)
-            fixed_pcd_o3d.paint_uniform_color([1.0, 0.0, 0.0])
+            anchor_pcd_o3d = o3d.geometry.PointCloud()
+            anchor_pcd_o3d.points = o3d.utility.Vector3dVector(anchor_coord)
+            anchor_pcd_o3d.paint_uniform_color([1.0, 0.0, 0.0])
             origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.5, origin=[0, 0, 0])
-            o3d.visualization.draw_geometries([target_pcd_o3d, gt_target_pcd_o3d, s_target_pcd_o3d, fixed_pcd_o3d, origin])
+            o3d.visualization.draw_geometries([target_pcd_o3d, gt_target_pcd_o3d, s_target_pcd_o3d, anchor_pcd_o3d, origin])

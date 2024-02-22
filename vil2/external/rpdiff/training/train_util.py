@@ -18,7 +18,7 @@ def adjust_learning_rate(
         epoch: float, 
         args: AttrDict) -> float:
     """Decay the learning rate with half-cycle cosine after warmup"""
-    if args.fixed_lr:
+    if args.anchor_lr:
         return args.lr
     if epoch < args.warmup_epochs:
         lr = args.lr * epoch / args.warmup_epochs 

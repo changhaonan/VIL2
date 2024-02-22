@@ -44,7 +44,7 @@ optimizer:
         - AdamW
         use_schedule: true
         schedule:
-            fixed_lr: false
+            anchor_lr: false
             min_lr: 1.0e-06
             warmup_epochs: 50
         opt_kwargs:

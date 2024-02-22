@@ -527,7 +527,7 @@ class NSMTransformerSingleSuccessClassifier(LocalAbstractSuccessClassifier):
                  n_pts: int=64, pn_pts: int=None, cn_pts: int=None, 
                  pooling: str='mean', 
                  sigmoid: bool=True, 
-                 fixed_scaling: float=None, 
+                 anchor_scaling: float=None, 
                  bidir: bool=False, 
                  n_queries: int=1,
                  mc_vis: Visualizer=None):
@@ -548,7 +548,7 @@ class NSMTransformerSingleSuccessClassifier(LocalAbstractSuccessClassifier):
             cn_pts (int): Number of points to downsample child/object to
             pooling (str): 'mean' or 'max', for how we pool the output features from the transformer
             sigmoid (bool): If True, pass through a final sigmoid at the output
-            fixed_scaling (float): Manually scale the objects based on pre-computed scale value
+            anchor_scaling (float): Manually scale the objects based on pre-computed scale value
             bidir (bool): If True, compute object-scene cross attention in both directions
             n_queries (int): Number of query tokens to use for output (unused currently, deafult 1 output)
             mc_vis (Visualizer): Meshcat interface for debugging visualization
