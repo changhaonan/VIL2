@@ -44,7 +44,7 @@ class LPcdDiffusion(L.LightningModule):
             # we found squared cosine works the best
             beta_schedule="squaredcos_cap_v2",
             # clip output to [-1,1] to improve stability
-            clip_sample=False,
+            clip_sample=True,
             # our network predicts noise (instead of denoised action)
             prediction_type="epsilon",
         )
@@ -70,22 +70,22 @@ class LPcdDiffusion(L.LightningModule):
         enc_target_coord, enc_target_feat, enc_target_offset = enc_target_points
         # Reposition to get goal coordinate
         target_batch_index = offset2batch(enc_target_offset)
-        batch_target_coord, target_coord_mask = to_dense_batch(enc_target_coord, target_batch_index)
-        batch_target_coord = self.reposition(batch_target_coord, target_pose, self.rot_axis)
-        flat_target_coord, _ = to_flat_batch(batch_target_coord, target_coord_mask)
+        target_batch_coord, target_coord_mask = to_dense_batch(enc_target_coord, target_batch_index)
+        target_batch_coord = self.reposition(target_batch_coord, target_pose, self.rot_axis)
+        flat_target_coord, _ = to_flat_batch(target_batch_coord, target_coord_mask)
 
         if self.diffusion_process == "ddpm":
             # sample noise to add to actions
-            noise = torch.randn(batch_target_coord.shape, device=self.device)
+            noise = torch.randn(target_batch_coord.shape, device=self.device)
             # sample a diffusion iteration for each data point
             timesteps = torch.randint(
                 low=0,
                 high=self.noise_scheduler.config.num_train_timesteps,
-                size=(batch_target_coord.shape[0], 1),
+                size=(target_batch_coord.shape[0], 1),
                 device=self.device,
             ).long()
             # add noisy actions
-            noisy_target_coord = self.noise_scheduler.add_noise(batch_target_coord, noise, timesteps)
+            noisy_target_coord = self.noise_scheduler.add_noise(target_batch_coord, noise, timesteps)
             noisy_target_coord, _ = to_flat_batch(noisy_target_coord, target_coord_mask)
             # predict noise residual
             noise_pred = self.pcd_noise_net(noisy_target_coord, enc_target_points, enc_anchor_points, timesteps)
@@ -126,23 +126,35 @@ class LPcdDiffusion(L.LightningModule):
         anchor_offset = batch2offset(anchor_batch_idx)
         anchor_points = [anchor_coord, anchor_feat, anchor_offset]
 
-        B = target_coord.shape[0]
-
         # Do one-time encoding
         enc_anchor_points = self.pcd_noise_net.encode_anchor(anchor_points)
         enc_target_points = self.pcd_noise_net.encode_target(target_points)
 
+        # Batchify
+        enc_target_coord, enc_target_feat, enc_target_offset = enc_target_points
+        target_batch_index = offset2batch(enc_target_offset)
+        target_batch_coord, target_coord_mask = to_dense_batch(enc_target_coord, target_batch_index)
+        B = target_batch_coord.shape[0]
         if self.diffusion_process == "ddpm":
             # initialize action from Guassian noise
-            pred_target_coord = torch.randn((target_coord.shape[0], target_coord.shape[1]), device=self.device)
+            pred_target_coord = torch.randn(target_batch_coord.shape, device=self.device)
+            pred_target_coord, _ = to_flat_batch(pred_target_coord, target_coord_mask)
             for k in self.noise_scheduler.timesteps:
                 timesteps = torch.tensor([k], device=self.device).to(torch.long).repeat(B)
                 # predict noise residual
                 noise_pred = self.pcd_noise_net(pred_target_coord, enc_target_points, enc_anchor_points, timesteps)
 
+                # Batchify
                 # inverse diffusion step (remove noise)
-                pred_target_coord = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=pred_target_coord).prev_sample
-            return pred_target_coord
+                pred_target_coord = self.noise_scheduler.step(model_output=noise_pred[target_coord_mask], timestep=k, sample=pred_target_coord).prev_sample
+        else:
+            raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
+
+        # Batchify & Numpy
+        pred_target_coord, _ = to_dense_batch(pred_target_coord, target_batch_index)
+        pred_target_coord = pred_target_coord.detach().cpu().numpy()
+        prev_target_coord = target_batch_coord.detach().cpu().numpy()
+        return pred_target_coord, prev_target_coord
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
@@ -265,8 +277,17 @@ class PCDDModel:
         # Put to device
         for key in batch.keys():
             batch[key] = batch[key].to(self.lpcd_noise_net.device)
-        pred_target_coord = self.lpcd_noise_net(batch)
-        return pred_target_coord
+        # [Debug]
+        self.lpcd_noise_net.criterion(batch)
+        pred_target_coord, prev_target_coord = self.lpcd_noise_net(batch)
+        # Full points
+        anchor_coord = batch["anchor_coord"]
+        anchor_batch_index = batch["anchor_batch_index"]
+        anchor_batch_coord, anchor_coord_mask = to_dense_batch(anchor_coord, anchor_batch_index)
+        target_coord = batch["target_coord"]
+        target_batch_index = batch["target_batch_index"]
+        target_batch_coord, target_coord_mask = to_dense_batch(target_coord, target_batch_index)
+        return pred_target_coord, prev_target_coord, anchor_batch_coord, target_batch_coord
 
     def load(self, checkpoint_path: str) -> None:
         self.lpcd_noise_net.load_state_dict(torch.load(checkpoint_path)["state_dict"])
@@ -279,3 +300,45 @@ class PCDDModel:
         init_args = self.cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name]
         crop_strategy = self.cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
         return f"PCDD_model_{crop_strategy}"
+
+    @staticmethod
+    def kabsch_transform(point_1, point_2, filter_zero=True):
+        """Compute the 6D transformation between two point clouds"""
+        if filter_zero:
+            # Filter zero points
+            mask_1 = np.linalg.norm(point_1, axis=1) > 0
+            mask_2 = np.linalg.norm(point_2, axis=1) > 0
+            mask = mask_1 * mask_2
+            point_1 = point_1[mask]
+            point_2 = point_2[mask]
+        # Center the points
+        centroid_1 = np.mean(point_1, axis=0)
+        centroid_2 = np.mean(point_2, axis=0)
+        centered_1 = point_1 - centroid_1
+        centered_2 = point_2 - centroid_2
+
+        # Compute the covariance matrix
+        H = np.dot(centered_1.T, centered_2)
+
+        # Compute the SVD
+        U, S, Vt = np.linalg.svd(H)
+
+        # Compute the rotation
+        R = np.dot(Vt.T, U.T)
+
+        # Ensure a right-handed coordinate system
+        if np.linalg.det(R) < 0:
+            Vt[-1, :] *= -1
+            R = np.dot(Vt.T, U.T)
+
+        # Compute the translation
+        t = centroid_2 - np.dot(R, centroid_1)
+
+        # Combine R and t to form the transformation matrix
+        transform = np.identity(4)
+        transform[:3, :3] = R
+        transform[:3, 3] = t
+
+        # Compute transform residual
+        residual = np.mean(np.linalg.norm(np.dot(point_1, R.T) + t - point_2, axis=1))
+        return transform, residual

@@ -64,6 +64,8 @@ class PcdNoiseNet(nn.Module):
             anchor_points (torch.Tensor): anchor point cloud in pyramid
             t (int): diffusion time step
         """
+        if len(t.shape) == 1:
+            t = t[:, None]
         # Convert to batch & mask
         anchor_coord, anchor_feat, anchor_offset = anchor_points  # Encode anchor
         time_token = self.time_embedding(t)
