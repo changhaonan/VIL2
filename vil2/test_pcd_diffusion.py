@@ -93,7 +93,8 @@ if __name__ == "__main__":
     pcdd_model.load(checkpoint_file)
     for _i in range(20):
         batch = next(iter(test_data_loader))
-
+        if _i != 4:
+            continue
         pred_target_coord, prev_target_coord, anchor_coord_full, target_coord_full = pcdd_model.predict(batch=batch)
 
         # Visualize

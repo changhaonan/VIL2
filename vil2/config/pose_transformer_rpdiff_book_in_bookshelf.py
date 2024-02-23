@@ -30,7 +30,7 @@ DATALOADER = dict(
         CROP_PCD=True,
         CROP_SIZE=0.75,
         CROP_NOISE=0.3,
-        CROP_STRATEGY="knn_bbox_max",  # bbox, radius, knn, knn_bbox, knn_bbox_max
+        CROP_STRATEGY="bbox",  # bbox, radius, knn, knn_bbox, knn_bbox_max
         RANDOM_CROP_PROB=0.0,
         ROT_NOISE_LEVEL=0.8,
         TRANS_NOISE_LEVEL=0.1,
@@ -68,11 +68,9 @@ MODEL = dict(
                 # Point transformer network
                 grid_sizes=[0.15, 0.3],
                 depths=[2, 3, 3],
-                dec_depths=[1, 1],  # V2
-                # dec_depths=[2, 2],  # V3
-                hidden_dims=[128, 256, 512],  # V2
-                # n_heads=[4, 8, 8],  # V2
-                n_heads=[8, 16, 16],  # V3
+                dec_depths=[1, 1],
+                hidden_dims=[128, 256, 512],
+                n_heads=[8, 16, 16],
                 ks=[16, 24, 32],
                 in_dim=6,
                 fusion_projection_dim=512,  # V2
@@ -82,18 +80,14 @@ MODEL = dict(
                 # Point transformer network
                 grid_sizes=[0.15, 0.3],
                 depths=[2, 3, 3],
-                dec_depths=[1, 1],  # V2
-                # dec_depths=[2, 2],  # V3
-                hidden_dims=[128, 256, 512],  # V2
-                # n_heads=[4, 8, 8],  # V2
-                n_heads=[8, 16, 16],  # V3
+                dec_depths=[1, 1],
+                n_heads=[8, 16, 16],
                 ks=[16, 24, 32],
                 in_dim=6,
-                fusion_projection_dim=512,  # V2
-                # Joint transformer network
+                fusion_projection_dim=512,
             ),
             PCDNOISENET=dict(
-                grid_sizes=[0.15, 0.3],
+                grid_sizes=[0.15, 0.2],
                 depths=[2, 3, 3],
                 dec_depths=[1, 1],
                 hidden_dims=[128, 256, 512],
