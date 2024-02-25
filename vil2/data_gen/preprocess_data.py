@@ -450,14 +450,10 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
             anchor_pcd.transform(np.linalg.inv(parent_mat_s))
 
             # Sample & Compute normal
-            target_pcd.transform(np.linalg.inv(child_mat_s)).transform(child_mat_f).transform(
-                np.linalg.inv(parent_mat_s)
-            )
+            target_pcd.transform(np.linalg.inv(child_mat_s)).transform(child_mat_f).transform(np.linalg.inv(parent_mat_s))
 
             # anchor_pcd, target_pcd, _, __ = normalize_pcd(anchor_pcd, target_pcd, do_scaling=do_scaling)
-            target_pcd, anchor_pcd, _, __ = normalize_pcd(
-                target_pcd, anchor_pcd, do_scaling=do_scaling
-            )  # Normalize to target
+            target_pcd, anchor_pcd, _, __ = normalize_pcd(target_pcd, anchor_pcd, do_scaling=do_scaling)  # Normalize to target
 
             # Compute normal
             target_pcd_center = (target_pcd.get_max_bound() + target_pcd.get_min_bound()) / 2
@@ -476,11 +472,7 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
             target_transform = np.eye(4, dtype=np.float32)
             target_transform[:3, 3] = target_pcd_center
 
-            if (
-                vis
-                or target_pcd_arr.shape[0] < (num_point_lower_bound / 2)
-                or anchor_pcd_arr.shape[0] < num_point_lower_bound
-            ):
+            if vis or target_pcd_arr.shape[0] < (num_point_lower_bound / 2) or anchor_pcd_arr.shape[0] < num_point_lower_bound:
                 visualize_pcd_with_open3d(target_pcd_arr, anchor_pcd_arr, np.eye(4, dtype=np.float32))
                 visualize_pcd_with_open3d(target_pcd_arr, anchor_pcd_arr, target_transform)
                 # # Visualize & Check

@@ -61,7 +61,7 @@ if __name__ == "__main__":
     net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
     pose_transformer = PcdNoiseNet(**net_init_args)
     pcdd_model = PCDDModel(cfg, pose_transformer)
-
+    
     model_name = pcdd_model.experiment_name()
     noise_net_name = cfg.MODEL.NOISE_NET.NAME
     save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints", noise_net_name)

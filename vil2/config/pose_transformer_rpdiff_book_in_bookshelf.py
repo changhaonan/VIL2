@@ -17,7 +17,7 @@ PREPROCESS = dict(
 DATALOADER = dict(
     BATCH_SIZE=32,
     NUM_WORKERS=8,  # Set to 0 if using ilab
-    ADD_NORMALS=False,
+    ADD_NORMALS=True,
     AUGMENTATION=dict(
         IS_ELASTIC_DISTORTION=False,
         ELASTIC_DISTORTION_GRANULARITY=1.0,
@@ -87,14 +87,19 @@ MODEL = dict(
                 fusion_projection_dim=512,
             ),
             PCDNOISENET=dict(
-                grid_sizes=[0.15, 0.2],
+                condition_strategy="FiLM",
+                condition_pooling="mean",
+                grid_sizes=[0.1, 0.15],
                 depths=[2, 3, 3],
                 dec_depths=[1, 1],
-                hidden_dims=[128, 256, 512],
-                n_heads=[8, 16, 16],
+                hidden_dims=[128, 256, 768],
+                n_heads=[8, 8, 12],
                 ks=[16, 24, 32],
-                in_dim=3,
-                fusion_projection_dim=512,
+                in_dim=6,
+                hidden_dim_denoise=768,
+                n_heads_denoise=12,
+                num_denoise_layers=3,
+                num_denoise_depths=1,
             ),
         ),
     ),

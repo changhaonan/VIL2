@@ -71,6 +71,13 @@ if __name__ == "__main__":
         num_workers=cfg.DATALOADER.NUM_WORKERS,
         collate_fn=PcdPairCollator(),
     )
+    train_data_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=cfg.DATALOADER.BATCH_SIZE,
+        shuffle=True,
+        num_workers=cfg.DATALOADER.NUM_WORKERS,
+        collate_fn=PcdPairCollator(),
+    )
 
     # Build model
     net_name = cfg.MODEL.NOISE_NET.NAME
@@ -92,13 +99,26 @@ if __name__ == "__main__":
 
     pcdd_model.load(checkpoint_file)
     for _i in range(20):
-        batch = next(iter(test_data_loader))
-        if _i != 4:
+        # batch = next(iter(test_data_loader))
+        batch = next(iter(train_data_loader))
+        if _i != 2:
             continue
-        pred_target_coord, prev_target_coord, anchor_coord_full, target_coord_full = pcdd_model.predict(batch=batch)
+        # Extract one data from batch
+        check_batch_idx = 1
+        pred_target_coord, prev_target_coord, anchor_coord_full, target_coord_full = pcdd_model.predict(batch=batch, check_batch_idx=check_batch_idx)
+
+        # Compute & compare residual
+        residual_list = []
+        for check_idx in range(pred_target_coord.shape[0]):
+            # Compute transform
+            transform, residual = PCDDModel.kabsch_transform(prev_target_coord[check_idx], pred_target_coord[check_idx])
+            residual_list.append(residual)
+        # Sort residual
+        residual_list = np.array(residual_list)
+        residual_idx = np.argsort(residual_list)
 
         # Visualize
-        for check_idx in range(pred_target_coord.shape[0]):
+        for check_idx in residual_idx:
             # Compute transform
             transform, residual = PCDDModel.kabsch_transform(prev_target_coord[check_idx], pred_target_coord[check_idx])
             print(f"Residual: {residual:.4f}")

@@ -50,6 +50,8 @@ class LPcdDiffusion(L.LightningModule):
         )
         # Logging
         self.batch_size = cfg.DATALOADER.BATCH_SIZE
+        # Init
+        self.pcd_noise_net.initialize_weights()
 
     def criterion(self, batch):
         # Prepare data
@@ -257,28 +259,76 @@ class PCDDModel:
         anchor_feat: np.ndarray | None = None,
         batch=None,
         target_pose=None,
+        **kwargs,
     ) -> Any:
         self.lpcd_noise_net.eval()
         # Assemble batch
         if batch is None:
-            target_batch_idx = np.array([0] * target_coord.shape[0], dtype=np.int64)
-            anchor_batch_idx = np.array([0] * anchor_coord.shape[0], dtype=np.int64)
+            batch_size = kwargs.get("batch_size", 16)
+            target_coord_list = []
+            target_feat_list = []
+            anchor_coord_list = []
+            anchor_feat_list = []
+            target_batch_idx_list = []
+            anchor_batch_idx_list = []
+            for i in range(batch_size):
+                target_coord_list.append(target_coord)
+                target_feat_list.append(target_feat)
+                anchor_coord_list.append(anchor_coord)
+                anchor_feat_list.append(anchor_feat)
+                target_batch_idx_list.append(np.array([i] * target_coord.shape[0], dtype=np.int64))
+                anchor_batch_idx_list.append(np.array([i] * anchor_coord.shape[0], dtype=np.int64))
             batch = {
-                "target_coord": target_coord,
-                "target_feat": target_feat,
-                "target_batch_index": target_batch_idx,
-                "anchor_coord": anchor_coord,
-                "anchor_feat": anchor_feat,
-                "anchor_batch_index": anchor_batch_idx,
+                "target_coord": np.concatenate(target_coord_list, axis=0),
+                "target_feat": np.concatenate(target_feat_list, axis=0),
+                "target_batch_index": np.concatenate(target_batch_idx_list, axis=0),
+                "anchor_coord": np.concatenate(anchor_coord_list, axis=0),
+                "anchor_feat": np.concatenate(anchor_feat_list, axis=0),
+                "anchor_batch_index": np.concatenate(anchor_batch_idx_list, axis=0),
             }
             # Put to torch
             for key in batch.keys():
                 batch[key] = torch.from_numpy(batch[key])
+        else:
+            check_batch_idx = kwargs.get("check_batch_idx", 0)
+            batch_size = kwargs.get("batch_size", 8)
+            target_coord = batch["target_coord"]
+            target_feat = batch["target_feat"]
+            target_batch_index = batch["target_batch_index"]
+
+            target_coord_i = target_coord[target_batch_index == check_batch_idx]
+            target_feat_i = target_feat[target_batch_index == check_batch_idx]
+            anchor_coord = batch["anchor_coord"]
+            anchor_feat = batch["anchor_feat"]
+            anchor_batch_index = batch["anchor_batch_index"]
+            anchor_coord_i = anchor_coord[anchor_batch_index == check_batch_idx]
+            anchor_feat_i = anchor_feat[anchor_batch_index == check_batch_idx]
+            target_coord_list = []
+            target_feat_list = []
+            anchor_coord_list = []
+            anchor_feat_list = []
+            target_batch_idx_list = []
+            anchor_batch_idx_list = []
+            for i in range(batch_size):
+                target_coord_list.append(target_coord_i)
+                target_feat_list.append(target_feat_i)
+                anchor_coord_list.append(anchor_coord_i)
+                anchor_feat_list.append(anchor_feat_i)
+                target_batch_idx_list.append(torch.tensor([i] * target_coord_i.shape[0], dtype=torch.int64))
+                anchor_batch_idx_list.append(torch.tensor([i] * anchor_coord_i.shape[0], dtype=torch.int64))
+            batch = {
+                "target_coord": torch.cat(target_coord_list, dim=0),
+                "target_feat": torch.cat(target_feat_list, dim=0),
+                "target_batch_index": torch.cat(target_batch_idx_list, dim=0),
+                "anchor_coord": torch.cat(anchor_coord_list, dim=0),
+                "anchor_feat": torch.cat(anchor_feat_list, dim=0),
+                "anchor_batch_index": torch.cat(anchor_batch_idx_list, dim=0),
+            }
         # Put to device
         for key in batch.keys():
             batch[key] = batch[key].to(self.lpcd_noise_net.device)
         # [Debug]
-        self.lpcd_noise_net.criterion(batch)
+        # self.lpcd_noise_net.criterion(batch)
         pred_target_coord, prev_target_coord = self.lpcd_noise_net(batch)
         # Full points
         anchor_coord = batch["anchor_coord"]
@@ -290,6 +340,7 @@ class PCDDModel:
         return pred_target_coord, prev_target_coord, anchor_batch_coord, target_batch_coord
 
     def load(self, checkpoint_path: str) -> None:
+        print(f"Loading checkpoint from {checkpoint_path}")
         self.lpcd_noise_net.load_state_dict(torch.load(checkpoint_path)["state_dict"])
 
     def save(self, save_path: str) -> None:
