@@ -95,15 +95,6 @@ class PcdPairDataset(Dataset):
     def set_mode(self, mode: str):
         self.mode = mode
 
-    def parse_pcd_data(self, batch_idx):
-        """Parse data from the dataset."""
-        data = self._data[batch_idx]
-        target_pcd = data["target"]
-        anchor_pcd = data["fixed"]
-        super_index = data["super_index"]
-        pose = data["9dpose"]
-        return target_pcd, anchor_pcd, super_index, pose
-
     def augment_pcd_instance(self, coordinate, normal, color, label, pose, disable_rot: bool = False, noise_scale: float = 1.0):
         """Augment a single point cloud instance."""
         if self.is_elastic_distortion:
@@ -112,22 +103,11 @@ class PcdPairDataset(Dataset):
             coordinate, color, normal, label = random_around_points(coordinate, color, normal, label, rate=self.random_distortion_rate, noise_level=self.random_distortion_mag)
 
         if self.vas is not None:
-            # do the below only with some probability
             if "rotation" in self.vas.keys() and not disable_rot:
                 max_angle = np.pi * self.rot_noise_level * noise_scale
                 if random() < self.vas.rotation.prob:
                     angle = np.random.uniform(-max_angle, max_angle)
-                    coordinate, normal, color, pose = rotate_around_axis(
-                        coordinate=coordinate,
-                        normal=normal,
-                        pose=pose,
-                        color=color,
-                        axis=np.random.rand(
-                            3,
-                        ),
-                        angle=angle,
-                        center_point=None,
-                    )
+                    coordinate, normal, color, pose = rotate_around_axis(coordinate=coordinate, normal=normal, pose=pose, color=color, axis=np.random.rand(3), angle=angle, center_point=None)
             if "translation" in self.vas.keys():
                 trans_noise_level = noise_scale * self.trans_noise_level
                 if random() < self.vas.translation.prob:
@@ -138,7 +118,7 @@ class PcdPairDataset(Dataset):
                     coordinate, normal, color, pose = random_translation(coordinate=coordinate, normal=normal, pose=pose, color=color, offset_type="given", offset=random_offset)
             if "segment_drop" in self.vas.keys():
                 if random() < self.vas.segment_drop.prob:
-                    coordinate, normal, color, pose = random_segment_drop(coordinate=coordinate, normal=normal, pose=pose, color=color)
+                    coordinate, normal, color, label = random_segment_drop(coordinate=coordinate, normal=normal, color=color, label=label)
 
         return coordinate, normal, color, label, pose
 
@@ -148,44 +128,42 @@ class PcdPairDataset(Dataset):
     def __getitem__(self, idx):
         idx = idx % len(self._data)
         # Parse data from the dataset & Convert to float32
-        target_pcd, anchor_pcd, super_index, pose = self.parse_pcd_data(idx)
-        target_pcd = target_pcd.astype(np.float32)
-        anchor_pcd = anchor_pcd.astype(np.float32)
-        target_pose = pose.astype(np.float32)
-
-        # Prepare data
-        target_coord = target_pcd[:, :3]
-        anchor_coord = anchor_pcd[:, :3]
+        target_coord = self._data[idx]["target_coord"].astype(np.float32)
+        target_feat = self._data[idx]["target_feat"].astype(np.float32)
+        target_super_index = self._data[idx]["target_super_index"]
+        target_label = self._data[idx]["target_label"]
+        anchor_coord = self._data[idx]["anchor_coord"].astype(np.float32)
+        anchor_feat = self._data[idx]["anchor_feat"].astype(np.float32)
+        anchor_super_index = self._data[idx]["anchor_super_index"]
+        anchor_label = self._data[idx]["anchor_label"]
+        target_pose = self._data[idx].get("pose", np.eye(4))
+        anchor_pose = np.eye(4)
         if self.add_normals:
-            target_normal = target_pcd[:, 3:6]
-            anchor_normal = anchor_pcd[:, 3:6]
+            target_normal = self._data[idx]["target_normal"].astype(np.float32)
+            anchor_normal = self._data[idx]["anchor_normal"].astype(np.float32)
         else:
             target_normal = None
             anchor_normal = None
         if self.add_colors:
-            target_color = target_pcd[:, 6:9]
-            anchor_color = anchor_pcd[:, 6:9]
+            target_color = self._data[idx]["target_color"].astype(np.float32)
+            anchor_color = self._data[idx]["anchor_color"].astype(np.float32)
         else:
             target_color = None
             anchor_color = None
-        target_pose = utils.pose9d_to_mat(target_pose, rot_axis=self.rot_axis)
-        anchor_pose = np.eye(4)
 
+        # Augment data
         if self.mode == "train" or self.mode == "val":
-            # noise_scale = 0.1 if random() < 0.5 else 1.0
-            # is_nearby = True if noise_scale < 1.0 else False
             noise_scale = 1.0
-            is_nearby = True
-            # Augment data
-            target_coord, target_normal, target_color, _, target_pose = self.augment_pcd_instance(target_coord, target_normal, target_color, None, target_pose, noise_scale=noise_scale)
-            anchor_coord, anchor_normal, anchor_color, _, anchor_pose = self.augment_pcd_instance(
-                anchor_coord, anchor_normal, anchor_color, None, anchor_pose, disable_rot=True, noise_scale=noise_scale
+            target_coord, target_normal, target_color, target_label, target_pose = self.augment_pcd_instance(
+                target_coord, target_normal, target_color, target_label, target_pose, noise_scale=noise_scale
+            )
+            anchor_coord, anchor_normal, anchor_color, anchor_label, anchor_pose = self.augment_pcd_instance(
+                anchor_coord, anchor_normal, anchor_color, anchor_label, anchor_pose, disable_rot=True, noise_scale=noise_scale
             )
         else:
             noise_scale = 1.0
-            is_nearby = True
 
-        # Crop pcd to focus
+        # Crop pcd to focus around the goal
         is_valid_crop = True
         if self.crop_pcd:
             crop_indicator = random()
@@ -207,14 +185,7 @@ class PcdPairDataset(Dataset):
                         is_valid_crop = False
                 crop_size = (0.5 * np.random.rand(3) + 0.5) * self.crop_size
                 crop_size = np.clip(crop_size, a_min=target_radius, a_max=None)  # Cannot be smaller than the target radius
-                anchor_indices = PcdPairDataset.crop(
-                    pcd=anchor_coord,
-                    crop_center=crop_center,
-                    crop_strategy=self.crop_strategy,
-                    crop_size=crop_size,
-                    knn_k=self.knn_k,
-                    ref_points=target_coord,
-                )
+                anchor_indices = PcdPairDataset.crop(pcd=anchor_coord, crop_center=crop_center, crop_strategy=self.crop_strategy, crop_size=crop_size, knn_k=self.knn_k, ref_points=target_coord)
                 if anchor_indices.sum() > 20:  # Make sure there are at least 20 points in the crop
                     break
                 if i == max_crop_attempts - 1:
@@ -235,8 +206,8 @@ class PcdPairDataset(Dataset):
             # DEBUG:
             raw_anchor_coord -= crop_center
 
+        # Apply translation disturbance after cropping
         if self.mode == "train" or self.mode == "val":
-            # Apply translation disturbance after cropping
             x_min, y_min, z_min = target_coord.min(axis=0)
             x_max, y_max, z_max = target_coord.max(axis=0)
             x_range, y_range, z_range = x_max - x_min, y_max - y_min, z_max - z_min
@@ -255,25 +226,21 @@ class PcdPairDataset(Dataset):
         anchor_pose = utils.mat_to_pose9d(anchor_pose, rot_axis=self.rot_axis)
 
         # Concat feat
-        target_feat = [copy.deepcopy(target_coord)]
-        anchor_feat = [copy.deepcopy(anchor_coord)]
         if self.add_colors:
-            target_feat.append(target_color)
-            anchor_feat.append(anchor_color)
+            target_feat = np.concatenate([target_feat, target_color], axis=-1)
+            anchor_feat = np.concatenate([anchor_feat, anchor_color], axis=-1)
         if self.add_normals:
-            target_feat.append(target_normal)
-            anchor_feat.append(anchor_normal)
-        target_feat = np.concatenate(target_feat, axis=-1)
-        anchor_feat = np.concatenate(anchor_feat, axis=-1)
+            target_feat = np.concatenate([target_feat, target_normal], axis=-1)
+            anchor_feat = np.concatenate([anchor_feat, anchor_normal], axis=-1)
 
         # DEBUG: sanity check
         if anchor_coord.shape[0] == 0 or np.max(np.abs(anchor_coord)) == 0:
             print("Fixed coord is zero")
             # After crop this becomes empty
             vis_list = []
-            anchor_pcd_o3d = o3d.geometry.PointCloud()
-            anchor_pcd_o3d.points = o3d.utility.Vector3dVector(anchor_pcd[:, :3])
-            vis_list.append(anchor_pcd_o3d)
+            anchor_pcd = o3d.geometry.PointCloud()
+            anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord)
+            vis_list.append(anchor_pcd)
             # Add a sphere to visualize the crop center
             sphere = o3d.geometry.TriangleMesh.create_sphere(radius=self.crop_size, resolution=20)
             sphere.compute_vertex_normals()
@@ -285,20 +252,19 @@ class PcdPairDataset(Dataset):
         if target_coord.shape[0] == 0 or np.max(np.abs(target_coord)) == 0:
             print("Target coord is zero")
 
-        # Compute target_coord goal
-        target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=self.rot_axis)
-        target_coord_goal = (target_pose_mat[:3, :3] @ target_coord.T).T + target_pose_mat[:3, 3]
-
+        # Return
         return {
             "target_coord": target_coord.astype(np.float32),
             "target_feat": target_feat.astype(np.float32),
-            "target_coord_goal": target_coord_goal.astype(np.float32),
+            "target_label": target_label,
+            "target_super_index": target_super_index,
             "target_pose": target_pose.astype(np.float32),
             "anchor_coord": anchor_coord.astype(np.float32),
             "anchor_feat": anchor_feat.astype(np.float32),
+            "anchor_label": anchor_label,
+            "anchor_super_index": anchor_super_index,
             "anchor_pose": anchor_pose.astype(np.float32),
             "is_valid_crop": np.array([is_valid_crop]).astype(np.int64),
-            "is_nearby": np.array([is_nearby]).astype(np.int64),
         }
 
     @staticmethod
@@ -377,14 +343,7 @@ def elastic_distortion(pointcloud, granularity, magnitude):
         noise = scipy.ndimage.filters.convolve(noise, blurz, mode="constant", cval=0)
 
     # Trilinear interpolate noise filters for each spatial dimensions.
-    ax = [
-        np.linspace(d_min, d_max, d)
-        for d_min, d_max, d in zip(
-            coords_min - granularity,
-            coords_min + granularity * (noise_dim - 2),
-            noise_dim,
-        )
-    ]
+    ax = [np.linspace(d_min, d_max, d) for d_min, d_max, d in zip(coords_min - granularity, coords_min + granularity * (noise_dim - 2), noise_dim)]
     interp = scipy.interpolate.RegularGridInterpolator(ax, noise, bounds_error=0, fill_value=0)
     pointcloud[:, :3] = coords + interp(coords) * magnitude
     return pointcloud
@@ -473,7 +432,7 @@ def random_translation(coordinate, normal, color, pose, offset_type: str = "give
     return transformed_points, transformed_normals, color, pose
 
 
-def random_segment_drop(coordinate, normal, color, pose):
+def random_segment_drop(coordinate, normal=None, color=None, label=None):
     # Boundary
     x_min, x_max = coordinate[:, 0].min(), coordinate[:, 0].max()
     y_min, y_max = coordinate[:, 1].min(), coordinate[:, 1].max()
@@ -489,14 +448,9 @@ def random_segment_drop(coordinate, normal, color, pose):
     if inside_count <= half_points:
         mask = distances >= radius  # keep mask
         if mask.sum() == 0:
-            return coordinate, normal, color, pose
+            return coordinate, normal, color, label
         if mask.sum() < half_points:
             mask = distances < radius
-
-        # # DEBUG:
-        # points_removed = total_points - mask.sum()
-        # print(f"Points removed: {points_removed}")
-        # Create a new point cloud without the points inside the sphere
         new_points = coordinate[mask]
         # Duplicate points to make up for the dropped points
         num_points_to_add = total_points - len(new_points)
@@ -507,7 +461,15 @@ def random_segment_drop(coordinate, normal, color, pose):
             new_normals = normal[mask]
             duplicated_normals = new_normals[indices_to_duplicate]
             normal = np.concatenate((new_normals, duplicated_normals))
-    return coordinate, normal, color, pose
+        if color is not None:
+            new_colors = color[mask]
+            duplicated_colors = new_colors[indices_to_duplicate]
+            color = np.concatenate((new_colors, duplicated_colors))
+        if label is not None:
+            new_labels = label[mask]
+            duplicated_labels = new_labels[indices_to_duplicate]
+            label = np.concatenate((new_labels, duplicated_labels))
+    return coordinate, normal, color, label
 
 
 if __name__ == "__main__":
@@ -539,6 +501,8 @@ if __name__ == "__main__":
     trans_noise_level = cfg.DATALOADER.AUGMENTATION.TRANS_NOISE_LEVEL
     rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
     knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
+    add_normals = cfg.DATALOADER.ADD_NORMALS
+    add_colors = cfg.DATALOADER.ADD_COLORS
 
     # Load dataset & data loader
     if cfg.ENV.GOAL_TYPE == "multimodal":
@@ -549,6 +513,8 @@ if __name__ == "__main__":
         dataset_folder = "dmorp_struct"
     elif "rpdiff" in cfg.ENV.GOAL_TYPE:
         dataset_folder = "dmorp_rpdiff"
+    elif "superpoint" in cfg.ENV.GOAL_TYPE:
+        dataset_folder = "dmorp_superpoint"
     else:
         dataset_folder = "dmorp_faster"
 
@@ -556,21 +522,15 @@ if __name__ == "__main__":
     splits = ["train", "val", "test"]
     data_file_dict = {}
     for split in splits:
-        data_file_dict[split] = os.path.join(
-            root_path,
-            "test_data",
-            dataset_folder,
-            task_name,
-            f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
-        )
+        data_file_dict[split] = os.path.join(root_path, "test_data", dataset_folder, task_name, f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl")
     print("Data loaded from: ", data_file_dict)
 
     volume_augmentations_path = os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     dataset = PcdPairDataset(
         data_file_list=[data_file_dict["train"]],
         dataset_name="dmorp",
-        add_colors=True,
-        add_normals=True,
+        add_colors=add_colors,
+        add_normals=add_normals,
         is_elastic_distortion=is_elastic_distortion,
         elastic_distortion_granularity=elastic_distortion_granularity,
         elastic_distortion_magnitude=elastic_distortion_magnitude,
@@ -596,32 +556,30 @@ if __name__ == "__main__":
         random_idx = i
         data = dataset[random_idx]
         target_coord = data["target_coord"]
-        target_feat = data["target_feat"]
         anchor_coord = data["anchor_coord"]
-        anchor_feat = data["anchor_feat"]
         target_pose = data["target_pose"]
+        anchor_label = data["anchor_label"]
+        target_label = data["target_label"]
         is_valid_crop = data["is_valid_crop"]
         print(f"Number of target points: {len(target_coord)}, Number of fixed points: {len(anchor_coord)}, Crop valid: {is_valid_crop}")
 
         target_color = np.zeros_like(target_coord)
-        target_color[:, 0] = 1
+        target_color[np.where(target_label == 1)[0], 0] = 1
         anchor_color = np.zeros_like(anchor_coord)
-        anchor_color[:, 1] = 1
+        anchor_color[np.where(anchor_label == 1)[0], 1] = 1
 
-        anchor_normal = anchor_feat[:, 3:6]
-        target_normal = target_feat[:, 3:6]
         target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
 
         utils.visualize_pcd_list(
             coordinate_list=[target_coord, anchor_coord],
-            normal_list=[target_normal, anchor_normal],
+            normal_list=None,
             color_list=[target_color, anchor_color],
             pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
         )
 
         utils.visualize_pcd_list(
             coordinate_list=[target_coord, anchor_coord],
-            normal_list=[target_normal, anchor_normal],
+            normal_list=None,
             color_list=[target_color, anchor_color],
             pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
         )

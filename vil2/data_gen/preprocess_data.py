@@ -380,11 +380,12 @@ def build_dataset_superpoint(data_dir, cfg, task_name: str, vis: bool = False, f
         # Compute nearest
         target_pcd = o3d.geometry.PointCloud()
         target_pcd.points = o3d.utility.Vector3dVector(target_coord)
+        target_label = np.zeros((target_coord.shape[0],), dtype=np.float32)  # 0: not nearby, 1: nearby
         anchor_pcd = o3d.geometry.PointCloud()
         anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord)
         anchor_nearby_indices = compute_nearby_pcd(anchor_pcd, target_pcd, radius=0.03)
-        anchor_is_nearby = np.zeros((anchor_coord.shape[0],), dtype=np.float32)  # 0: not nearby, 1: nearby
-        anchor_is_nearby[anchor_nearby_indices] = 1.0
+        anchor_label = np.zeros((anchor_coord.shape[0],), dtype=np.float32)  # 0: not nearby, 1: nearby
+        anchor_label[anchor_nearby_indices] = 1.0
         if vis:
             # Visualize overall anchor
             anchor_color = np.zeros((anchor_coord.shape[0], 3))
@@ -405,13 +406,14 @@ def build_dataset_superpoint(data_dir, cfg, task_name: str, vis: bool = False, f
             o3d.visualization.draw_geometries(superpoint_list)
 
         tmorp_data = {
-            "target": target_coord,
+            "target_coord": target_coord,
             "target_feat": target_feat,
             "target_super_index": target_super_index,
-            "fixed": anchor_coord,
+            "target_label": target_label,
+            "anchor_coord": anchor_coord,
             "anchor_feat": anchor_feat,
             "anchor_super_index": anchor_super_index,
-            "anchor_is_nearby": anchor_is_nearby,
+            "anchor_label": anchor_label,
         }
         for split, split_list in split_dict.items():
             if data_file in split_list:
