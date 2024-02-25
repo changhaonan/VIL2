@@ -1,3 +1,7 @@
+"""
+Compute normal & voxel downsample & Sync the data-format
+"""
+
 import json
 import os
 import numpy as np
@@ -11,6 +15,22 @@ import copy
 from detectron2.config import LazyConfig
 import argparse
 from scipy.spatial.transform import Rotation as R
+
+
+def compute_nearby_pcd(pcd1, pcd2, radius: float = 0.1):
+    """Compute the nearby points between two point clouds;
+    pcd1 is the target point cloud, pcd2 is the anchor point cloud.
+    """
+    pcd_tree = o3d.geometry.KDTreeFlann(pcd1)
+    nearby_indices = []
+    for p in pcd2.points:
+        [_, idx, _] = pcd_tree.search_radius_vector_3d(p, radius)
+        if len(idx) > 0:
+            nearby_idx = np.asarray(idx)
+            nearby_indices.extend(nearby_idx)
+    # Remove duplicates
+    nearby_indices = list(set(nearby_indices))
+    return nearby_indices
 
 
 def pose7d_to_mat(pose7d):
@@ -204,21 +224,21 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
     data_dict["val"] = []
     data_dict["test"] = []
     for data_file in tqdm(data_file_list, desc="Processing data"):
-        super_index = superpoint_info[data_file]
-        if len(super_index) == 0:
+        super_indexes = superpoint_info[data_file]
+        if len(super_indexes) == 0:
             print("No superpoint found")
             continue
 
         data = np.load(os.path.join(data_dir, data_file), allow_pickle=True)
-        raw_parent_pcd_s, raw_child_pcd_s = parse_child_parent(data["multi_obj_start_pcd"])
-        raw_parent_normal_s, raw_child_normal_s = parse_child_parent(data["normals"])
+        parent_pcd_s, child_pcd_s = parse_child_parent(data["multi_obj_start_pcd"])
+        parent_normal_s, child_normal_s = parse_child_parent(data["normals"])
         parent_pose_s, child_pose_s = parse_child_parent(data["multi_obj_start_obj_pose"])
         _, child_pose_f = parse_child_parent(data["multi_obj_final_obj_pose"])
 
         if task_name == "stack_can_in_cabinet":
-            raw_parent_pose_s = [raw_parent_pose_s]
-            raw_child_pose_f = [raw_child_pose_f]
-            raw_child_pose_s = [raw_child_pose_s]
+            parent_pose_s = [parent_pose_s]
+            child_pose_f = [child_pose_f]
+            child_pose_s = [child_pose_s]
 
         for i in range(len(parent_pose_s)):
             # Transform pose to matrix
@@ -226,24 +246,20 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
             child_mat_s = pose7d_to_mat(child_pose_s[0])
             child_mat_f = pose7d_to_mat(child_pose_f[0])
 
-            if raw_child_pcd_s.shape[0] <= num_point_lower_bound or raw_parent_pcd_s.shape[0] <= num_point_lower_bound:
-                # target_pcd = o3d.geometry.PointCloud()
-                # target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
-                # target_pcd.paint_uniform_color([1.0, 0.706, 0.0])
-                # anchor_pcd = o3d.geometry.PointCloud()
-                # anchor_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
-                # origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
-                # o3d.visualization.draw_geometries([target_pcd, anchor_pcd, origin])
-                print(f"Target pcd has {raw_child_pcd_s.shape[0]} points, fixed pcd has {raw_parent_pcd_s.shape[0]} points")
+            if child_pcd_s.shape[0] <= num_point_lower_bound or parent_pcd_s.shape[0] <= num_point_lower_bound:
+                print(f"Target pcd has {child_pcd_s.shape[0]} points, fixed pcd has {parent_pcd_s.shape[0]} points")
                 continue
 
             # Filter outliers
-            parent_pcd_s = raw_parent_pcd_s[np.linalg.norm(raw_parent_pcd_s, axis=1) <= 2.0]
-            child_pcd_s = raw_child_pcd_s[np.linalg.norm(raw_child_pcd_s, axis=1) <= 2.0]
-            parent_normal_s = raw_parent_normal_s[np.linalg.norm(raw_parent_pcd_s, axis=1) <= 2.0]
-            child_normal_s = raw_child_normal_s[np.linalg.norm(raw_child_pcd_s, axis=1) <= 2.0]
+            if np.sum(np.linalg.norm(parent_pcd_s, axis=1) >= 3.0) > 1 or np.sum(np.linalg.norm(child_pcd_s, axis=1) >= 3.0) > 1:
+                print("Outliers found")
+                continue
 
             # Use superpoint as color; superpoint are only provided for the anchor object
+            superpoint_layers = {}
+            for _i, super_index in enumerate(super_indexes):
+                superpoint_layers[f"superpoint_{_i}"] = super_index
+                pass
             # Rescale the target pcd in case that there are not enough points after voxel downsampling
             # Shift all points to the origin
             target_pcd = o3d.geometry.PointCloud()
@@ -276,16 +292,6 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
             if vis or target_pcd_arr.shape[0] < (num_point_lower_bound / 2) or anchor_pcd_arr.shape[0] < num_point_lower_bound:
                 visualize_pcd_with_open3d(target_pcd_arr, anchor_pcd_arr, np.eye(4, dtype=np.float32))
                 visualize_pcd_with_open3d(target_pcd_arr, anchor_pcd_arr, target_transform)
-                # # Visualize & Check
-                # raw_target_pcd = o3d.geometry.PointCloud()
-                # raw_target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
-                # raw_target_pcd.transform(np.linalg.inv(parent_mat_s))
-                # raw_target_pcd.paint_uniform_color([0.0, 0.651, 0.929])
-                # raw_anchor_pcd = o3d.geometry.PointCloud()
-                # raw_anchor_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
-                # raw_anchor_pcd.transform(np.linalg.inv(parent_mat_s))
-                # origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
-                # o3d.visualization.draw_geometries([raw_target_pcd, raw_anchor_pcd, origin])
                 print(f"Target pcd has {target_pcd_arr.shape[0]} points, fixed pcd has {anchor_pcd_arr.shape[0]} points")
                 continue
 
@@ -308,7 +314,7 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
                 "fixed": anchor_pcd_arr,
                 "target_label": np.array([0]),
                 "anchor_label": np.array([1]),
-                "super_index": super_index,
+                "super_index": super_indexes,
                 "9dpose": utils.mat_to_pose9d(target_transform, rot_axis=rot_axis),
             }
             for split, split_list in split_dict.items():
@@ -326,11 +332,106 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
             pickle.dump(data_dict[split], f)
 
 
+def build_dataset_superpoint(data_dir, cfg, task_name: str, vis: bool = False, f_keys: list = ["planarity", "linearity", "verticality", "scattering"]):
+    """Build the dataset from the superpoint data"""
+    # Split info
+    split_dict = {}
+    train_split_info = os.path.join(data_dir, "split_info", "train_split.txt")
+    val_split_info = os.path.join(data_dir, "split_info", "train_val_split.txt")
+    test_split_info = os.path.join(data_dir, "split_info", "test_split.txt")
+    with open(train_split_info, "r") as f:
+        train_split_list = f.readlines()
+        train_split_info = [x.split("\n")[0] for x in train_split_list]
+    with open(val_split_info, "r") as f:
+        val_split_list = f.readlines()
+        val_split_info = [x.split("\n")[0] for x in val_split_list]
+    with open(test_split_info, "r") as f:
+        test_split_list = f.readlines()
+        test_split_info = [x.split("\n")[0] for x in test_split_list]
+    split_dict["train"] = train_split_info
+    split_dict["val"] = val_split_info
+    split_dict["test"] = test_split_info
+
+    superpoint_file = os.path.join(data_dir, "superpoint_data", "superpoint_dict.pkl")
+    superpoint_dict = pickle.load(open(superpoint_file, "rb"))
+
+    data_dict = {}
+    data_dict["train"] = []
+    data_dict["val"] = []
+    data_dict["test"] = []
+    for data_file, superpoint_data in superpoint_dict.items():
+        if data_file not in train_split_info and data_file not in val_split_info and data_file not in test_split_info:
+            continue
+        c_superpoint_data = superpoint_data["child"]
+        p_superpoint_data = superpoint_data["parent"]
+        # Assemble data
+        anchor_coord = p_superpoint_data["pos"]
+        anchor_feat = []
+        for f_key in f_keys:
+            anchor_feat.append(p_superpoint_data[f_key])
+        anchor_feat = np.concatenate(anchor_feat, axis=-1)
+        anchor_super_index = np.vstack(p_superpoint_data["super_index"]).T
+        target_coord = c_superpoint_data["pos"]
+        target_feat = []
+        for f_key in f_keys:
+            target_feat.append(c_superpoint_data[f_key])
+        target_feat = np.concatenate(target_feat, axis=-1)
+        target_super_index = np.vstack(c_superpoint_data["super_index"]).T
+        # Compute nearest
+        target_pcd = o3d.geometry.PointCloud()
+        target_pcd.points = o3d.utility.Vector3dVector(target_coord)
+        anchor_pcd = o3d.geometry.PointCloud()
+        anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord)
+        anchor_nearby_indices = compute_nearby_pcd(anchor_pcd, target_pcd, radius=0.03)
+        anchor_is_nearby = np.zeros((anchor_coord.shape[0],), dtype=np.float32)  # 0: not nearby, 1: nearby
+        anchor_is_nearby[anchor_nearby_indices] = 1.0
+        if vis:
+            # Visualize overall anchor
+            anchor_color = np.zeros((anchor_coord.shape[0], 3))
+            anchor_color[anchor_nearby_indices, :] = [1, 0, 0]
+            anchor_pcd.colors = o3d.utility.Vector3dVector(anchor_color)
+            # o3d.visualization.draw_geometries([anchor_pcd, target_pcd])
+            # Visualize by superpoint average
+            superpoint_layer0 = p_superpoint_data["super_index"][0]
+            num_superpoint = np.unique(superpoint_layer0).shape[0]
+            superpoint_list = []
+            for _i in range(num_superpoint):
+                superpoint_indices = np.where(superpoint_layer0 == _i)[0]
+                superpoint_pcd = o3d.geometry.PointCloud()
+                superpoint_pcd.points = o3d.utility.Vector3dVector(anchor_coord[superpoint_indices])
+                superpoint_color = np.mean(anchor_color[superpoint_indices], axis=0)
+                superpoint_pcd.paint_uniform_color(superpoint_color)
+                superpoint_list.append(superpoint_pcd)
+            o3d.visualization.draw_geometries(superpoint_list)
+
+        tmorp_data = {
+            "target": target_coord,
+            "target_feat": target_feat,
+            "target_super_index": target_super_index,
+            "fixed": anchor_coord,
+            "anchor_feat": anchor_feat,
+            "anchor_super_index": anchor_super_index,
+            "anchor_is_nearby": anchor_is_nearby,
+        }
+        for split, split_list in split_dict.items():
+            if data_file in split_list:
+                data_dict[split].append(tmorp_data)
+                break
+    print("Len of dtset:", len(data_dict["train"]), len(data_dict["val"]), len(data_dict["test"]))
+    # Save the dtset into a .pkl file
+    export_dir = os.path.join(root_dir, "test_data", "dmorp_superpoint", task_name)
+    os.makedirs(export_dir, exist_ok=True)
+    for split, split_list in split_dict.items():
+        print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_superpoint')}...")
+        with open(os.path.join(export_dir, f"diffusion_dataset_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl"), "wb") as f:
+            pickle.dump(data_dict[split], f)
+
+
 if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--task_name", type=str, default="book_in_bookshelf", help="stack_can_in_cabinet, book_in_bookshelf, mug_on_rack_multi")
-    parser.add_argument("--data_type", type=str, default="rpdiff")
+    parser.add_argument("--data_type", type=str, default="superpoint")
     parser.add_argument("--filter_key", type=str, default=None)
     parser.add_argument("--vis", action="store_true")
     args = parser.parse_args()
@@ -356,5 +457,7 @@ if __name__ == "__main__":
         build_dataset_real(data_path, cfg, data_id=0, vis=vis, filter_key=filter_key)
     elif args.data_type == "rpdiff":
         build_dataset_rpdiff(data_dir, cfg, task_name=task_name, vis=vis, do_scaling=do_scaling)
+    elif args.data_type == "superpoint":
+        build_dataset_superpoint(data_dir, cfg, task_name=task_name, vis=vis)
     else:
         raise NotImplementedError
