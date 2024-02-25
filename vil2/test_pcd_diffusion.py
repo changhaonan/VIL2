@@ -53,7 +53,7 @@ if __name__ == "__main__":
     # Prepare path
     data_path_dict = {
         "stack_can_in_cabinet": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/can_in_cabinet_stack/task_name_stack_can_in_cabinet",
-        "book_in_bookshelf": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/book_on_bookshelf_double_view_rnd_ori/task_name_book_in_bookshelf",
+        "book_in_bookshelf": "/home/harvey/Data/rpdiff_V2/book_in_bookshelf",
         "mug_on_rack_multi": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/mug_on_rack_multi_large_proc_gen_demos/task_name_mug_on_rack_multi",
     }
     data_format = "test"  # "rpdiff_fail" or "raw", "test"
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     for _i in range(20):
         # batch = next(iter(test_data_loader))
         batch = next(iter(train_data_loader))
-        if _i != 2:
+        if _i != 3:
             continue
         # Extract one data from batch
         check_batch_idx = 1

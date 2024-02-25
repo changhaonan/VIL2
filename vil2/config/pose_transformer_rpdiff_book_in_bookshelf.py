@@ -87,9 +87,9 @@ MODEL = dict(
                 fusion_projection_dim=512,
             ),
             PCDNOISENET=dict(
-                condition_strategy="FiLM",
-                condition_pooling="mean",
-                grid_sizes=[0.1, 0.15],
+                condition_strategy="FiLM",  # FiLM, cross_attn
+                condition_pooling="max",
+                grid_sizes=[0.1, 0.3],
                 depths=[2, 3, 3],
                 dec_depths=[1, 1],
                 hidden_dims=[128, 256, 768],

@@ -100,8 +100,9 @@ class PcdPairDataset(Dataset):
         data = self._data[batch_idx]
         target_pcd = data["target"]
         anchor_pcd = data["fixed"]
+        super_index = data["super_index"]
         pose = data["9dpose"]
-        return target_pcd, anchor_pcd, pose
+        return target_pcd, anchor_pcd, super_index, pose
 
     def augment_pcd_instance(self, coordinate, normal, color, label, pose, disable_rot: bool = False, noise_scale: float = 1.0):
         """Augment a single point cloud instance."""
@@ -147,7 +148,7 @@ class PcdPairDataset(Dataset):
     def __getitem__(self, idx):
         idx = idx % len(self._data)
         # Parse data from the dataset & Convert to float32
-        target_pcd, anchor_pcd, pose = self.parse_pcd_data(idx)
+        target_pcd, anchor_pcd, super_index, pose = self.parse_pcd_data(idx)
         target_pcd = target_pcd.astype(np.float32)
         anchor_pcd = anchor_pcd.astype(np.float32)
         target_pose = pose.astype(np.float32)
@@ -394,26 +395,9 @@ def crop_bbox(points, x_min, y_min, z_min, x_max, y_max, z_max):
         raise ValueError(
             "We should have x_min < x_max and y_min < y_max and z_min < z_max. But we got"
             " (x_min = {x_min}, y_min = {y_min}, z_min = {z_min},"
-            " x_max = {x_max}, y_max = {y_max}, z_max = {z_max})".format(
-                x_min=x_min,
-                x_max=x_max,
-                y_min=y_min,
-                y_max=y_max,
-                z_min=z_min,
-                z_max=z_max,
-            )
+            " x_max = {x_max}, y_max = {y_max}, z_max = {z_max})".format(x_min=x_min, x_max=x_max, y_min=y_min, y_max=y_max, z_min=z_min, z_max=z_max)
         )
-    inds = np.all(
-        [
-            (points[:, 0] >= x_min),
-            (points[:, 0] < x_max),
-            (points[:, 1] >= y_min),
-            (points[:, 1] < y_max),
-            (points[:, 2] >= z_min),
-            (points[:, 2] < z_max),
-        ],
-        axis=0,
-    )
+    inds = np.all([(points[:, 0] >= x_min), (points[:, 0] < x_max), (points[:, 1] >= y_min), (points[:, 1] < y_max), (points[:, 2] >= z_min), (points[:, 2] < z_max)], axis=0)
     return inds
 
 
@@ -432,15 +416,7 @@ def crop_knn(points, ref_points, crop_center, k=20):
     return indices.flatten()
 
 
-def random_around_points(
-    coordinates,
-    color,
-    normals,
-    labels,
-    rate=0.2,
-    noise_level=0.01,
-    ignore_label=255,
-):
+def random_around_points(coordinates, color, normals, labels, rate=0.2, noise_level=0.01, ignore_label=255):
     # coordinate
     coord_indexes = sample(list(range(len(coordinates))), k=int(len(coordinates) * rate))
     coordinate_noises = np.random.rand(len(coord_indexes), 3) * 2 - 1
@@ -453,10 +429,7 @@ def random_around_points(
     return coordinates, color, normals, labels
 
 
-def random_on_pose(
-    pose,
-    noise_level=0.01,
-):
+def random_on_pose(pose, noise_level=0.01):
     tran_noise = (np.random.rand(3) * 2 - 1) * noise_level
     rot_vector = np.random.rand(3) * 2 - 1
     rot_vector = rot_vector / np.linalg.norm(rot_vector)
@@ -597,7 +570,7 @@ if __name__ == "__main__":
         data_file_list=[data_file_dict["train"]],
         dataset_name="dmorp",
         add_colors=True,
-        add_normals=False,
+        add_normals=True,
         is_elastic_distortion=is_elastic_distortion,
         elastic_distortion_granularity=elastic_distortion_granularity,
         elastic_distortion_magnitude=elastic_distortion_magnitude,

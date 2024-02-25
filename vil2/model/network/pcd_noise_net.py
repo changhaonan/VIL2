@@ -85,6 +85,24 @@ class DiTBlock(nn.Module):
         return x
 
 
+class DiTFinalLayer(nn.Module):
+    """
+    The final layer of DiT.
+    """
+
+    def __init__(self, hidden_size, output_dim, out_channels):
+        super().__init__()
+        self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.linear = nn.Linear(hidden_size, output_dim, bias=True)
+        self.adaLN_modulation = nn.Sequential(nn.SiLU(), nn.Linear(hidden_size, 2 * hidden_size, bias=True))
+
+    def forward(self, x, c):
+        shift, scale = self.adaLN_modulation(c).chunk(2, dim=1)
+        x = modulate(self.norm_final(x), shift, scale)
+        x = self.linear(x)
+        return x
+
+
 class PcdNoiseNet(nn.Module):
     """Generate noise for point cloud diffusion process."""
 
@@ -103,12 +121,15 @@ class PcdNoiseNet(nn.Module):
         self.anchor_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=True)
         self.conv1x1 = nn.ModuleList()
         self.linear_proj_up = nn.Linear(6, hidden_dims[-1])
-        self.pos_decoder = nn.Sequential(
-            nn.LayerNorm(hidden_dims[-1]),
-            nn.Linear(hidden_dims[-1], hidden_dims[-1]),
-            nn.ReLU(),
-            nn.Linear(hidden_dims[-1], 3),
-        )
+        if condition_strategy == "cross_attn":
+            self.pos_decoder = nn.Sequential(
+                nn.LayerNorm(hidden_dims[-1], elementwise_affine=False, eps=1e-6),
+                nn.Linear(hidden_dims[-1], 3),
+            )
+        elif condition_strategy == "FiLM":
+            self.pos_decoder = DiTFinalLayer(hidden_dims[-1], 3, 3)
+        else:
+            raise NotImplementedError
         self.decoders = nn.ModuleList()
         if self.condition_strategy == "cross_attn":
             for i in range(num_denoise_layers):
@@ -279,5 +300,10 @@ class PcdNoiseNet(nn.Module):
                 print("Nan exists in the feature")
 
         # Decode pos
-        target_pos_noise_t = self.pos_decoder(target_feat_t)
+        if self.condition_strategy == "FiLM":
+            target_pos_noise_t = self.pos_decoder(target_feat_t, anchor_feat)
+        elif self.condition_strategy == "cross_attn":
+            target_pos_noise_t = self.pos_decoder(target_feat_t)
+        else:
+            raise NotImplementedError
         return target_pos_noise_t

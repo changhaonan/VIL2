@@ -104,188 +104,6 @@ def visualize_pcd_with_open3d(
         o3d.visualization.draw_geometries([pcd1, pcd2, origin])
 
 
-def assemble_tmorp_data(
-    anchor_color,
-    anchor_depth,
-    anchor_label,
-    target_color,
-    target_depth,
-    target_label,
-    intrinsic,
-    camera_pose,
-    target_transform_world,
-    pcd_size,
-    data_id: int = 0,
-    is_opengl: bool = False,
-):
-    # Filter depth
-    target_depth = target_depth.astype(np.float32)
-    target_depth[target_depth > 1000.0] = 0.0
-    target_depth = -target_depth
-    anchor_depth = anchor_depth.astype(np.float32)
-    anchor_depth[anchor_depth > 1000.0] = 0.0
-    anchor_depth = -anchor_depth
-
-    if is_opengl:
-        flip_x = True
-        flip_y = False
-    else:
-        flip_x = False
-        flip_y = True
-    target_pcd, tpointcloud_size = utils.get_o3d_pointcloud(target_color, target_depth, intrinsic, flip_x, flip_y)
-    if tpointcloud_size < pcd_size:
-        return None
-    anchor_pcd, fpointcloud_size = utils.get_o3d_pointcloud(anchor_color, anchor_depth, intrinsic, flip_x, flip_y)
-    if fpointcloud_size < pcd_size:
-        return None
-    # Transform pcd to world frame
-    anchor_pcd.transform(camera_pose)
-    target_pcd.transform(camera_pose)
-
-    target_pcd = target_pcd.farthest_point_down_sample(pcd_size)
-    target_pcd_arr = np.hstack((np.array(target_pcd.points), np.array(target_pcd.normals), np.array(target_pcd.colors)))
-    anchor_pcd = anchor_pcd.farthest_point_down_sample(pcd_size)
-    anchor_pcd_arr = np.hstack((np.array(anchor_pcd.points), np.array(anchor_pcd.normals), np.array(anchor_pcd.colors)))
-
-    rotation = target_transform_world[:3, :3]
-    v1 = rotation[:, 0]
-    v1_normalized = v1 / np.linalg.norm(v1)
-    v2 = rotation[:, 1]
-    v2_orthogonal = v2 - np.dot(v2, v1_normalized) * v1_normalized
-    v2_normalized = v2_orthogonal / np.linalg.norm(v2_orthogonal)
-    v3 = np.cross(v1_normalized, v2_normalized)
-    return {
-        "target": target_pcd_arr,
-        "fixed": anchor_pcd_arr,
-        "target_label": target_label,
-        "anchor_label": anchor_label,
-        "transform": target_transform_world,
-        "9dpose": utils.perform_gram_schmidt_transform(target_transform_world),
-        "cam_pose": camera_pose,
-        "data_id": data_id,
-    }
-
-
-# def build_dataset_blender(scene_info_path, camera_info_path, cfg):
-#     """Build the dataset from the given scene and camera info"""
-#     # Parse number of scenes and cameras
-#     with open(os.path.join(scene_info_path, "scene_info.json"), "r") as f:
-#         scene_info = json.load(f)
-#     scene_info_list = list(os.listdir(camera_info_path))
-#     num_init_scenes = len(scene_info_list)
-#     render_file_list = list(os.listdir(os.path.join(camera_info_path, scene_info_list[0])))
-#     render_file_list = [f for f in render_file_list if f.endswith(".hdf5")]
-#     num_cameras = len(render_file_list) // 2
-#     pcd_size = cfg.MODEL.PCD_SIZE
-#     print(f"Number of scenes: {num_init_scenes}; Number of cameras: {num_cameras}...")
-
-#     dtset = []
-#     for i in tqdm(range(num_init_scenes), desc="Processing scenes"):
-#         target_transform_world = np.array(scene_info["transform_list"][i])
-#         for j in tqdm(range(num_cameras), desc=f"Processing cameras for scene {i}", leave=False):
-#             # Read the target and fixed pointcloud
-#             h5file_dir = os.path.join(camera_info_path, f"{i:06d}")
-#             intrinsic_file = os.path.join(h5file_dir, "camera.json")
-#             camera_pose_file = os.path.join(h5file_dir, "poses.json")
-#             target_hdf5 = os.path.join(h5file_dir, f"{j}.hdf5")
-#             anchor_hdf5 = os.path.join(h5file_dir, f"{j + num_cameras}.hdf5")
-#             target_color, target_depth, anchor_color, anchor_depth, intrinsic = read_scene_hdf5(
-#                 anchor_hdf5, target_hdf5, intrinsic_file
-#             )
-#             with open(camera_pose_file, "r") as f:
-#                 camera_pose_json = json.load(f)
-#             camera_pose = np.array(camera_pose_json["cam2world"][j])
-
-#             # Assemble data
-#             data = assemble_tmorp_data(
-#                 anchor_color,
-#                 anchor_depth,
-#                 target_color,
-#                 target_depth,
-#                 intrinsic,
-#                 camera_pose,
-#                 target_transform_world,
-#                 pcd_size,
-#             )
-#             if data is None:
-#                 continue
-#             # visualize_pcd_with_open3d(target_pcd_arr, anchor_pcd_arr, np.eye(4, dtype=np.float32))
-#             # visualize_pcd_with_open3d(target_pcd_arr, anchor_pcd_arr, target_transform_world)
-#             dtset.append(data)
-
-#     print("Len of dtset:", len(dtset))
-#     print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_augmented')}...")
-#     # Save the dtset into a .pkl file
-#     with open(
-#         os.path.join(
-#             root_dir, "test_data", "dmorp_augmented", f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}.pkl"
-#         ),
-#         "wb",
-#     ) as f:
-#         pickle.dump(dtset, f)
-#     print("Done!")
-
-
-def build_dataset_pyrender(data_path, cfg, data_id: int = 0, vis: bool = False):
-    """Build the dataset from the pyrender render engine"""
-    data_file_list = os.listdir(data_path)
-    data_file_list = [f for f in data_file_list if f.endswith(".npz")]
-    # Sorted by numerical order
-    data_file_list = sorted(data_file_list, key=lambda x: int(x.split(".")[0]))
-    dtset = []
-    for data_file in tqdm(data_file_list, desc="Processing data"):
-        data_list = np.load(os.path.join(data_path, data_file), allow_pickle=True)["data"]
-        assert len(data_list) % 2 == 0
-        for i in tqdm(range(0, len(data_list), 2), desc="Processing frames", leave=False):
-            data_0 = data_list[i]  # target
-            data_1 = data_list[i + 1]  # fixed
-            tmorp_data = assemble_tmorp_data(
-                data_1["color"][..., :3],
-                data_1["depth"],
-                data_1["semantic"],
-                data_0["color"][..., :3],
-                data_0["depth"],
-                data_0["semantic"],
-                data_0["intrinsic"],
-                data_0["camera_pose"],
-                data_0["transform"],
-                cfg.MODEL.PCD_SIZE,
-                data_id=data_id,
-                is_opengl=True,
-            )
-            if tmorp_data is None:
-                continue
-            if vis:
-                # Visualize & Check
-                visualize_pcd_with_open3d(
-                    tmorp_data["target"],
-                    tmorp_data["fixed"],
-                    np.eye(4, dtype=np.float32),
-                    camera_pose=tmorp_data["cam_pose"],
-                )
-                visualize_pcd_with_open3d(
-                    tmorp_data["target"],
-                    tmorp_data["fixed"],
-                    tmorp_data["transform"],
-                    camera_pose=tmorp_data["cam_pose"],
-                )
-            dtset.append(tmorp_data)
-    print("Len of dtset:", len(dtset))
-    print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_faster')}...")
-    # Save the dtset into a .pkl file
-    with open(
-        os.path.join(
-            root_dir,
-            "test_data",
-            "dmorp_faster",
-            f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}.pkl",
-        ),
-        "wb",
-    ) as f:
-        pickle.dump(dtset, f)
-    print("Done!")
-
-
 def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False, filter_key: str = None):
     """Build the dataset from the real data"""
     data_file_list = os.listdir(data_path)
@@ -330,43 +148,17 @@ def build_dataset_real(data_path, cfg, data_id: int = 0, vis: bool = False, filt
             }
             # Visualize & Check
             if vis:
-                visualize_pcd_with_open3d(
-                    tmorp_data["target"],
-                    tmorp_data["fixed"],
-                    np.eye(4, dtype=np.float32),
-                    camera_pose=tmorp_data["cam_pose"],
-                )
-                visualize_pcd_with_open3d(
-                    tmorp_data["target"],
-                    tmorp_data["fixed"],
-                    tmorp_data["transform"],
-                    camera_pose=tmorp_data["cam_pose"],
-                )
+                visualize_pcd_with_open3d(tmorp_data["target"], tmorp_data["fixed"], np.eye(4, dtype=np.float32), camera_pose=tmorp_data["cam_pose"])
+                visualize_pcd_with_open3d(tmorp_data["target"], tmorp_data["fixed"], tmorp_data["transform"], camera_pose=tmorp_data["cam_pose"])
             dtset.append(tmorp_data)
     print("Len of dtset:", len(dtset))
     print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_real')}...")
     # Save the dtset into a .pkl file
     if filter_key is not None:
-        with open(
-            os.path.join(
-                root_dir,
-                "test_data",
-                "dmorp_real",
-                f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_{filter_key}.pkl",
-            ),
-            "wb",
-        ) as f:
+        with open(os.path.join(root_dir, "test_data", "dmorp_real", f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_{filter_key}.pkl"), "wb") as f:
             pickle.dump(dtset, f)
     else:
-        with open(
-            os.path.join(
-                root_dir,
-                "test_data",
-                "dmorp_real",
-                f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}.pkl",
-            ),
-            "wb",
-        ) as f:
+        with open(os.path.join(root_dir, "test_data", "dmorp_real", f"diffusion_dataset_{data_id}_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}.pkl"), "wb") as f:
             pickle.dump(dtset, f)
     print("Done!")
 
@@ -403,21 +195,30 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
         child_val = pcd_dict["child"]
         return parent_val, child_val
 
+    # Load superpoint info
+    superpoint_info_file = os.path.join(data_dir, "superpoint_data", "superpoint_dict.pkl")
+    superpoint_info = pickle.load(open(superpoint_info_file, "rb"))
+
     data_dict = {}
     data_dict["train"] = []
     data_dict["val"] = []
     data_dict["test"] = []
     for data_file in tqdm(data_file_list, desc="Processing data"):
+        super_index = superpoint_info[data_file]
+        if len(super_index) == 0:
+            print("No superpoint found")
+            continue
+
         data = np.load(os.path.join(data_dir, data_file), allow_pickle=True)
-        parent_pcd_s, child_pcd_s = parse_child_parent(data["multi_obj_start_pcd"])
-        # parent_pcd_s, child_pcd_s = parse_child_parent(data["multi_obj_final_pcd"])
+        raw_parent_pcd_s, raw_child_pcd_s = parse_child_parent(data["multi_obj_start_pcd"])
+        raw_parent_normal_s, raw_child_normal_s = parse_child_parent(data["normals"])
         parent_pose_s, child_pose_s = parse_child_parent(data["multi_obj_start_obj_pose"])
         _, child_pose_f = parse_child_parent(data["multi_obj_final_obj_pose"])
 
-        if task_name == "stack_can_in_cabinet" or task_name == "book_in_bookshelf":
-            parent_pose_s = [parent_pose_s]
-            child_pose_f = [child_pose_f]
-            child_pose_s = [child_pose_s]
+        if task_name == "stack_can_in_cabinet":
+            raw_parent_pose_s = [raw_parent_pose_s]
+            raw_child_pose_f = [raw_child_pose_f]
+            raw_child_pose_s = [raw_child_pose_s]
 
         for i in range(len(parent_pose_s)):
             # Transform pose to matrix
@@ -425,7 +226,7 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
             child_mat_s = pose7d_to_mat(child_pose_s[0])
             child_mat_f = pose7d_to_mat(child_pose_f[0])
 
-            if child_pcd_s.shape[0] <= num_point_lower_bound or parent_pcd_s.shape[0] <= num_point_lower_bound:
+            if raw_child_pcd_s.shape[0] <= num_point_lower_bound or raw_parent_pcd_s.shape[0] <= num_point_lower_bound:
                 # target_pcd = o3d.geometry.PointCloud()
                 # target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
                 # target_pcd.paint_uniform_color([1.0, 0.706, 0.0])
@@ -433,20 +234,24 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
                 # anchor_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
                 # origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
                 # o3d.visualization.draw_geometries([target_pcd, anchor_pcd, origin])
-                print(f"Target pcd has {child_pcd_s.shape[0]} points, fixed pcd has {parent_pcd_s.shape[0]} points")
+                print(f"Target pcd has {raw_child_pcd_s.shape[0]} points, fixed pcd has {raw_parent_pcd_s.shape[0]} points")
                 continue
 
             # Filter outliers
-            parent_pcd_s = parent_pcd_s[np.linalg.norm(parent_pcd_s, axis=1) <= 2.0]
-            child_pcd_s = child_pcd_s[np.linalg.norm(child_pcd_s, axis=1) <= 2.0]
+            parent_pcd_s = raw_parent_pcd_s[np.linalg.norm(raw_parent_pcd_s, axis=1) <= 2.0]
+            child_pcd_s = raw_child_pcd_s[np.linalg.norm(raw_child_pcd_s, axis=1) <= 2.0]
+            parent_normal_s = raw_parent_normal_s[np.linalg.norm(raw_parent_pcd_s, axis=1) <= 2.0]
+            child_normal_s = raw_child_normal_s[np.linalg.norm(raw_child_pcd_s, axis=1) <= 2.0]
 
+            # Use superpoint as color; superpoint are only provided for the anchor object
             # Rescale the target pcd in case that there are not enough points after voxel downsampling
             # Shift all points to the origin
             target_pcd = o3d.geometry.PointCloud()
             target_pcd.points = o3d.utility.Vector3dVector(child_pcd_s)
-
+            target_pcd.normals = o3d.utility.Vector3dVector(child_normal_s)
             anchor_pcd = o3d.geometry.PointCloud()
             anchor_pcd.points = o3d.utility.Vector3dVector(parent_pcd_s)
+            anchor_pcd.normals = o3d.utility.Vector3dVector(parent_normal_s)
             anchor_pcd.transform(np.linalg.inv(parent_mat_s))
 
             # Sample & Compute normal
@@ -458,14 +263,10 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
             # Compute normal
             target_pcd_center = (target_pcd.get_max_bound() + target_pcd.get_min_bound()) / 2
             target_pcd.translate(-target_pcd_center)
-            # Rescale the target pcd in case that there are not enough points after voxel downsampling
-            # target_pcd.scale(target_rescale, center=np.array([0, 0, 0]))  # FIXME: will this bring systematic error?
 
             target_pcd = target_pcd.voxel_down_sample(grid_size)
             anchor_pcd = anchor_pcd.voxel_down_sample(grid_size)
-            target_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05, max_nn=30))
             target_pcd_arr = np.hstack((np.array(target_pcd.points), np.array(target_pcd.normals)))
-            anchor_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
             anchor_pcd_arr = np.hstack((np.array(anchor_pcd.points), np.array(anchor_pcd.normals)))
 
             # Move target to center
@@ -507,6 +308,7 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
                 "fixed": anchor_pcd_arr,
                 "target_label": np.array([0]),
                 "anchor_label": np.array([1]),
+                "super_index": super_index,
                 "9dpose": utils.mat_to_pose9d(target_transform, rot_axis=rot_axis),
             }
             for split, split_list in split_dict.items():
@@ -520,25 +322,14 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
     os.makedirs(export_dir, exist_ok=True)
     for split, split_list in split_dict.items():
         print(f"Saving dataset to {os.path.join(root_dir, 'test_data', 'dmorp_rpdiff')}...")
-        with open(
-            os.path.join(
-                export_dir,
-                f"diffusion_dataset_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl",
-            ),
-            "wb",
-        ) as f:
+        with open(os.path.join(export_dir, f"diffusion_dataset_{cfg.MODEL.PCD_SIZE}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl"), "wb") as f:
             pickle.dump(data_dict[split], f)
 
 
 if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--task_name",
-        type=str,
-        default="book_in_bookshelf",
-        help="stack_can_in_cabinet, book_in_bookshelf, mug_on_rack_multi",
-    )
+    parser.add_argument("--task_name", type=str, default="book_in_bookshelf", help="stack_can_in_cabinet, book_in_bookshelf, mug_on_rack_multi")
     parser.add_argument("--data_type", type=str, default="rpdiff")
     parser.add_argument("--filter_key", type=str, default=None)
     parser.add_argument("--vis", action="store_true")
@@ -546,7 +337,7 @@ if __name__ == "__main__":
     # Prepare path
     data_path_dict = {
         "stack_can_in_cabinet": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/can_in_cabinet_stack/task_name_stack_can_in_cabinet",
-        "book_in_bookshelf": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/book_on_bookshelf_double_view_rnd_ori/task_name_book_in_bookshelf",
+        "book_in_bookshelf": "/home/harvey/Data/rpdiff_V2/book_in_bookshelf",
         "mug_on_rack_multi": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/mug_on_rack_multi_large_proc_gen_demos/task_name_mug_on_rack_multi",
     }
     task_name = args.task_name
@@ -557,13 +348,10 @@ if __name__ == "__main__":
     filter_key = args.filter_key
     vis = args.vis
     do_scaling = True
-    vis = True
+    vis = False
 
     dtset = []
-    if args.data_type == "pyrender":
-        data_path = os.path.join(root_dir, "test_data", "dmorp_faster", f"{0:06d}")
-        build_dataset_pyrender(data_path, cfg, data_id=0, vis=vis)
-    elif args.data_type == "real":
+    if args.data_type == "real":
         data_path = os.path.join(root_dir, "test_data", "dmorp_real", f"{0:06d}")
         build_dataset_real(data_path, cfg, data_id=0, vis=vis, filter_key=filter_key)
     elif args.data_type == "rpdiff":
