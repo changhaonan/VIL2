@@ -226,6 +226,8 @@ class PcdPairDataset(Dataset):
         anchor_pose = utils.mat_to_pose9d(anchor_pose, rot_axis=self.rot_axis)
 
         # Concat feat
+        target_feat = np.concatenate([target_coord, target_feat], axis=-1)
+        anchor_feat = np.concatenate([anchor_coord, anchor_feat], axis=-1)
         if self.add_colors:
             target_feat = np.concatenate([target_feat, target_color], axis=-1)
             anchor_feat = np.concatenate([anchor_feat, anchor_color], axis=-1)

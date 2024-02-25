@@ -25,6 +25,7 @@ def build_dmorp_dataset(root_path, cfg):
     rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
     knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
     add_normals = cfg.DATALOADER.ADD_NORMALS
+    add_colors = cfg.DATALOADER.ADD_COLORS
     # Load dataset & data loader
     if cfg.ENV.GOAL_TYPE == "multimodal":
         dataset_folder = "dmorp_multimodal"
@@ -34,6 +35,8 @@ def build_dmorp_dataset(root_path, cfg):
         dataset_folder = "dmorp_struct"
     elif "rpdiff" in cfg.ENV.GOAL_TYPE:
         dataset_folder = "dmorp_rpdiff"
+    elif "superpoint" in cfg.ENV.GOAL_TYPE:
+        dataset_folder = "dmorp_superpoint"
     else:
         dataset_folder = "dmorp_faster"
 
@@ -53,7 +56,7 @@ def build_dmorp_dataset(root_path, cfg):
     train_dataset = PcdPairDataset(
         data_file_list=[data_file_dict["train"]],
         dataset_name="dmorp",
-        add_colors=True,
+        add_colors=add_colors,
         add_normals=add_normals,
         is_elastic_distortion=is_elastic_distortion,
         elastic_distortion_granularity=elastic_distortion_granularity,
@@ -75,7 +78,7 @@ def build_dmorp_dataset(root_path, cfg):
     val_dataset = PcdPairDataset(
         data_file_list=[data_file_dict["val"]],
         dataset_name="dmorp",
-        add_colors=True,
+        add_colors=add_colors,
         add_normals=add_normals,
         is_elastic_distortion=is_elastic_distortion,
         elastic_distortion_granularity=elastic_distortion_granularity,
@@ -97,12 +100,12 @@ def build_dmorp_dataset(root_path, cfg):
     test_dataset = PcdPairDataset(
         data_file_list=[data_file_dict["test"]],
         dataset_name="dmorp",
-        add_colors=True,
+        add_colors=add_colors,
         add_normals=add_normals,
-        is_elastic_distortion=False,
+        is_elastic_distortion=is_elastic_distortion,
         elastic_distortion_granularity=elastic_distortion_granularity,
         elastic_distortion_magnitude=elastic_distortion_magnitude,
-        is_random_distortion=False,
+        is_random_distortion=is_random_distortion,
         random_distortion_rate=random_distortion_rate,
         random_distortion_mag=random_distortion_mag,
         volume_augmentations_path=volume_augmentations_path,
@@ -110,8 +113,8 @@ def build_dmorp_dataset(root_path, cfg):
         crop_size=crop_size,
         crop_noise=crop_noise,
         crop_strategy=crop_strategy,
-        random_crop_prob=0.0,
-        rot_noise_level=0.1,
+        random_crop_prob=random_crop_prob,
+        rot_noise_level=rot_noise_level,
         trans_noise_level=trans_noise_level,
         rot_axis=rot_axis,
         knn_k=knn_k,

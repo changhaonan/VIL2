@@ -7,28 +7,34 @@ class PcdPairCollator:
     def __call__(self, samples):
         target = {
             "target_coord": [],
-            "target_coord_goal": [],
             "target_feat": [],
             "anchor_coord": [],
             "anchor_feat": [],
             "target_pose": [],
             "target_batch_index": [],
             "anchor_batch_index": [],
-            "is_valid_crop": [],
-            "is_nearby": [],
+            "target_super_index": [],
+            "anchor_super_index": [],
+            "target_label": [],
+            "anchor_label": [],
         }
+        num_anchor_cluster = 0
+        num_target_cluster = 0
         for sample_id, item in enumerate(samples):
             target["target_coord"].append(item["target_coord"])  # (N, 3)
-            target["target_coord_goal"].append(item["target_coord_goal"])  # (N, 3)
             target["target_feat"].append(item["target_feat"])  # (N, 3)
             target["target_batch_index"].append(np.full([len(item["target_coord"])], fill_value=sample_id))  # (N,)
             target["anchor_coord"].append(item["anchor_coord"])  # (M, 3)
             target["anchor_feat"].append(item["anchor_feat"])  # (M, 3)
             target["anchor_batch_index"].append(np.full([len(item["anchor_coord"])], fill_value=sample_id))  # (M,)
             target["target_pose"].append(item["target_pose"][None, :])  #
-            target["is_valid_crop"].append(item["is_valid_crop"])
-            target["is_nearby"].append(item["is_nearby"])
-
+            target["target_super_index"].append(item["target_super_index"] + num_target_cluster)
+            target["anchor_super_index"].append(item["anchor_super_index"] + num_anchor_cluster)
+            target["target_label"].append(item["target_label"])
+            target["anchor_label"].append(item["anchor_label"])
+            # Update num_cluster
+            num_anchor_cluster = num_anchor_cluster + np.max(item["anchor_super_index"]) + 1
+            num_target_cluster = num_target_cluster + np.max(item["target_super_index"]) + 1
         return {k: torch.from_numpy(np.concatenate(v)) for k, v in target.items()}
 
 
