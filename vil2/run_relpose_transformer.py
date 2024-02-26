@@ -32,7 +32,10 @@ if __name__ == "__main__":
     root_path = os.path.dirname((os.path.abspath(__file__)))
     cfg_file = os.path.join(root_path, "config", f"pose_transformer_rpdiff_{task_name}.py")
     cfg = LazyConfig.load(cfg_file)
-
+    # Overriding config
+    cfg.MODEL.NAME = "RPTModel"
+    cfg.DATALOADER.CROP_PCD = True
+    
     # Load dataset & data loader
     train_dataset, val_dataset, test_dataset = build_dmorp_dataset(root_path, cfg)
 

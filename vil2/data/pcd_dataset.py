@@ -166,16 +166,19 @@ class PcdPairDataset(Dataset):
         # Crop pcd to focus around the goal
         is_valid_crop = True
         if self.crop_pcd:
+            # Crop around the target pose
+            target_coord_goal = (target_pose[:3, :3] @ target_coord.T).T + target_pose[:3, 3]
             crop_indicator = random()
             x_min, y_min, z_min = anchor_coord.min(axis=0)
             x_max, y_max, z_max = anchor_coord.max(axis=0)
-            target_center = np.mean(target_coord, axis=0)
-            target_radius = np.linalg.norm(target_coord - target_center, axis=1).max()
             # Apply crop around the target pose
             max_crop_attempts = 10
             for i in range(max_crop_attempts):
+                anchor_nearby = anchor_coord[anchor_label >= 0.0]
+                anchor_nearby_size = np.max(anchor_nearby, axis=0) - np.min(anchor_nearby, axis=0)
                 if crop_indicator > self.random_crop_prob:
-                    crop_center = target_pose[:3, 3] + np.random.rand(3) * 2 * self.crop_noise - self.crop_noise
+                    crop_center = anchor_nearby.mean(axis=0) + (np.random.rand(3) * 2 * self.crop_noise - self.crop_noise)
+                    crop_size = (0.9 + 0.2 * np.random.rand(1)) * anchor_nearby_size
                     is_valid_crop = True
                 else:
                     crop_center = np.random.rand(3) * (np.array([x_max, y_max, z_max]) - np.array([x_min, y_min, z_min])) + np.array([x_min, y_min, z_min])
@@ -183,9 +186,8 @@ class PcdPairDataset(Dataset):
                         is_valid_crop = True
                     else:
                         is_valid_crop = False
-                crop_size = (0.5 * np.random.rand(3) + 0.5) * self.crop_size
-                crop_size = np.clip(crop_size, a_min=target_radius, a_max=None)  # Cannot be smaller than the target radius
-                anchor_indices = PcdPairDataset.crop(pcd=anchor_coord, crop_center=crop_center, crop_strategy=self.crop_strategy, crop_size=crop_size, knn_k=self.knn_k, ref_points=target_coord)
+                    crop_size = (0.4 + 0.8 * np.random.rand(1)) * anchor_nearby_size
+                anchor_indices = PcdPairDataset.crop(pcd=anchor_coord, crop_center=crop_center, crop_strategy=self.crop_strategy, crop_size=crop_size, knn_k=self.knn_k, ref_points=target_coord_goal)
                 if anchor_indices.sum() > 20:  # Make sure there are at least 20 points in the crop
                     break
                 if i == max_crop_attempts - 1:
@@ -198,6 +200,10 @@ class PcdPairDataset(Dataset):
                 anchor_normal = anchor_normal[anchor_indices]
             if self.add_colors:
                 anchor_color = anchor_color[anchor_indices]
+            anchor_label = anchor_label[anchor_indices]
+            anchor_super_index = anchor_super_index[anchor_indices] - anchor_super_index[anchor_indices].min()
+            anchor_feat = anchor_feat[anchor_indices]
+
             # Update fixed pose
             anchor_shift = np.eye(4)
             anchor_shift[:3, 3] = crop_center
@@ -286,6 +292,8 @@ class PcdPairDataset(Dataset):
         """Crop point cloud to a given size around a given center."""
         if crop_strategy == "bbox":
             crop_size = kwargs.get("crop_size", 0.2)
+            if isinstance(crop_size, (int, float)):
+                crop_size = np.array([crop_size, crop_size, crop_size])
             x_min, y_min, z_min = crop_center - crop_size
             x_max, y_max, z_max = crop_center + crop_size
             return crop_bbox(pcd, x_min, y_min, z_min, x_max, y_max, z_max)
@@ -527,6 +535,8 @@ if __name__ == "__main__":
         data_file_dict[split] = os.path.join(root_path, "test_data", dataset_folder, task_name, f"diffusion_dataset_{pcd_size}_{cfg.MODEL.DATASET_CONFIG}_{split}.pkl")
     print("Data loaded from: ", data_file_dict)
 
+    # Override config
+    crop_pcd = True
     volume_augmentations_path = os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     dataset = PcdPairDataset(
         data_file_list=[data_file_dict["train"]],

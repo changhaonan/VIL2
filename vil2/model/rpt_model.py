@@ -21,13 +21,14 @@ from vil2.model.network.geometric import batch2offset
 from vil2.model.network.relpose_transformer import RelPoseTransformer
 import vil2.utils.misc_utils as utils
 from vil2.utils.pcd_utils import normalize_pcd, check_collision
+import torch_scatter
 
 # DataUtils
 from vil2.data.pcd_dataset import PcdPairDataset
 from vil2.data.pcd_datalodaer import PcdPairCollator
 
 
-class LitRelPoseTransformer(L.LightningModule):
+class LRelPoseTransformer(L.LightningModule):
     """Lightning module for RelPose Transformer"""
 
     def __init__(self, pose_transformer: RelPoseTransformer, cfg=None) -> None:
@@ -39,6 +40,7 @@ class LitRelPoseTransformer(L.LightningModule):
         self.start_time = time.time()
         # Logging
         self.batch_size = cfg.DATALOADER.BATCH_SIZE
+        self.valid_crop_threshold = cfg.MODEL.VALID_CROP_THRESHOLD
 
     def training_step(self, batch, batch_idx):
         pose9d = batch["target_pose"].to(torch.float32)
@@ -113,6 +115,26 @@ class LitRelPoseTransformer(L.LightningModule):
         self.log("train_runtime(hrs)", elapsed_time, sync_dist=True, batch_size=self.batch_size)
         return loss
 
+    def criterion(self, batch):
+        pose9d = batch["target_pose"]
+        anchor_label = batch["anchor_label"]
+        anchor_batch_index = batch["anchor_batch_index"]
+        avg_anchor_label = torch_scatter.scatter_mean(anchor_label, anchor_batch_index, dim=0).detach()
+        is_valid_crop = (avg_anchor_label > self.valid_crop_threshold).to(torch.long)
+
+        pred_pose9d, pred_status = self.forward(batch)
+        # compute loss
+        status_loss = F.cross_entropy(pred_status, is_valid_crop)
+        # mask out invalid crops
+        pose9d_valid = pose9d[is_valid_crop == 1]
+        pose9d_pred_valid = pred_pose9d[is_valid_crop == 1]
+        trans_loss = F.mse_loss(pose9d_pred_valid[:, :3], pose9d_valid[:, :3])
+        rx_loss = F.mse_loss(pose9d_pred_valid[:, 3:6], pose9d_valid[:, 3:6])
+        ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
+        # sum
+        loss = trans_loss + rx_loss + ry_loss + 0.1 * status_loss
+        return loss
+
     def forward(self, batch) -> Any:
         # Assemble input
         target_coord = batch["target_coord"]
@@ -156,7 +178,7 @@ class RPTModel:
         # parameters
         # build model
         self.pose_transformer = pose_transformer
-        self.lightning_pose_transformer = LitRelPoseTransformer(pose_transformer, cfg).to(torch.float32)
+        self.lightning_pose_transformer = LRelPoseTransformer(pose_transformer, cfg).to(torch.float32)
         # parameters
         self.rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
         self.gradient_clip_val = cfg.TRAIN.GRADIENT_CLIP_VAL
@@ -283,7 +305,7 @@ class RPTModel:
                 "anchor_feat": crop_anchor_feat,
                 "target_pose": np.zeros(9),
                 "is_valid_crop": np.ones(1),
-                "crop_center": crop_center,  # Aux info
+                "crop_center": crop_center,
             }
             samples.append(sample)
         return PcdPairCollator()(samples), samples
