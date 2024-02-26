@@ -79,9 +79,8 @@ class LPcdSegDiffusion(L.LightningModule):
         super_points = [super_coord, super_feat, super_offset]
         batch_label, label_mask = to_dense_batch(super_label, super_batch_index)
         if self.diffusion_process == "ddpm":
-            latent_label = self.pcd_noise_net.encode_noise(batch_label)
             # sample noise to add to actions
-            noise = torch.randn(latent_label.shape, device=self.device)
+            noise = torch.randn(batch_label.shape, device=self.device)
             # sample a diffusion iteration for each data point
             timesteps = torch.randint(
                 low=0,
@@ -90,14 +89,13 @@ class LPcdSegDiffusion(L.LightningModule):
                 device=self.device,
             ).long()
             # add noisy actions
-            noisy_label = self.noise_scheduler.add_noise(latent_label, noise, timesteps)
+            noisy_label = self.noise_scheduler.add_noise(batch_label, noise, timesteps)
             noisy_label, _ = to_flat_batch(noisy_label, label_mask)
             # predict noise residual
-            latent_noise_pred = self.pcd_noise_net(noisy_label, super_points, timesteps)
+            noise_pred = self.pcd_noise_net(noisy_label, super_points, timesteps)
             # Compute loss with mask
-            decode_loss = F.mse_loss(batch_label[label_mask], self.pcd_noise_net.decode_noise(latent_label[label_mask]))
-            diff_loss = F.mse_loss(latent_noise_pred[label_mask], noise[label_mask])
-            loss = decode_loss * 0.1 + diff_loss
+            diff_loss = F.mse_loss(noise_pred[label_mask], noise[label_mask])
+            loss = diff_loss
         else:
             raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
         return loss
@@ -121,7 +119,7 @@ class LPcdSegDiffusion(L.LightningModule):
 
     def on_validation_epoch_end(self) -> None:
         """Validate by running full diffusion inference."""
-        if (self.current_epoch + 1) % 5 == 0:
+        if (self.current_epoch + 1) % 1 == 0:
             batch = self.sample_batch
             batch_idx = batch["anchor_batch_index"]
             label = batch["anchor_label"]
@@ -154,16 +152,17 @@ class LPcdSegDiffusion(L.LightningModule):
         super_points = [super_coord, super_feat, super_offset]
 
         # Batchify
-        batch_coord, mask = to_dense_batch(super_coord, super_batch_index)
+        batch_coord, super_index_mask = to_dense_batch(super_coord, super_batch_index)
         B = batch_coord.shape[0]
         if self.diffusion_process == "ddpm":
             # initialize action from Guassian noise
-            noisy_label = torch.randn((batch_coord.shape[0], batch_coord.shape[1], self.pcd_noise_net.latent_dim), device=self.device)
+            noisy_label = torch.randn((batch_coord.shape[0], batch_coord.shape[1], 1), device=self.device)
             for k in self.noise_scheduler.timesteps:
                 timesteps = torch.tensor([k], device=self.device).to(torch.long).repeat(B)
+                noisy_label, _ = to_flat_batch(noisy_label, super_index_mask)
                 # predict noise residual
                 noise_pred = self.pcd_noise_net(noisy_label, super_points, timesteps)
-
+                noisy_label, _ = to_dense_batch(noisy_label, super_batch_index)
                 # Batchify
                 # inverse diffusion step (remove noise)
                 noisy_label = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=noisy_label).prev_sample
@@ -171,7 +170,7 @@ class LPcdSegDiffusion(L.LightningModule):
             raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
 
         # Batchify & Numpy
-        pred_label = self.pcd_noise_net.decode_noise(noisy_label)
+        pred_label = noisy_label
         return pred_label
 
     def configure_optimizers(self):
@@ -249,33 +248,38 @@ class PCDDModel:
         target_feat: np.ndarray | None = None,
         anchor_coord: np.ndarray | None = None,
         anchor_feat: np.ndarray | None = None,
+        super_index: np.ndarray | None = None,
         batch=None,
-        target_pose=None,
         **kwargs,
     ) -> Any:
         self.lpcd_noise_net.eval()
         # Assemble batch
         if batch is None:
-            batch_size = kwargs.get("batch_size", 16)
+            batch_size = kwargs.get("batch_size", 2)
             target_coord_list = []
             target_feat_list = []
             anchor_coord_list = []
             anchor_feat_list = []
+            anchor_super_index_list = []
             target_batch_idx_list = []
             anchor_batch_idx_list = []
+            num_anchor_cluster = 0
             for i in range(batch_size):
                 target_coord_list.append(target_coord)
                 target_feat_list.append(target_feat)
                 anchor_coord_list.append(anchor_coord)
                 anchor_feat_list.append(anchor_feat)
+                anchor_super_index_list.append(super_index + num_anchor_cluster)
                 target_batch_idx_list.append(np.array([i] * target_coord.shape[0], dtype=np.int64))
                 anchor_batch_idx_list.append(np.array([i] * anchor_coord.shape[0], dtype=np.int64))
+                num_anchor_cluster = num_anchor_cluster + np.max(super_index) + 1
             batch = {
                 "target_coord": np.concatenate(target_coord_list, axis=0),
                 "target_feat": np.concatenate(target_feat_list, axis=0),
                 "target_batch_index": np.concatenate(target_batch_idx_list, axis=0),
                 "anchor_coord": np.concatenate(anchor_coord_list, axis=0),
                 "anchor_feat": np.concatenate(anchor_feat_list, axis=0),
+                "anchor_super_index": np.concatenate(anchor_super_index_list, axis=0),
                 "anchor_batch_index": np.concatenate(anchor_batch_idx_list, axis=0),
             }
             # Put to torch
@@ -283,7 +287,7 @@ class PCDDModel:
                 batch[key] = torch.from_numpy(batch[key])
         else:
             check_batch_idx = kwargs.get("check_batch_idx", 0)
-            batch_size = kwargs.get("batch_size", 8)
+            batch_size = kwargs.get("batch_size", 2)
             target_coord = batch["target_coord"]
             target_feat = batch["target_feat"]
             target_batch_index = batch["target_batch_index"]
@@ -293,43 +297,48 @@ class PCDDModel:
             anchor_coord = batch["anchor_coord"]
             anchor_feat = batch["anchor_feat"]
             anchor_batch_index = batch["anchor_batch_index"]
+            anchor_super_index_i = batch["anchor_super_index"][anchor_batch_index == check_batch_idx]
+            anchor_super_index_i[:, 0] = anchor_super_index_i[:, 0] - torch.min(anchor_super_index_i[:, 0])
+            anchor_super_index_i[:, 1] = anchor_super_index_i[:, 1] - torch.min(anchor_super_index_i[:, 1])
             anchor_coord_i = anchor_coord[anchor_batch_index == check_batch_idx]
             anchor_feat_i = anchor_feat[anchor_batch_index == check_batch_idx]
             target_coord_list = []
             target_feat_list = []
             anchor_coord_list = []
+            anchor_super_index_list = []
             anchor_feat_list = []
             target_batch_idx_list = []
             anchor_batch_idx_list = []
+            num_anchor_cluster = 0
             for i in range(batch_size):
                 target_coord_list.append(target_coord_i)
                 target_feat_list.append(target_feat_i)
                 anchor_coord_list.append(anchor_coord_i)
+                anchor_super_index_list.append(anchor_super_index_i + num_anchor_cluster)
                 anchor_feat_list.append(anchor_feat_i)
                 target_batch_idx_list.append(torch.tensor([i] * target_coord_i.shape[0], dtype=torch.int64))
                 anchor_batch_idx_list.append(torch.tensor([i] * anchor_coord_i.shape[0], dtype=torch.int64))
+                num_anchor_cluster = num_anchor_cluster + torch.max(anchor_super_index_i) + 1
             batch = {
                 "target_coord": torch.cat(target_coord_list, dim=0),
                 "target_feat": torch.cat(target_feat_list, dim=0),
                 "target_batch_index": torch.cat(target_batch_idx_list, dim=0),
                 "anchor_coord": torch.cat(anchor_coord_list, dim=0),
+                "anchor_super_index": torch.cat(anchor_super_index_list, dim=0),
                 "anchor_feat": torch.cat(anchor_feat_list, dim=0),
                 "anchor_batch_index": torch.cat(anchor_batch_idx_list, dim=0),
             }
         # Put to device
         for key in batch.keys():
             batch[key] = batch[key].to(self.lpcd_noise_net.device)
-        # [Debug]
-        # self.lpcd_noise_net.criterion(batch)
-        pred_target_coord, prev_target_coord = self.lpcd_noise_net(batch)
+        pred_label = self.lpcd_noise_net(batch)
         # Full points
         anchor_coord = batch["anchor_coord"]
         anchor_batch_index = batch["anchor_batch_index"]
         anchor_batch_coord, anchor_coord_mask = to_dense_batch(anchor_coord, anchor_batch_index)
-        target_coord = batch["target_coord"]
-        target_batch_index = batch["target_batch_index"]
-        target_batch_coord, target_coord_mask = to_dense_batch(target_coord, target_batch_index)
-        return pred_target_coord, prev_target_coord, anchor_batch_coord, target_batch_coord
+        anchor_batch_super_index = batch["anchor_super_index"]
+        anchor_batch_super_index, _ = to_dense_batch(anchor_batch_super_index, anchor_batch_index)
+        return pred_label.detach().cpu().numpy(), anchor_batch_coord.detach().cpu().numpy(), anchor_batch_super_index.detach().cpu().numpy()
 
     def load(self, checkpoint_path: str) -> None:
         print(f"Loading checkpoint from {checkpoint_path}")
@@ -343,45 +352,3 @@ class PCDDModel:
         init_args = self.cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name]
         crop_strategy = self.cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
         return f"PCDD_model_{crop_strategy}"
-
-    @staticmethod
-    def kabsch_transform(point_1, point_2, filter_zero=True):
-        """Compute the 6D transformation between two point clouds"""
-        if filter_zero:
-            # Filter zero points
-            mask_1 = np.linalg.norm(point_1, axis=1) > 0
-            mask_2 = np.linalg.norm(point_2, axis=1) > 0
-            mask = mask_1 * mask_2
-            point_1 = point_1[mask]
-            point_2 = point_2[mask]
-        # Center the points
-        centroid_1 = np.mean(point_1, axis=0)
-        centroid_2 = np.mean(point_2, axis=0)
-        centered_1 = point_1 - centroid_1
-        centered_2 = point_2 - centroid_2
-
-        # Compute the covariance matrix
-        H = np.dot(centered_1.T, centered_2)
-
-        # Compute the SVD
-        U, S, Vt = np.linalg.svd(H)
-
-        # Compute the rotation
-        R = np.dot(Vt.T, U.T)
-
-        # Ensure a right-handed coordinate system
-        if np.linalg.det(R) < 0:
-            Vt[-1, :] *= -1
-            R = np.dot(Vt.T, U.T)
-
-        # Compute the translation
-        t = centroid_2 - np.dot(R, centroid_1)
-
-        # Combine R and t to form the transformation matrix
-        transform = np.identity(4)
-        transform[:3, :3] = R
-        transform[:3, 3] = t
-
-        # Compute transform residual
-        residual = np.mean(np.linalg.norm(np.dot(point_1, R.T) + t - point_2, axis=1))
-        return transform, residual

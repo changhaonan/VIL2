@@ -101,54 +101,28 @@ if __name__ == "__main__":
     for _i in range(20):
         # batch = next(iter(test_data_loader))
         batch = next(iter(train_data_loader))
-        if _i != 3:
+        if _i < 11:
             continue
         # Extract one data from batch
         check_batch_idx = 1
-        pred_target_coord, prev_target_coord, anchor_coord_full, target_coord_full = pcdd_model.predict(batch=batch, check_batch_idx=check_batch_idx)
-
-        # Compute & compare residual
-        residual_list = []
-        for check_idx in range(pred_target_coord.shape[0]):
-            # Compute transform
-            transform, residual = PCDDModel.kabsch_transform(prev_target_coord[check_idx], pred_target_coord[check_idx])
-            residual_list.append(residual)
-        # Sort residual
-        residual_list = np.array(residual_list)
-        residual_idx = np.argsort(residual_list)
+        pred_anchor_label, anchor_coord, anchor_super_index = pcdd_model.predict(batch=batch, check_batch_idx=check_batch_idx)
 
         # Visualize
-        for check_idx in residual_idx:
-            # Compute transform
-            transform, residual = PCDDModel.kabsch_transform(prev_target_coord[check_idx], pred_target_coord[check_idx])
-            print(f"Residual: {residual:.4f}")
+        for check_idx in range(pred_anchor_label.shape[0]):
             anchor_full_pcd = o3d.geometry.PointCloud()
-            anchor_full_pcd.points = o3d.utility.Vector3dVector(anchor_coord_full[check_idx])
+            anchor_full_pcd.points = o3d.utility.Vector3dVector(anchor_coord[check_idx])
             anchor_full_pcd.paint_uniform_color([1, 0, 0])
 
-            target_full_pcd = o3d.geometry.PointCloud()
-            target_full_pcd.points = o3d.utility.Vector3dVector(target_coord_full[check_idx])
-            target_full_pcd.paint_uniform_color([0, 0, 1])
-            target_full_pcd.transform(transform)
-            prev_target_full_pcd = o3d.geometry.PointCloud()
-            prev_target_full_pcd.points = o3d.utility.Vector3dVector(target_coord_full[check_idx])
-            prev_target_full_pcd.paint_uniform_color([1, 1, 0])
-
-            target_pcd = o3d.geometry.PointCloud()
-            target_pcd.points = o3d.utility.Vector3dVector(pred_target_coord[check_idx])
-            target_pcd.paint_uniform_color([0, 1, 1])
-            prev_target_pcd = o3d.geometry.PointCloud()
-            prev_target_pcd.points = o3d.utility.Vector3dVector(prev_target_coord[check_idx])
-            prev_target_pcd.paint_uniform_color([0, 1, 0])
-            # Connecting points within target_pcd and prev_target_pcd
-            lines = []
-            for i in range(len(pred_target_coord[check_idx])):
-                lines.append([i, i])
-            for i in range(len(pred_target_coord[check_idx])):
-                lines.append([i, i + len(pred_target_coord[check_idx])])
-            line_set = o3d.geometry.LineSet(
-                points=o3d.utility.Vector3dVector(np.concatenate([pred_target_coord[check_idx], prev_target_coord[check_idx]], axis=0)),
-                lines=o3d.utility.Vector2iVector(lines),
-            )
-            origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
-            o3d.visualization.draw_geometries([origin, anchor_full_pcd, target_full_pcd, target_pcd, prev_target_full_pcd, prev_target_pcd, line_set])
+            super_point_list = []
+            for super_idx in np.unique(anchor_super_index[check_idx, :, 0]):
+                pcd_superpoint_idx = anchor_super_index[check_idx, :, 0] == super_idx
+                superpoint_coord = anchor_coord[check_idx][pcd_superpoint_idx]
+                superpoint_pcd = o3d.geometry.PointCloud()
+                superpoint_pcd.points = o3d.utility.Vector3dVector(superpoint_coord)
+                # Color by label3
+                super_idx = super_idx - np.min(anchor_super_index[check_idx, :, 0])
+                superpoint_label = pred_anchor_label[check_idx][super_idx]  # (-1, 1)
+                color = superpoint_label * np.array([0.0, 1.0, 0.0]) + (1 - superpoint_label) * np.array([1.0, 0.0, 0.0])
+                superpoint_pcd.paint_uniform_color(color)
+                super_point_list.append(superpoint_pcd)
+            o3d.visualization.draw_geometries(super_point_list)

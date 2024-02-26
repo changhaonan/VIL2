@@ -15,7 +15,7 @@ PREPROCESS = dict(
 )
 
 DATALOADER = dict(
-    BATCH_SIZE=8,
+    BATCH_SIZE=4,
     NUM_WORKERS=0,  # Set to 0 if using ilab
     ADD_NORMALS=False,
     ADD_COLORS=False,
@@ -103,7 +103,7 @@ MODEL = dict(
                 num_denoise_depths=1,
             ),
             PCDSEGNOISENET=dict(
-                condition_strategy="concat",  # FiLM, cross_attn, concat
+                condition_strategy="FiLM",  # FiLM, cross_attn, concat
                 condition_pooling="max",
                 grid_sizes=[0.1, 0.3],
                 depths=[2, 3, 3],
@@ -113,7 +113,7 @@ MODEL = dict(
                 ks=[16, 24, 32],
                 in_dim=7,
                 hidden_dim_denoise=256,
-                n_heads_denoise=12,
+                n_heads_denoise=8,
                 num_denoise_layers=3,
                 num_denoise_depths=1,
             ),
