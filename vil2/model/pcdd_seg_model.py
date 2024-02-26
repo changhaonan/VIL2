@@ -25,6 +25,10 @@ import yaml
 import torch_scatter
 import vil2.utils.misc_utils as utils
 from torch.optim.lr_scheduler import LambdaLR
+import open3d as o3d
+import cv2
+import wandb
+from scipy.spatial.transform import Rotation as R
 
 
 class LPcdSegDiffusion(L.LightningModule):
@@ -39,6 +43,7 @@ class LPcdSegDiffusion(L.LightningModule):
         self.num_diffusion_iters = cfg.MODEL.NUM_DIFFUSION_ITERS
         self.warm_up_step = cfg.TRAIN.WARM_UP_STEP
         self.rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
+        self.superpoint_layer = cfg.MODEL.SUPERPOINT_LAYER
         self.noise_scheduler = DDPMScheduler(
             num_train_timesteps=self.num_diffusion_iters,
             # the choise of beta schedule has big impact on performance
@@ -65,7 +70,7 @@ class LPcdSegDiffusion(L.LightningModule):
         offset = batch2offset(batch_idx)
         points = [coord, feat, offset]
         label = batch["anchor_label"]
-        super_index = batch["anchor_super_index"][:, 0]  # Use the first super index
+        super_index = batch["anchor_super_index"][:, self.superpoint_layer]  # Use selected layer
         # Do one-time encoding
         enc_points = self.pcd_noise_net.encode_pcd(points)
         # Scatter to super_index
@@ -123,14 +128,23 @@ class LPcdSegDiffusion(L.LightningModule):
             batch = self.sample_batch
             batch_idx = batch["anchor_batch_index"]
             label = batch["anchor_label"]
-            super_index = batch["anchor_super_index"][:, 0]  # Use the first super index
+            super_index = batch["anchor_super_index"][:, self.superpoint_layer]  # Use the first super index
             super_label = torch_scatter.scatter(label, super_index, dim=0, reduce="mean").unsqueeze(1)
             super_batch_index = torch_scatter.scatter(batch_idx, super_index, dim=0, reduce="mean")
-            batch_label, label_mask = to_dense_batch(super_label, super_batch_index)
+            batch_label, super_mask = to_dense_batch(super_label, super_batch_index)
             pred_label = self.forward(batch)
-            # Compute loss with mask
-            loss = F.mse_loss(batch_label[label_mask], pred_label[label_mask])
-            self.log("val_loss_full", loss, sync_dist=True, batch_size=self.batch_size)
+            # Visualize results
+            anchor_coord = batch["anchor_coord"]
+            batch_anchor_coord = to_dense_batch(anchor_coord, batch_idx)[0]
+            batch_pred_label = to_dense_batch(pred_label, batch_idx)[0]
+            for i in range(min(batch_label.shape[0], 4)):
+                pred_label_i = pred_label[i]
+                anchord_coord_i = batch_anchor_coord[i]
+                pred_label_i = batch_pred_label[i]
+                image = self.view_result(anchord_coord_i, pred_label_i)
+                # Log image in wandb
+                wandb_logger = self.logger.experiment
+                wandb_logger.log({f"val_label_image_{i}": [wandb.Image(image, caption=f"val_label_image")]})
 
     def forward(self, batch):
         """Inference for PCD diffusion model."""
@@ -140,7 +154,7 @@ class LPcdSegDiffusion(L.LightningModule):
         batch_idx = batch["anchor_batch_index"]
         offset = batch2offset(batch_idx)
         points = [coord, feat, offset]
-        super_index = batch["anchor_super_index"][:, 0]  # Use the first super index
+        super_index = batch["anchor_super_index"][:, self.superpoint_layer]  # Use selected layer
         # Do one-time encoding
         enc_points = self.pcd_noise_net.encode_pcd(points)
         # Scatter to super_index
@@ -169,8 +183,9 @@ class LPcdSegDiffusion(L.LightningModule):
         else:
             raise ValueError(f"Diffusion process {self.diffusion_process} not supported.")
 
-        # Batchify & Numpy
-        pred_label = noisy_label
+        # Assign to cluster
+        noisy_label, _ = to_flat_batch(noisy_label, super_index_mask)
+        pred_label = noisy_label[super_index]
         return pred_label
 
     def configure_optimizers(self):
@@ -187,6 +202,27 @@ class LPcdSegDiffusion(L.LightningModule):
 
         scheduler = LambdaLR(optimizer, lr_lambda=lr_foo)
         return [optimizer], [scheduler]
+
+    def view_result(self, batch_coord: torch.Tensor, pred_label: torch.Tensor):
+        """Render label image."""
+        pred_label = pred_label.detach().cpu().numpy()
+        batch_coord = batch_coord.detach().cpu().numpy()
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(batch_coord)
+        color = pred_label * np.array([0.0, 1.0, 0.0]) + (1 - pred_label) * np.array([1.0, 0.0, 0.0])
+        color = np.clip(color, 0, 1)
+        pcd.colors = o3d.utility.Vector3dVector(color)
+        # Rotate the object for better view: rotate around y-axis for 90 degree & z-axis for -90 degree
+        rot = R.from_euler("z", -90, degrees=True) * R.from_euler("y", -90, degrees=True)
+        pcd.rotate(rot.as_matrix(), center=(0, 0, 0))
+        # Offscreen rendering
+        viewer = o3d.visualization.Visualizer()
+        viewer.create_window(width=540, height=540, visible=False)
+        viewer.add_geometry(pcd)
+        # Render image
+        image = viewer.capture_screen_float_buffer(do_render=True)
+        viewer.destroy_window()
+        return np.asarray(image)
 
 
 class PCDDModel:
