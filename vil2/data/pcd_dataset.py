@@ -567,8 +567,7 @@ if __name__ == "__main__":
 
         target_color = np.zeros_like(target_coord)
         target_color[np.where(target_label == 1)[0], 0] = 1
-        anchor_color = np.zeros_like(anchor_coord)
-        anchor_color[np.where(anchor_label == 1)[0], 1] = 1
+        anchor_color = anchor_label[:, None] * np.array([[0, 1, 0]]) + (1 - anchor_label[:, None]) * np.array([[1, 0, 0]])
 
         target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
 

@@ -144,7 +144,7 @@ class LPcdSegDiffusion(L.LightningModule):
                 image = self.view_result(anchord_coord_i, pred_label_i)
                 # Log image in wandb
                 wandb_logger = self.logger.experiment
-                wandb_logger.log({f"val_label_image_{i}": [wandb.Image(image, caption=f"val_label_image")]})
+                wandb_logger.log({f"val_label_image_{i}": [wandb.Image(image, caption=f"val_label_image_{i}")]})
 
     def forward(self, batch):
         """Inference for PCD diffusion model."""
@@ -209,7 +209,7 @@ class LPcdSegDiffusion(L.LightningModule):
         batch_coord = batch_coord.detach().cpu().numpy()
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(batch_coord)
-        color = pred_label * np.array([0.0, 1.0, 0.0]) + (1 - pred_label) * np.array([1.0, 0.0, 0.0])
+        color = (1 + pred_label) * np.array([0.0, 0.5, 0.0]) + (1 - pred_label) * np.array([0.5, 0.0, 0.0])
         color = np.clip(color, 0, 1)
         pcd.colors = o3d.utility.Vector3dVector(color)
         # Rotate the object for better view: rotate around y-axis for 90 degree & z-axis for -90 degree

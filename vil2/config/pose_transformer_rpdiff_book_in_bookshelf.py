@@ -12,6 +12,8 @@ PREPROCESS = dict(
     TARGET_RESCALE=3.0,
     NUM_POINT_LOW_BOUND=40,
     NUM_POINT_HIGH_BOUND=400,
+    NEARBY_RADIUS=0.08,
+    USE_SOFT_LABEL=True
 )
 
 DATALOADER = dict(
@@ -119,7 +121,7 @@ MODEL = dict(
             ),
         ),
     ),
-    SUPERPOINT_LAYER=1,
+    SUPERPOINT_LAYER=0,
     TIME_EMB_DIM=128,
     RETRAIN=True,
     PCD_SIZE=2048,

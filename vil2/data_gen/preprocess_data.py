@@ -18,19 +18,25 @@ from scipy.spatial.transform import Rotation as R
 
 
 def compute_nearby_pcd(pcd1, pcd2, radius: float = 0.1):
-    """Compute the nearby points between two point clouds;
+    """
+    Compute the nearby points between two point clouds with radius;
     pcd1 is the target point cloud, pcd2 is the anchor point cloud.
+    Return a list of nearby indices and distances.
     """
     pcd_tree = o3d.geometry.KDTreeFlann(pcd1)
-    nearby_indices = []
+    nearby_data = {}
     for p in pcd2.points:
-        [_, idx, _] = pcd_tree.search_radius_vector_3d(p, radius)
+        [_, idx, dist] = pcd_tree.search_radius_vector_3d(p, radius)
         if len(idx) > 0:
             nearby_idx = np.asarray(idx)
-            nearby_indices.extend(nearby_idx)
-    # Remove duplicates
-    nearby_indices = list(set(nearby_indices))
-    return nearby_indices
+            for i in nearby_idx:
+                distance = np.linalg.norm(p - np.asarray(pcd1.points)[i])
+                if i not in nearby_data:
+                    nearby_data[i] = distance
+                else:
+                    # Take min distance
+                    nearby_data[i] = min(nearby_data[i], distance)
+    return list(nearby_data.keys()), list(nearby_data.values())
 
 
 def pose7d_to_mat(pose7d):
@@ -359,7 +365,7 @@ def build_dataset_superpoint(data_dir, cfg, task_name: str, vis: bool = False, f
     data_dict["train"] = []
     data_dict["val"] = []
     data_dict["test"] = []
-    for data_file, superpoint_data in superpoint_dict.items():
+    for data_file, superpoint_data in tqdm(superpoint_dict.items()):
         if data_file not in train_split_info and data_file not in val_split_info and data_file not in test_split_info:
             continue
         c_superpoint_data = superpoint_data["child"]
@@ -377,15 +383,20 @@ def build_dataset_superpoint(data_dir, cfg, task_name: str, vis: bool = False, f
             target_feat.append(c_superpoint_data[f_key])
         target_feat = np.concatenate(target_feat, axis=-1)
         target_super_index = np.vstack(c_superpoint_data["super_index"]).T
-        # Compute nearest
+        # Compute nearby label
         target_pcd = o3d.geometry.PointCloud()
         target_pcd.points = o3d.utility.Vector3dVector(target_coord)
-        target_label = np.zeros((target_coord.shape[0],), dtype=np.float32)  # 0: not nearby, 1: nearby
+        target_label = -np.ones((target_coord.shape[0],), dtype=np.float32)  # -1: not nearby, 1: nearby
         anchor_pcd = o3d.geometry.PointCloud()
         anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord)
-        anchor_nearby_indices = compute_nearby_pcd(anchor_pcd, target_pcd, radius=0.03)
-        anchor_label = np.zeros((anchor_coord.shape[0],), dtype=np.float32)  # 0: not nearby, 1: nearby
-        anchor_label[anchor_nearby_indices] = 1.0
+        nearyby_radius = cfg.PREPROCESS.NEARBY_RADIUS
+        use_soft_label = cfg.PREPROCESS.USE_SOFT_LABEL
+        anchor_nearby_indices, anchor_nearby_distances = compute_nearby_pcd(anchor_pcd, target_pcd, radius=nearyby_radius)
+        anchor_label = -np.ones((anchor_coord.shape[0],), dtype=np.float32)  # -1: not nearby, 1: nearby
+        if not use_soft_label:
+            anchor_label[anchor_nearby_indices] = 1.0
+        else:
+            anchor_label[anchor_nearby_indices] = 2.0 * np.exp(-np.array(anchor_nearby_distances) / nearyby_radius) - 1.0
         if vis:
             # Visualize overall anchor
             anchor_color = np.zeros((anchor_coord.shape[0], 3))

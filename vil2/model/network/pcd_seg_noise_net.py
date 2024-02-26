@@ -365,8 +365,11 @@ class PcdSegNoiseNet(nn.Module):
         noisy_t = torch.cat((feat_c, noisy_t), dim=-1)  # Concatenate condition feature
         padding_mask = batch_mask == 0
 
+        # Add positional encoding
+        pos_embedding = self.pos_enc(coord).permute(0, 2, 1)
         # Do DiT
         for i in range(len(self.decoders)):
+            noisy_t = noisy_t + pos_embedding  # In segmentation task, we add positional encoding before each layer
             # Mask out the padding
             noisy_t = self.decoders[i](noisy_t, time_token, mask=padding_mask.unsqueeze(1))
             # Sanity check
