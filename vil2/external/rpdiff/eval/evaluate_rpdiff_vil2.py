@@ -37,8 +37,8 @@ from vil2.external.rpdiff.utils.eval_gen_utils import (
     safeRemoveConstraint,
 )
 
-from vil2.model.network.pose_transformer_v2 import PoseTransformerV2
-from vil2.model.tmorp_model_v2 import TmorpModelV2
+from vil2.model.network.relpose_transformer import RelPoseTransformer
+from vil2.model.rpt_model import RPTModel
 import open3d as o3d
 
 
@@ -130,8 +130,8 @@ def main(args: config_util.AttrDict) -> None:
     # Build model
     net_name = cfg.MODEL.NOISE_NET.NAME
     net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
-    pose_transformer = PoseTransformerV2(**net_init_args)
-    tmorp_model = TmorpModelV2(cfg, pose_transformer)
+    pose_transformer = RelPoseTransformer(**net_init_args)
+    tmorp_model = RPTModel(cfg, pose_transformer)
     model_name = tmorp_model.experiment_name()
     noise_net_name = cfg.MODEL.NOISE_NET.NAME
     save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints", noise_net_name)

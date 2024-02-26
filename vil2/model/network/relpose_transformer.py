@@ -1,4 +1,4 @@
-"""Pose transformer network Version 2. Using PointTransformerV2 (Unet)"""
+"""Relative pose transfomer"""
 
 from __future__ import annotations
 import math
@@ -12,43 +12,15 @@ from vil2.model.network.genpose_modules import Linear
 from vil2.utils.pcd_utils import visualize_tensor_pcd
 
 
-class PoseTransformerV2(nn.Module):
-    def __init__(
-        self,
-        grid_sizes,  # (2)
-        depths,  # (3)
-        dec_depths,  # (2)
-        hidden_dims,  # (3)
-        n_heads,  # (3)
-        ks,  # (3)
-        in_dim,
-        fusion_projection_dim,
-    ) -> None:
+class RelPoseTransformer(nn.Module):
+    """Relative pose transformer network"""
+
+    def __init__(self, grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, fusion_projection_dim) -> None:
         super().__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         # Encode pcd features
-        self.target_pcd_transformer = PointTransformerNetwork(
-            grid_sizes,  # (2)
-            depths,  # (3)
-            dec_depths,  # (2)
-            hidden_dims,  # (3)
-            n_heads,  # (3)
-            ks,  # (3)
-            in_dim,
-            skip_dec=True,
-        )
-        self.anchor_pcd_transformer = PointTransformerNetwork(
-            grid_sizes,  # (2)
-            depths,  # (3)
-            dec_depths,  # (2)
-            hidden_dims,  # (3)
-            n_heads,  # (3)
-            ks,  # (3)
-            in_dim,
-            skip_dec=False,
-        )
-
+        self.target_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=True)
+        self.anchor_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=False)
         # Learnable embedding
         self.pose_embedding = nn.Embedding(1, hidden_dims[-1])
         self.status_embedding = nn.Embedding(1, hidden_dims[-1])
@@ -57,19 +29,11 @@ class PoseTransformerV2(nn.Module):
         self.conv1x1 = nn.ModuleList()
         self.linear_projs = nn.ModuleList()
         for i in range(len(hidden_dims) - 1):
-            refine_encoder_layer = TransformerDecoderLayer(
-                d_model=hidden_dims[i + 1],
-                nhead=n_heads[i],
-                dim_feedforward=hidden_dims[i + 1] * 4,
-                dropout=0.1,
-                activation="relu",
-                batch_first=True,
-            )
+            refine_encoder_layer = TransformerDecoderLayer(d_model=hidden_dims[i + 1], nhead=n_heads[i], dim_feedforward=hidden_dims[i + 1] * 4, dropout=0.1, activation="relu", batch_first=True)
             refine_decoder = TransformerDecoder(refine_encoder_layer, num_layers=dec_depths[i])
             self.refine_decoders.insert(0, refine_decoder)
             self.conv1x1.insert(0, nn.Conv1d(hidden_dims[i + 1], hidden_dims[i], 1))
             self.linear_projs.insert(0, nn.Linear(hidden_dims[i + 1], hidden_dims[i]))
-
         # Pose decoder
         self.pose_decoder = nn.Sequential(
             nn.Linear(hidden_dims[0], fusion_projection_dim),
@@ -84,28 +48,19 @@ class PoseTransformerV2(nn.Module):
             nn.Linear(fusion_projection_dim, 2),
         )
 
-    def encode_cond(
-        self,
-        target_points,
-        anchor_points,
-    ):
+    def encode_cond(self, target_points, anchor_points):
         """
-        Encode target and fixed pcd to features
+        Encode target and anchor pcd to features
         """
         target_points = self.target_pcd_transformer(target_points)
         # Encode fixed pcd
         anchor_points, all_anchor_points, cluster_indexes = self.anchor_pcd_transformer(anchor_points, return_full=True)
-        # DEBUG:
         # Check the existence of nan
         if torch.isnan(target_points[1]).any() or torch.isnan(anchor_points[1]).any():
             print("Nan exists in the feature")
         return target_points, all_anchor_points, cluster_indexes
 
-    def forward(
-        self,
-        target_points: list[torch.Tensor],
-        all_anchor_points: list[list[torch.Tensor]],
-    ) -> torch.Tensor:
+    def forward(self, target_points: list[torch.Tensor], all_anchor_points: list[list[torch.Tensor]]) -> torch.Tensor:
         target_coord, target_feat, target_offset = target_points
         # Convert to batch & mask
         target_batch_index = offset2batch(target_offset)
@@ -131,9 +86,6 @@ class PoseTransformerV2(nn.Module):
         if torch.isnan(target_feat).any():
             print("Nan exists in the feature")
 
-        # DEBUG:
-        # target_coord_batch, mask = to_dense_batch(target_coord, target_batch_index)
-        # visualize_tensor_pcd(target_coord_batch[0])
         # Refine pose tokens
         for i in range(len(self.refine_decoders)):
             anchor_coord, anchor_feat, anchor_offset = all_anchor_points[i]
@@ -145,9 +97,7 @@ class PoseTransformerV2(nn.Module):
                 print(anchor_offset)
                 print("target_offset:")
                 print(target_offset)
-                print(
-                    f"target_feat: {target_feat.shape}, anchor_feat: {anchor_feat.shape}, target_mask: {target_feat_padding_mask.shape}, anchor_mask: {anchor_feat_padding_mask.shape}"
-                )
+                print(f"target_feat: {target_feat.shape}, anchor_feat: {anchor_feat.shape}, target_mask: {target_feat_padding_mask.shape}, anchor_mask: {anchor_feat_padding_mask.shape}")
                 print("Batch size mismatch")
             target_feat = self.refine_decoders[i](
                 target_feat,
@@ -169,20 +119,15 @@ class PoseTransformerV2(nn.Module):
                         anchor_coord_batch, mask = to_dense_batch(anchor_coord_raw, anchor_batch_raw)
                         visualize_tensor_pcd(anchor_coord_batch[j])
             target_feat = self.conv1x1[i](target_feat.permute(0, 2, 1)).permute(0, 2, 1)
-            # DEBUG:
-            # Check the existence of nan
+            # Sanity check
             if torch.isnan(target_feat).any():
                 print("Nan exists in the feature")
-            # DEBUG:
-            # anchor_coord_batch, mask = to_dense_batch(anchor_coord, anchor_batch_index)
-            # visualize_tensor_pcd(anchor_coord_batch[0])
 
         # Decode pose & status
         pose_pred = self.pose_decoder(target_feat[:, 0, :])
         status_pred = self.status_decoder(target_feat[:, 1, :])
 
-        # DEBUG:
-        # Check the existence of nan
+        # Sanity check
         if torch.isnan(pose_pred).any():
             print("Nan exists in the pose")
         return pose_pred, status_pred

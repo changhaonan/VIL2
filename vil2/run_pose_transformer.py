@@ -11,6 +11,7 @@ from detectron2.config import LazyConfig
 from torch.utils.data.dataset import random_split
 import random
 
+
 if __name__ == "__main__":
     torch.set_float32_matmul_precision("high")
     # Parse arguments
@@ -56,9 +57,7 @@ if __name__ == "__main__":
         for data_id in data_id_list
     ]
 
-    volume_augmentations_path = (
-        os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
-    )
+    volume_augmentations_path = os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     dataset = PcdPairDataset(
         data_file_list=data_file_list,
         dataset_name="dmorp",

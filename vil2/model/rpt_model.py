@@ -18,7 +18,7 @@ from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import time
 from vil2.model.network.geometric import batch2offset
-from vil2.model.network.pose_transformer_v2 import PoseTransformerV2
+from vil2.model.network.relpose_transformer import RelPoseTransformer
 import vil2.utils.misc_utils as utils
 from vil2.utils.pcd_utils import normalize_pcd, check_collision
 
@@ -27,10 +27,10 @@ from vil2.data.pcd_dataset import PcdPairDataset
 from vil2.data.pcd_datalodaer import PcdPairCollator
 
 
-class LitPoseTransformerV2(L.LightningModule):
-    """Lightning module for Pose Transformer"""
+class LitRelPoseTransformer(L.LightningModule):
+    """Lightning module for RelPose Transformer"""
 
-    def __init__(self, pose_transformer: PoseTransformerV2, cfg=None) -> None:
+    def __init__(self, pose_transformer: RelPoseTransformer, cfg=None) -> None:
         super().__init__()
         self.cfg = cfg
         self.pose_transformer = pose_transformer
@@ -127,9 +127,7 @@ class LitPoseTransformerV2(L.LightningModule):
         anchor_points = [anchor_coord, anchor_feat, anchor_offset]
 
         # Compute conditional features
-        enc_target_points, all_enc_anchor_points, cluster_indexes = self.pose_transformer.encode_cond(
-            target_points, anchor_points
-        )
+        enc_target_points, all_enc_anchor_points, cluster_indexes = self.pose_transformer.encode_cond(target_points, anchor_points)
 
         # forward
         pred_pose9d, pred_status = self.pose_transformer(enc_target_points, all_enc_anchor_points)
@@ -144,22 +142,21 @@ class LitPoseTransformerV2(L.LightningModule):
                 lr_scale = 0.1 ** (self.warm_up_step - epoch)
             else:
                 lr_scale = 0.95**epoch
-
             return lr_scale
 
         scheduler = LambdaLR(optimizer, lr_lambda=lr_foo)
         return [optimizer], [scheduler]
 
 
-class TmorpModelV2:
-    """Transformer Model for multi-object relative Pose Generation"""
+class RPTModel:
+    """RelPose Transformer Model for multi-object relative Pose Generation"""
 
-    def __init__(self, cfg, pose_transformer: PoseTransformerV2) -> None:
+    def __init__(self, cfg, pose_transformer: RelPoseTransformer) -> None:
         self.cfg = cfg
         # parameters
         # build model
         self.pose_transformer = pose_transformer
-        self.lightning_pose_transformer = LitPoseTransformerV2(pose_transformer, cfg).to(torch.float32)
+        self.lightning_pose_transformer = LitRelPoseTransformer(pose_transformer, cfg).to(torch.float32)
         # parameters
         self.rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
         self.gradient_clip_val = cfg.TRAIN.GRADIENT_CLIP_VAL
@@ -167,13 +164,7 @@ class TmorpModelV2:
 
     def train(self, num_epochs: int, train_data_loader, val_data_loader, save_path: str):
         # Checkpoint callback
-        checkpoint_callback = ModelCheckpoint(
-            monitor="val_loss",
-            dirpath=os.path.join(save_path, "checkpoints"),
-            filename="Tmorp_modelV2-{epoch:02d}-{val_loss:.2f}",
-            save_top_k=3,
-            mode="min",
-        )
+        checkpoint_callback = ModelCheckpoint(monitor="val_loss", dirpath=os.path.join(save_path, "checkpoints"), filename="RTmorp_model-{epoch:02d}-{val_loss:.2f}", save_top_k=3, mode="min")
         # Trainer
         # If not mac, using ddp_find_unused_parameters_true
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
@@ -188,18 +179,14 @@ class TmorpModelV2:
             accelerator=accelerator,
             gradient_clip_val=self.gradient_clip_val,
         )
-        trainer.fit(
-            self.lightning_pose_transformer, train_dataloaders=train_data_loader, val_dataloaders=val_data_loader
-        )
+        trainer.fit(self.lightning_pose_transformer, train_dataloaders=train_data_loader, val_dataloaders=val_data_loader)
 
     def test(self, test_data_loader, save_path: str):
         # Trainer
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
         os.makedirs(os.path.join(save_path, "logs"), exist_ok=True)
         trainer = L.Trainer(
-            logger=WandbLogger(
-                name=self.experiment_name(), project=self.logger_project, save_dir=os.path.join(save_path, "logs")
-            ),
+            logger=WandbLogger(name=self.experiment_name(), project=self.logger_project, save_dir=os.path.join(save_path, "logs")),
             strategy=strategy,
         )
         checkpoint_path = f"{save_path}/checkpoints"
@@ -208,20 +195,12 @@ class TmorpModelV2:
         sorted_checkpoints = sorted(checkpoints, key=lambda x: float(x.split("=")[-1].split(".ckpt")[0]))
         checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
         trainer.test(
-            self.lightning_pose_transformer.__class__.load_from_checkpoint(
-                checkpoint_file, pose_transformer=self.pose_transformer, cfg=self.cfg
-            ),
+            self.lightning_pose_transformer.__class__.load_from_checkpoint(checkpoint_file, pose_transformer=self.pose_transformer, cfg=self.cfg),
             dataloaders=test_data_loader,
         )
 
     def predict(
-        self,
-        target_coord: np.ndarray | None = None,
-        target_feat: np.ndarray | None = None,
-        anchor_coord: np.ndarray | None = None,
-        anchor_feat: np.ndarray | None = None,
-        batch=None,
-        target_pose=None,
+        self, target_coord: np.ndarray | None = None, target_feat: np.ndarray | None = None, anchor_coord: np.ndarray | None = None, anchor_feat: np.ndarray | None = None, batch=None, target_pose=None
     ) -> Any:
         self.lightning_pose_transformer.eval()
         # Assemble batch
@@ -267,18 +246,10 @@ class TmorpModelV2:
         noise_net_name = self.cfg.MODEL.NOISE_NET.NAME
         init_args = self.cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name]
         crop_strategy = self.cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
-        return f"Tmorp_model_{crop_strategy}"
+        return f"RPT_model_{crop_strategy}"
 
     def batch_random_sample(
-        self,
-        sample_size: int,
-        sample_strategy: str,
-        target_coord: np.ndarray,
-        target_feat: np.ndarray,
-        anchor_coord: np.ndarray,
-        anchor_feat: np.ndarray,
-        crop_strategy: str,
-        **kwargs,
+        self, sample_size: int, sample_strategy: str, target_coord: np.ndarray, target_feat: np.ndarray, anchor_coord: np.ndarray, anchor_feat: np.ndarray, crop_strategy: str, **kwargs
     ) -> Any:
         crop_size = kwargs.get("crop_size", 0.2)
         knn_k = kwargs.get("knn_k", 20)
@@ -298,21 +269,8 @@ class TmorpModelV2:
                 x_grid = np.linspace(0.1, 0.9, num_grid) * (x_max - x_min) + x_min
                 y_grid = np.linspace(0.1, 0.9, num_grid) * (y_max - y_min) + y_min
                 z_grid = np.linspace(0.1, 0.9, num_grid) * (z_max - z_min) + z_min
-                crop_center = np.array(
-                    [
-                        np.random.choice(x_grid),
-                        np.random.choice(y_grid),
-                        np.random.choice(z_grid),
-                    ]
-                )
-            crop_indices = PcdPairDataset.crop(
-                pcd=anchor_coord,
-                crop_center=crop_center,
-                crop_strategy=crop_strategy,
-                ref_points=target_coord,
-                crop_size=crop_size,
-                knn_k=knn_k,
-            )
+                crop_center = np.array([np.random.choice(x_grid), np.random.choice(y_grid), np.random.choice(z_grid)])
+            crop_indices = PcdPairDataset.crop(pcd=anchor_coord, crop_center=crop_center, crop_strategy=crop_strategy, ref_points=target_coord, crop_size=crop_size, knn_k=knn_k)
             crop_anchor_coord = anchor_coord[crop_indices]
             crop_anchor_feat = anchor_feat[crop_indices]
             crop_anchor_coord[:, :3] -= crop_center
@@ -385,10 +343,6 @@ class TmorpModelV2:
         # Compute normal
         anchor_pcd_o3d.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
         target_pcd_o3d.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-
-        # DEBUG:
-        # origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0)
-        # o3d.visualization.draw_geometries([target_pcd_o3d, anchor_pcd_o3d, origin])
 
         # Build the input
         target_coord = np.array(target_pcd_o3d.points).astype(np.float32)
