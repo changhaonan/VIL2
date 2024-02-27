@@ -43,19 +43,7 @@ class LRelPoseTransformer(L.LightningModule):
         self.valid_crop_threshold = cfg.MODEL.VALID_CROP_THRESHOLD
 
     def training_step(self, batch, batch_idx):
-        pose9d = batch["target_pose"].to(torch.float32)
-        is_valid_crop = batch["is_valid_crop"].to(torch.long)
-        pred_pose9d, pred_status = self.forward(batch)
-        # compute loss
-        status_loss = F.cross_entropy(pred_status, is_valid_crop)
-        # mask out invalid crops
-        pose9d_valid = pose9d[is_valid_crop == 1]
-        pose9d_pred_valid = pred_pose9d[is_valid_crop == 1]
-        trans_loss = F.mse_loss(pose9d_pred_valid[:, :3], pose9d_valid[:, :3])
-        rx_loss = F.mse_loss(pose9d_pred_valid[:, 3:6], pose9d_valid[:, 3:6])
-        ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
-        # sum
-        loss = trans_loss + rx_loss + ry_loss + 0.1 * status_loss
+        loss, trans_loss, rx_loss, ry_loss, status_loss = self.criterion(batch)
         # log
         self.log("tr_status_loss", status_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("tr_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
@@ -68,19 +56,7 @@ class LRelPoseTransformer(L.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
-        pose9d = batch["target_pose"].to(torch.float32)
-        is_valid_crop = batch["is_valid_crop"].to(torch.long)
-        pred_pose9d, pred_status = self.forward(batch)
-        # compute loss
-        status_loss = F.cross_entropy(pred_status, is_valid_crop)
-        # mask out invalid crops
-        pose9d_valid = pose9d[is_valid_crop == 1]
-        pose9d_pred_valid = pred_pose9d[is_valid_crop == 1]
-        trans_loss = F.mse_loss(pose9d_pred_valid[:, :3], pose9d_valid[:, :3])
-        rx_loss = F.mse_loss(pose9d_pred_valid[:, 3:6], pose9d_valid[:, 3:6])
-        ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
-        # sum
-        loss = trans_loss + rx_loss + ry_loss + 0.1 * status_loss
+        loss, trans_loss, rx_loss, ry_loss, status_loss = self.criterion(batch)
         # log
         self.log("te_status_loss", status_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("te_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
@@ -92,19 +68,7 @@ class LRelPoseTransformer(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        pose9d = batch["target_pose"].to(torch.float32)
-        is_valid_crop = batch["is_valid_crop"].to(torch.long)
-        pred_pose9d, pred_status = self.forward(batch)
-        # compute loss
-        status_loss = F.cross_entropy(pred_status, is_valid_crop)
-        # mask out invalid crops
-        pose9d_valid = pose9d[is_valid_crop == 1]
-        pose9d_pred_valid = pred_pose9d[is_valid_crop == 1]
-        trans_loss = F.mse_loss(pose9d_pred_valid[:, :3], pose9d_valid[:, :3])
-        rx_loss = F.mse_loss(pose9d_pred_valid[:, 3:6], pose9d_valid[:, 3:6])
-        ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
-        # sum
-        loss = trans_loss + rx_loss + ry_loss + 0.1 * status_loss
+        loss, trans_loss, rx_loss, ry_loss, status_loss = self.criterion(batch)
         # log
         self.log("v_status_loss", status_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("v_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
@@ -117,11 +81,7 @@ class LRelPoseTransformer(L.LightningModule):
 
     def criterion(self, batch):
         pose9d = batch["target_pose"]
-        anchor_label = batch["anchor_label"]
-        anchor_batch_index = batch["anchor_batch_index"]
-        avg_anchor_label = torch_scatter.scatter_mean(anchor_label, anchor_batch_index, dim=0).detach()
-        is_valid_crop = (avg_anchor_label > self.valid_crop_threshold).to(torch.long)
-
+        is_valid_crop = batch["is_valid_crop"]
         pred_pose9d, pred_status = self.forward(batch)
         # compute loss
         status_loss = F.cross_entropy(pred_status, is_valid_crop)
@@ -133,7 +93,7 @@ class LRelPoseTransformer(L.LightningModule):
         ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
         # sum
         loss = trans_loss + rx_loss + ry_loss + 0.1 * status_loss
-        return loss
+        return loss, trans_loss, rx_loss, ry_loss, status_loss
 
     def forward(self, batch) -> Any:
         # Assemble input
@@ -253,7 +213,7 @@ class RPTModel:
             ry_loss = np.mean(np.square(pred_pose9d[:, 6:9] - target_pose[:, 6:9]))
             print(f"trans_loss: {trans_loss}, rx_loss: {rx_loss}, ry_loss: {ry_loss}")
         # HACK: Add a small offset on z-axis
-        pred_pose9d[:, 2] += 0.1
+        # pred_pose9d[:, 2] += 0.1
         return pred_pose9d, pred_status
 
     def load(self, checkpoint_path: str) -> None:
@@ -413,3 +373,27 @@ class RPTModel:
             collison_scores.append(collision)
         collison_scores = np.array(collison_scores)
         return collison_scores
+
+    def reposition(self, coord: torch.Tensor, pose_pred: torch.Tensor, rot_axis: str = "xy"):
+        """Reposition the points using the pose9d"""
+        t = pose_pred[:, 0:3]
+        r1 = pose_pred[:, 3:6]
+        r2 = pose_pred[:, 6:9]
+        # Normalize & Gram-Schmidt
+        r1 = r1 / (torch.norm(r1, dim=1, keepdim=True) + 1e-8)
+        r1_r2_dot = torch.sum(r1 * r2, dim=1, keepdim=True)
+        r2_orth = r2 - r1_r2_dot * r1
+        r2 = r2_orth / (torch.norm(r2_orth, dim=1, keepdim=True) + 1e-8)
+        r3 = torch.cross(r1, r2)
+        # Rotate
+        if rot_axis == "xy":
+            R = torch.stack([r1, r2, r3], dim=2)
+        elif rot_axis == "yz":
+            R = torch.stack([r3, r1, r2], dim=2)
+        elif rot_axis == "zx":
+            R = torch.stack([r2, r3, r1], dim=2)
+        R = R.permute(0, 2, 1)
+        # Reposition
+        coord = torch.bmm(coord, R)
+        coord = coord + t[:, None, :]
+        return coord

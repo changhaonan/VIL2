@@ -25,11 +25,11 @@ DATALOADER = dict(
         RANDOM_SEGMENT_DROP_RATE=0.15,
         CROP_PCD=False,
         CROP_SIZE=0.75,
-        CROP_NOISE=0.03,
+        CROP_NOISE=0.00,
         CROP_STRATEGY="bbox",  # bbox, radius, knn, knn_bbox, knn_bbox_max
-        RANDOM_CROP_PROB=0.5,
+        RANDOM_CROP_PROB=0.0,
         ROT_NOISE_LEVEL=0.8,
-        TRANS_NOISE_LEVEL=0.1,
+        TRANS_NOISE_LEVEL=0.00,
         ROT_AXIS="yz",
         KNN_K=20,
     ),
@@ -47,16 +47,14 @@ MODEL = dict(
         NAME="PCDSEGNOISENET",
         INIT_ARGS=dict(
             RPTModel=dict(
-                # Point transformer network
-                grid_sizes=[0.15, 0.3],
+                grid_sizes=[0.1, 0.15],
                 depths=[2, 3, 3],
                 dec_depths=[1, 1],
-                hidden_dims=[128, 256, 512],
+                hidden_dims=[128, 256, 256],  # 1+ dim are the same
                 n_heads=[8, 16, 16],
                 ks=[16, 24, 32],
-                in_dim=6,
-                fusion_projection_dim=512,  # V2
-                # Joint transformer network
+                in_dim=7,
+                fusion_projection_dim=512,
             ),
             PCDSEGNOISENET=dict(
                 condition_strategy="FiLM",  # FiLM, cross_attn, concat

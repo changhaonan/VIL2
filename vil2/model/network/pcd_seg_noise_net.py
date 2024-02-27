@@ -16,16 +16,7 @@ import numpy as np
 class PositionEmbeddingCoordsSine(nn.Module):
     """From Mask3D"""
 
-    def __init__(
-        self,
-        temperature=10000,
-        normalize=False,
-        scale=None,
-        pos_type="fourier",
-        d_pos=None,
-        d_in=3,
-        gauss_scale=1.0,
-    ):
+    def __init__(self, temperature=10000, normalize=False, scale=None, pos_type="fourier", d_pos=None, d_in=3, gauss_scale=1.0):
         super().__init__()
         self.d_pos = d_pos
         self.temperature = temperature

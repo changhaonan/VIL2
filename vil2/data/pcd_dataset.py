@@ -175,10 +175,11 @@ class PcdPairDataset(Dataset):
             max_crop_attempts = 10
             for i in range(max_crop_attempts):
                 anchor_nearby = anchor_coord[anchor_label >= 0.0]
-                anchor_nearby_size = np.max(anchor_nearby, axis=0) - np.min(anchor_nearby, axis=0)
+                anchor_nearby_size = (np.max(anchor_nearby, axis=0) - np.min(anchor_nearby, axis=0)) / 2.0
                 if crop_indicator > self.random_crop_prob:
                     crop_center = anchor_nearby.mean(axis=0) + (np.random.rand(3) * 2 * self.crop_noise - self.crop_noise)
-                    crop_size = (0.9 + 0.2 * np.random.rand(1)) * anchor_nearby_size
+                    # crop_size = (0.9 + 0.2 * np.random.rand(1)) * anchor_nearby_size
+                    crop_size = anchor_nearby_size
                     is_valid_crop = True
                 else:
                     crop_center = np.random.rand(3) * (np.array([x_max, y_max, z_max]) - np.array([x_min, y_min, z_min])) + np.array([x_min, y_min, z_min])
@@ -194,7 +195,6 @@ class PcdPairDataset(Dataset):
                     print("Warning: Failed to find a crop")
                     anchor_indices = np.arange(len(anchor_coord))
 
-            raw_anchor_coord = copy.deepcopy(anchor_coord)
             anchor_coord = anchor_coord[anchor_indices]
             if self.add_normals:
                 anchor_normal = anchor_normal[anchor_indices]
@@ -204,13 +204,17 @@ class PcdPairDataset(Dataset):
             anchor_super_index = anchor_super_index[anchor_indices] - anchor_super_index[anchor_indices].min()
             anchor_feat = anchor_feat[anchor_indices]
 
-            # Update fixed pose
-            anchor_shift = np.eye(4)
-            anchor_shift[:3, 3] = crop_center
-            anchor_pose = anchor_pose @ anchor_shift
-            anchor_coord -= crop_center
-            # DEBUG:
-            raw_anchor_coord -= crop_center
+        # Move anchor & origin to center
+        anchor_shift = np.eye(4)
+        anchor_center = anchor_coord.mean(axis=0)
+        anchor_shift[:3, 3] = anchor_center
+        anchor_pose = anchor_pose @ anchor_shift
+        anchor_coord -= anchor_center
+        target_shift = np.eye(4)
+        target_center = target_coord.mean(axis=0)
+        target_shift[:3, 3] = target_center
+        target_pose = target_pose @ target_shift
+        target_coord -= target_center
 
         # Apply translation disturbance after cropping
         if self.mode == "train" or self.mode == "val":

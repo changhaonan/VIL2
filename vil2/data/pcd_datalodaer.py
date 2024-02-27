@@ -17,6 +17,7 @@ class PcdPairCollator:
             "anchor_super_index": [],
             "target_label": [],
             "anchor_label": [],
+            "is_valid_crop": [],
         }
         num_anchor_cluster = 0
         num_target_cluster = 0
@@ -32,6 +33,7 @@ class PcdPairCollator:
             target["anchor_super_index"].append(item["anchor_super_index"] + num_anchor_cluster)
             target["target_label"].append(item["target_label"])
             target["anchor_label"].append(item["anchor_label"])
+            target["is_valid_crop"].append(item["is_valid_crop"])
             # Update num_cluster
             num_anchor_cluster = num_anchor_cluster + np.max(item["anchor_super_index"]) + 1
             num_target_cluster = num_target_cluster + np.max(item["target_super_index"]) + 1

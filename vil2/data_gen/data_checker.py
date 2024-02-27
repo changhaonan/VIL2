@@ -29,6 +29,8 @@ if __name__ == "__main__":
     data_dir = data_path_dict[task_name]
     data_file_list = os.listdir(data_dir)
     data_file_list = [f for f in data_file_list if f.endswith(".npz")]
+
+    # Check superpoint data
     export_dir = os.path.join(data_dir, "superpoint_data")
     os.makedirs(export_dir, exist_ok=True)
     superpoint_file = os.path.join(export_dir, "superpoint_dict.pkl")

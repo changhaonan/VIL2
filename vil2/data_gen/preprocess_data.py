@@ -276,6 +276,9 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
             anchor_pcd.normals = o3d.utility.Vector3dVector(parent_normal_s)
             anchor_pcd.transform(np.linalg.inv(parent_mat_s))
 
+            # o3d.visualization.draw_geometries([anchor_pcd])
+            o3d.visualization.draw_geometries([target_pcd])
+
             # Sample & Compute normal
             target_pcd.transform(np.linalg.inv(child_mat_s)).transform(child_mat_f).transform(np.linalg.inv(parent_mat_s))
 
@@ -444,7 +447,7 @@ if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--task_name", type=str, default="book_in_bookshelf", help="stack_can_in_cabinet, book_in_bookshelf, mug_on_rack_multi")
-    parser.add_argument("--data_type", type=str, default="superpoint")
+    parser.add_argument("--data_type", type=str, default="rpdiff", help="real, rpdiff, superpoint")
     parser.add_argument("--filter_key", type=str, default=None)
     parser.add_argument("--vis", action="store_true")
     args = parser.parse_args()

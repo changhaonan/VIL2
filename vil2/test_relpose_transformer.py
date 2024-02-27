@@ -81,9 +81,7 @@ if __name__ == "__main__":
 
     # Test dataset
     if data_format == "rpdiff_fail":
-        failed_data_path = (
-            "/home/harvey/Project/VIL2/vil2/external/rpdiff/eval_data/eval_data/can_on_cabinet_nosc/seed_0/failed"
-        )
+        failed_data_path = "/home/harvey/Project/VIL2/vil2/external/rpdiff/eval_data/eval_data/can_on_cabinet_nosc/seed_0/failed"
         failed_data_list = os.listdir(failed_data_path)
         failed_data_list = [os.path.join(failed_data_path, f) for f in failed_data_list if f.endswith(".npz")]
 
@@ -91,9 +89,9 @@ if __name__ == "__main__":
     net_name = cfg.MODEL.NOISE_NET.NAME
     net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
     pose_transformer = RelPoseTransformer(**net_init_args)
-    tmorp_model = RPTModel(cfg, pose_transformer)
+    rpt_model = RPTModel(cfg, pose_transformer)
 
-    model_name = tmorp_model.experiment_name()
+    model_name = rpt_model.experiment_name()
     noise_net_name = cfg.MODEL.NOISE_NET.NAME
     save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints", noise_net_name)
     save_path = os.path.join(save_dir, model_name)
@@ -105,7 +103,7 @@ if __name__ == "__main__":
     sorted_checkpoints = sorted(checkpoints, key=lambda x: float(x.split("=")[-1].split(".ckpt")[0]))
     checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
 
-    tmorp_model.load(checkpoint_file)
+    rpt_model.load(checkpoint_file)
     for i in range(20):
         i = 2
         if data_format == "test":
@@ -115,7 +113,7 @@ if __name__ == "__main__":
             anchor_coord_s, target_coord_s = parse_child_parent(raw_data["multi_obj_start_pcd"])
             anchor_pose_s, target_pose_s = parse_child_parent(raw_data["multi_obj_start_obj_pose"])
             anchor_pose_f, target_pose_f = parse_child_parent(raw_data["multi_obj_final_obj_pose"])
-            data = tmorp_model.preprocess_input_rpdiff(
+            data = rpt_model.preprocess_input_rpdiff(
                 anchor_coord=anchor_coord_s,
                 target_coord=target_coord_s,
             )
@@ -125,7 +123,7 @@ if __name__ == "__main__":
             anchor_coord_s = failed_data["parent_pcd"]
             target_coord_s = failed_data["child_pcd"]
             final_child_pcd = failed_data["final_child_pcd"]
-            data = tmorp_model.preprocess_input_rpdiff(
+            data = rpt_model.preprocess_input_rpdiff(
                 anchor_coord=anchor_coord_s,
                 target_coord=target_coord_s,
             )
@@ -143,7 +141,7 @@ if __name__ == "__main__":
         sample_size = cfg.MODEL.SAMPLE_SIZE
         sample_strategy = cfg.MODEL.SAMPLE_STRATEGY
         # Batch sampling
-        sample_batch, samples = tmorp_model.batch_random_sample(
+        sample_batch, samples = rpt_model.batch_random_sample(
             sample_size,
             sample_strategy=sample_strategy,
             target_coord=target_coord,
@@ -156,7 +154,7 @@ if __name__ == "__main__":
             num_grid=num_grid,
         )
 
-        pred_pose9d, pred_status = tmorp_model.predict(batch=sample_batch)
+        pred_pose9d, pred_status = rpt_model.predict(batch=sample_batch)
 
         # Rank the prediction by status
         sorted_indices = np.argsort(pred_status[:, 1])
@@ -204,9 +202,7 @@ if __name__ == "__main__":
             print(f"Status: {pred_status[j]} for {j}-th sample")
 
             # DEBUG: check the recovered pose
-            recover_pose = tmorp_model.pose_recover_rpdiff(
-                pred_pose9d[j], samples[sorted_indices[j]]["crop_center"], data
-            )
+            recover_pose = rpt_model.pose_recover_rpdiff(pred_pose9d[j], samples[sorted_indices[j]]["crop_center"], data)
             # DEBUG:
             anchor_coord_o3d = o3d.geometry.PointCloud()
             anchor_coord_o3d.points = o3d.utility.Vector3dVector(anchor_coord_s)
