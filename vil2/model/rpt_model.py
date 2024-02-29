@@ -84,7 +84,7 @@ class LRelPoseTransformer(L.LightningModule):
         is_valid_crop = batch["is_valid_crop"]
         pred_pose9d, pred_status = self.forward(batch)
         # compute loss
-        status_loss = F.cross_entropy(pred_status, is_valid_crop)
+        # status_loss = F.cross_entropy(pred_status, is_valid_crop)
         # mask out invalid crops
         pose9d_valid = pose9d[is_valid_crop == 1]
         pose9d_pred_valid = pred_pose9d[is_valid_crop == 1]
@@ -92,8 +92,8 @@ class LRelPoseTransformer(L.LightningModule):
         rx_loss = F.mse_loss(pose9d_pred_valid[:, 3:6], pose9d_valid[:, 3:6])
         ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
         # sum
-        loss = trans_loss + rx_loss + ry_loss + 0.1 * status_loss
-        return loss, trans_loss, rx_loss, ry_loss, status_loss
+        loss = trans_loss + rx_loss + ry_loss
+        return loss, trans_loss, rx_loss, ry_loss, torch.Tensor([0]).to(loss.device)
 
     def forward(self, batch) -> Any:
         # Assemble input
@@ -109,10 +109,10 @@ class LRelPoseTransformer(L.LightningModule):
         anchor_points = [anchor_coord, anchor_feat, anchor_offset]
 
         # Compute conditional features
-        enc_target_points, all_enc_anchor_points, cluster_indexes = self.pose_transformer.encode_cond(target_points, anchor_points)
+        enc_target_points, enc_anchor_points = self.pose_transformer.encode_cond(target_points, anchor_points)
 
         # forward
-        pred_pose9d, pred_status = self.pose_transformer(enc_target_points, all_enc_anchor_points)
+        pred_pose9d, pred_status = self.pose_transformer(enc_target_points, enc_anchor_points)
         return pred_pose9d.to(torch.float32), pred_status.to(torch.float32)
 
     def configure_optimizers(self):

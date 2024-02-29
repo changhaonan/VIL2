@@ -204,6 +204,12 @@ class PcdPairDataset(Dataset):
             anchor_super_index = anchor_super_index[anchor_indices] - anchor_super_index[anchor_indices].min()
             anchor_feat = anchor_feat[anchor_indices]
 
+        # DEBUG
+        # anchor_pcd = o3d.geometry.PointCloud()
+        # anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord)
+        # anchor_pcd.normals = o3d.utility.Vector3dVector(anchor_normal)
+        # o3d.visualization.draw_geometries([anchor_pcd])
+
         # Move anchor & origin to center
         anchor_shift = np.eye(4)
         anchor_center = anchor_coord.mean(axis=0)
@@ -236,14 +242,18 @@ class PcdPairDataset(Dataset):
         anchor_pose = utils.mat_to_pose9d(anchor_pose, rot_axis=self.rot_axis)
 
         # Concat feat
-        target_feat = np.concatenate([target_coord, target_feat], axis=-1)
-        anchor_feat = np.concatenate([anchor_coord, anchor_feat], axis=-1)
-        if self.add_colors:
-            target_feat = np.concatenate([target_feat, target_color], axis=-1)
-            anchor_feat = np.concatenate([anchor_feat, anchor_color], axis=-1)
+        target_feat_list = []
+        anchor_feat_list = []
         if self.add_normals:
-            target_feat = np.concatenate([target_feat, target_normal], axis=-1)
-            anchor_feat = np.concatenate([anchor_feat, anchor_normal], axis=-1)
+            target_feat_list.append(target_normal)
+            anchor_feat_list.append(anchor_normal)
+        if self.add_colors:
+            target_feat_list.append(target_color)
+            anchor_feat_list.append(anchor_color)
+        target_feat_list.append(target_feat)
+        anchor_feat_list.append(anchor_feat)
+        target_feat = np.concatenate(target_feat_list, axis=1)
+        anchor_feat = np.concatenate(anchor_feat_list, axis=1)
 
         # DEBUG: sanity check
         if anchor_coord.shape[0] == 0 or np.max(np.abs(anchor_coord)) == 0:
@@ -541,6 +551,7 @@ if __name__ == "__main__":
 
     # Override config
     crop_pcd = True
+    add_normals = True
     volume_augmentations_path = os.path.join(root_path, "config", volume_augmentation_file) if volume_augmentation_file is not None else None
     dataset = PcdPairDataset(
         data_file_list=[data_file_dict["train"]],
@@ -574,6 +585,8 @@ if __name__ == "__main__":
         target_coord = data["target_coord"]
         anchor_coord = data["anchor_coord"]
         target_pose = data["target_pose"]
+        target_feat = data["target_feat"]
+        anchor_feat = data["anchor_feat"]
         anchor_label = data["anchor_label"]
         target_label = data["target_label"]
         is_valid_crop = data["is_valid_crop"]
@@ -587,14 +600,13 @@ if __name__ == "__main__":
 
         utils.visualize_pcd_list(
             coordinate_list=[target_coord, anchor_coord],
-            normal_list=None,
+            normal_list=[target_feat[:, :3], anchor_feat[:, :3]],
             color_list=[target_color, anchor_color],
             pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
         )
-
         utils.visualize_pcd_list(
             coordinate_list=[target_coord, anchor_coord],
-            normal_list=None,
+            normal_list=[target_feat[:, :3], anchor_feat[:, :3]],
             color_list=[target_color, anchor_color],
             pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
         )

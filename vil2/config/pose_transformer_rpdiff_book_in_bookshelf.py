@@ -12,7 +12,7 @@ PREPROCESS = dict(GRID_SIZE=0.05, TARGET_RESCALE=3.0, NUM_POINT_LOW_BOUND=40, NU
 DATALOADER = dict(
     BATCH_SIZE=4,
     NUM_WORKERS=0,  # Set to 0 if using ilab
-    ADD_NORMALS=False,
+    ADD_NORMALS=True,
     ADD_COLORS=False,
     AUGMENTATION=dict(
         IS_ELASTIC_DISTORTION=False,
@@ -32,6 +32,7 @@ DATALOADER = dict(
         TRANS_NOISE_LEVEL=0.00,
         ROT_AXIS="yz",
         KNN_K=20,
+        NORMALIZE_COORD=True,
     ),
 )
 TRAIN = dict(
@@ -47,7 +48,7 @@ MODEL = dict(
         NAME="PCDSEGNOISENET",
         INIT_ARGS=dict(
             RPTModel=dict(
-                grid_sizes=[0.1, 0.15],
+                grid_sizes=[0.1, 0.3],
                 depths=[2, 3, 3],
                 dec_depths=[1, 1],
                 hidden_dims=[128, 256, 256],  # 1+ dim are the same

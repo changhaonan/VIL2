@@ -8,9 +8,9 @@ import torch.nn as nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from torch.nn import TransformerDecoder, TransformerDecoderLayer
 from vil2.model.embeddings.pct import PointTransformerEncoderSmall, EncoderMLP, DropoutSampler
-from vil2.model.network.geometric import PointTransformerNetwork, to_dense_batch, offset2batch
+from vil2.model.network.geometric import PointTransformerNetwork, to_dense_batch, offset2batch, to_flat_batch
 from vil2.model.network.genpose_modules import Linear
-from vil2.utils.pcd_utils import visualize_tensor_pcd
+from vil2.utils.pcd_utils import visualize_point_pyramid, visualize_tensor_pcd
 
 
 class PositionEmbeddingCoordsSine(nn.Module):
@@ -133,46 +133,58 @@ class RelPoseTransformer(nn.Module):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # Encode pcd features
         self.target_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=True)
-        self.anchor_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=False)
+        self.anchor_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=True)
         # Learnable embedding
         self.pos_enc = PositionEmbeddingCoordsSine(pos_type="fourier", d_pos=hidden_dims[-1], gauss_scale=1.0, normalize=False)
         self.pose_embedding = nn.Embedding(1, hidden_dims[-1])
         self.status_embedding = nn.Embedding(1, hidden_dims[-1])
         # Pose refiner
-        self.refine_decoders = nn.ModuleList()
-        self.linear_projs = nn.ModuleList()
-        for i in range(len(hidden_dims) - 1):
-            refine_encoder_layer = TransformerDecoderLayer(d_model=hidden_dims[i + 1], nhead=n_heads[i], dim_feedforward=hidden_dims[i + 1] * 4, dropout=0.1, activation="relu", batch_first=True)
-            refine_decoder = TransformerDecoder(refine_encoder_layer, num_layers=dec_depths[i])
-            self.refine_decoders.insert(0, refine_decoder)
-            self.linear_projs.insert(0, nn.Linear(hidden_dims[i + 1], hidden_dims[i]))
+        refine_decoder_layer = TransformerDecoderLayer(d_model=hidden_dims[-1], nhead=n_heads[0], dim_feedforward=hidden_dims[-1] * 4, dropout=0.1, activation="relu", batch_first=True)
+        self.decoder = TransformerDecoder(refine_decoder_layer, num_layers=dec_depths[0])
         # Pose decoder
-        self.pose_decoder = nn.Sequential(
-            nn.Linear(hidden_dims[0], fusion_projection_dim),
-            nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
-            nn.ReLU(inplace=True),
-            nn.Linear(fusion_projection_dim, 9),
+        self.pose_proj = nn.Sequential(
+            nn.LayerNorm(hidden_dims[-1], elementwise_affine=False, eps=1e-6),
+            nn.Linear(hidden_dims[-1], 9),
         )
-        self.status_decoder = nn.Sequential(
-            nn.Linear(hidden_dims[0], fusion_projection_dim),
-            nn.BatchNorm1d(fusion_projection_dim, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True),
-            nn.ReLU(inplace=True),
-            nn.Linear(fusion_projection_dim, 2),
+        self.status_proj = nn.Sequential(
+            nn.LayerNorm(hidden_dims[-1], elementwise_affine=False, eps=1e-6),
+            nn.Linear(hidden_dims[-1], 1),
         )
+        self.normalize_coord = True
 
     def encode_cond(self, target_points, anchor_points):
         """
         Encode target and anchor pcd to features
         """
-        target_points = self.target_pcd_transformer(target_points)
-        # Encode fixed pcd
-        anchor_points, all_anchor_points, cluster_indexes = self.anchor_pcd_transformer(anchor_points, return_full=True)
+        if self.normalize_coord:
+            # Normalize coord to unit cube
+            target_coord, anchor_coord = target_points[0], anchor_points[0]
+            target_offset, anchor_offset = target_points[2], anchor_points[2]
+            # Convert to batch & mask
+            target_batch_index = offset2batch(target_offset)
+            target_coord, target_mask = to_dense_batch(target_coord, target_batch_index)
+            target_center = (target_coord.max(dim=1).values + target_coord.min(dim=1).values) / 2
+            target_scale = target_coord.max(dim=1).values - target_coord.min(dim=1).values
+            target_coord = (target_coord - target_center[:, None]) / target_scale[:, None]
+            target_points[0] = to_flat_batch(target_coord, target_mask)[0]
+            anchor_batch_index = offset2batch(anchor_offset)
+            anchor_coord, anchor_mask = to_dense_batch(anchor_coord, anchor_batch_index)
+            anchor_center = (anchor_coord.max(dim=1).values + anchor_coord.min(dim=1).values) / 2
+            anchor_scale = anchor_coord.max(dim=1).values - anchor_coord.min(dim=1).values
+            anchor_coord = (anchor_coord - anchor_center[:, None]) / anchor_scale[:, None]
+            anchor_points[0] = to_flat_batch(anchor_coord, anchor_mask)[0]
+        target_points, all_target_points, target_cluster_indices = self.target_pcd_transformer(target_points, return_full=True)
+        # Encode anchor pcd
+        anchor_points, all_anchor_points, anchor_cluster_indices = self.anchor_pcd_transformer(anchor_points, return_full=True)
+
+        # DEBUG:
+        # self.visualize_pcd_pyramids(all_anchor_points, anchor_cluster_indices)
         # Check the existence of nan
         if torch.isnan(target_points[1]).any() or torch.isnan(anchor_points[1]).any():
             print("Nan exists in the feature")
-        return target_points, all_anchor_points, cluster_indexes
+        return target_points, anchor_points
 
-    def forward(self, target_points: list[torch.Tensor], all_anchor_points: list[list[torch.Tensor]]) -> torch.Tensor:
+    def forward(self, target_points: list[torch.Tensor], anchor_points: list[torch.Tensor]) -> torch.Tensor:
         target_coord, target_feat, target_offset = target_points
         # Convert to batch & mask
         target_batch_index = offset2batch(target_offset)
@@ -183,40 +195,66 @@ class RelPoseTransformer(nn.Module):
         target_feat = torch.cat((pose_token[:, None, :], status_token[:, None, :], target_feat), dim=1)
         target_feat_mask = torch.cat((torch.ones([target_feat_mask.shape[0], 2], dtype=target_feat_mask.dtype, device=target_feat_mask.device), target_feat_mask), dim=1)
         target_feat_padding_mask = target_feat_mask == 0
+        target_coord = to_dense_batch(target_coord, target_batch_index)[0]
+        target_pos_embedding = self.pos_enc(target_coord).permute(0, 2, 1)
+        target_feat[:, 2:, :] = target_feat[:, 2:, :] + target_pos_embedding
 
         # Check the existence of nan
         if torch.isnan(target_feat).any():
             print("Nan exists in the feature")
 
-        # Refine pose tokens
-        target_coord = to_dense_batch(target_coord, target_batch_index)[0]
-        target_pos_embedding = self.pos_enc(target_coord).permute(0, 2, 1)
-        for i in range(len(self.refine_decoders)):
-            anchor_coord, anchor_feat, anchor_offset = all_anchor_points[i]
-            anchor_batch_index = offset2batch(anchor_offset)
-            anchor_coord = to_dense_batch(anchor_coord, anchor_batch_index)[0]
-            anchor_pos_embedding = self.pos_enc(anchor_coord).permute(0, 2, 1)
-            anchor_feat, anchor_feat_mask = to_dense_batch(anchor_feat, anchor_batch_index)
-            anchor_feat_padding_mask = anchor_feat_mask == 0
-            assert target_feat.shape[0] == anchor_feat.shape[0], "Batch size mismatch"
-            # Apply position embedding
-            anchor_feat = anchor_feat + anchor_pos_embedding
-            target_feat[:, 2:, :] = target_feat[:, 2:, :] + target_pos_embedding
-            target_feat = self.refine_decoders[i](
-                target_feat, anchor_feat, tgt_mask=None, memory_mask=None, tgt_key_padding_mask=target_feat_padding_mask, memory_key_padding_mask=anchor_feat_padding_mask
-            )
-            if torch.isnan(target_feat).any():
-                assert False, "Nan exists in the feature"
-            # Sanity check
-            if torch.isnan(target_feat).any():
-                print("Nan exists in the feature")
-            # Projection
-            target_feat = self.linear_projs[i](target_feat)
+        # Do query
+        anchor_coord, anchor_feat, anchor_offset = anchor_points
+        anchor_batch_index = offset2batch(anchor_offset)
+        anchor_coord = to_dense_batch(anchor_coord, anchor_batch_index)[0]
+        anchor_pos_embedding = self.pos_enc(anchor_coord).permute(0, 2, 1)
+        anchor_feat, anchor_feat_mask = to_dense_batch(anchor_feat, anchor_batch_index)
+        anchor_feat_padding_mask = anchor_feat_mask == 0
+        anchor_feat = anchor_feat + anchor_pos_embedding
+        assert target_feat.shape[0] == anchor_feat.shape[0], "Batch size mismatch"
+
+        target_feat = self.decoder(target_feat, anchor_feat, tgt_mask=None, memory_mask=None, tgt_key_padding_mask=target_feat_padding_mask, memory_key_padding_mask=anchor_feat_padding_mask)
+
+        if torch.isnan(target_feat).any():
+            assert False, "Nan exists in the feature"
+        # Sanity check
+        if torch.isnan(target_feat).any():
+            print("Nan exists in the feature")
+
         # Decode pose & status
-        pose_pred = self.pose_decoder(target_feat[:, 0, :])
-        status_pred = self.status_decoder(target_feat[:, 1, :])
+        pose_pred = self.pose_proj(target_feat[:, 0, :])
+        status_pred = self.status_proj(target_feat[:, 1, :])
 
         # Sanity check
         if torch.isnan(pose_pred).any():
             print("Nan exists in the pose")
         return pose_pred, status_pred
+
+    def visualize_pcd_pyramids(self, all_points, cluster_indices):
+        coord, feat, _ = all_points[-1]
+        offsets = [a[2] for a in all_points[1:]]
+        cluster_pyramid = [to_dense_batch(cluster_idex, offset2batch(offset))[0] for (cluster_idex, offset) in zip(cluster_indices, offsets)]
+        # Reverse the anchor cluster pyramid
+        cluster_pyramid = cluster_pyramid[::-1]
+        coord = to_dense_batch(coord, offset2batch(offsets[-1]))[0]
+        for i in range(coord.shape[0]):
+            visualize_point_pyramid(coord[i], None, [a[i] for a in cluster_pyramid])
+
+    def reposition(self, points, pose):
+        """
+        Reposition the points based on the pose;
+        point: [Coord, Normal, Feat, Offset]
+        pose: [Batch, 16]
+        """
+        coord, normal, feat, offset = points
+        batch_index = offset2batch(offset)
+        coord, mask = to_dense_batch(coord, batch_index)
+        normal, _ = to_dense_batch(normal, batch_index)
+        pose = pose.view(-1, 4, 4)
+        coord = torch.bmm(pose[:, :3, :3], coord) + pose[:, :3, 3][:, :, None]
+        normal = torch.bmm(pose[:, :3, :3], normal)
+        # Convert to flat batch
+        coord = to_flat_batch(coord, mask)[0]
+        normal = to_flat_batch(normal, mask)[0]
+        new_points = [coord, normal, feat, offset]
+        return new_points

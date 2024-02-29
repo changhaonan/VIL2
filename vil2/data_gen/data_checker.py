@@ -8,6 +8,7 @@ import open3d as o3d
 
 def visualize_superpoint(superpoint_data):
     pos = superpoint_data["pos"]
+    normal = superpoint_data["normal"]
     super_indexes = superpoint_data["super_index"]
     num_color = np.max(super_indexes[0]) + 1
     # Generate random color
@@ -15,6 +16,7 @@ def visualize_superpoint(superpoint_data):
     for i, super_index in enumerate(super_indexes):
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(pos)
+        pcd.normals = o3d.utility.Vector3dVector(normal)
         pcd.colors = o3d.utility.Vector3dVector(color[super_index])
         o3d.visualization.draw_geometries([pcd])
 
@@ -22,7 +24,7 @@ def visualize_superpoint(superpoint_data):
 if __name__ == "__main__":
     data_path_dict = {
         "stack_can_in_cabinet": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/can_in_cabinet_stack/task_name_stack_can_in_cabinet",
-        "book_in_bookshelf": "/home/harvey/Data/rpdiff_V2/book_in_bookshelf",
+        "book_in_bookshelf": "/home/harvey/Data/rpdiff_V3/book_in_bookshelf",
         "mug_on_rack_multi": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/mug_on_rack_multi_large_proc_gen_demos/task_name_mug_on_rack_multi",
     }
     task_name = "book_in_bookshelf"

@@ -276,9 +276,6 @@ def build_dataset_rpdiff(data_dir, cfg, task_name: str, vis: bool = False, do_sc
             anchor_pcd.normals = o3d.utility.Vector3dVector(parent_normal_s)
             anchor_pcd.transform(np.linalg.inv(parent_mat_s))
 
-            # o3d.visualization.draw_geometries([anchor_pcd])
-            o3d.visualization.draw_geometries([target_pcd])
-
             # Sample & Compute normal
             target_pcd.transform(np.linalg.inv(child_mat_s)).transform(child_mat_f).transform(np.linalg.inv(parent_mat_s))
 
@@ -375,12 +372,14 @@ def build_dataset_superpoint(data_dir, cfg, task_name: str, vis: bool = False, f
         p_superpoint_data = superpoint_data["parent"]
         # Assemble data
         anchor_coord = p_superpoint_data["pos"]
+        anchor_normal = p_superpoint_data["normal"]
         anchor_feat = []
         for f_key in f_keys:
             anchor_feat.append(p_superpoint_data[f_key])
         anchor_feat = np.concatenate(anchor_feat, axis=-1)
         anchor_super_index = np.vstack(p_superpoint_data["super_index"]).T
         target_coord = c_superpoint_data["pos"]
+        target_normal = c_superpoint_data["normal"]
         target_feat = []
         for f_key in f_keys:
             target_feat.append(c_superpoint_data[f_key])
@@ -389,8 +388,10 @@ def build_dataset_superpoint(data_dir, cfg, task_name: str, vis: bool = False, f
         # Compute nearby label
         target_pcd = o3d.geometry.PointCloud()
         target_pcd.points = o3d.utility.Vector3dVector(target_coord)
+        target_pcd.normals = o3d.utility.Vector3dVector(target_normal)
         target_label = -np.ones((target_coord.shape[0],), dtype=np.float32)  # -1: not nearby, 1: nearby
         anchor_pcd = o3d.geometry.PointCloud()
+        anchor_pcd.normals = o3d.utility.Vector3dVector(anchor_normal)
         anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord)
         nearyby_radius = cfg.PREPROCESS.NEARBY_RADIUS
         use_soft_label = cfg.PREPROCESS.USE_SOFT_LABEL
@@ -404,27 +405,30 @@ def build_dataset_superpoint(data_dir, cfg, task_name: str, vis: bool = False, f
             # Visualize overall anchor
             anchor_color = np.zeros((anchor_coord.shape[0], 3))
             anchor_color[anchor_nearby_indices, :] = [1, 0, 0]
+            anchor_pcd.normals = o3d.utility.Vector3dVector(anchor_normal)
             anchor_pcd.colors = o3d.utility.Vector3dVector(anchor_color)
-            # o3d.visualization.draw_geometries([anchor_pcd, target_pcd])
-            # Visualize by superpoint average
-            superpoint_layer0 = p_superpoint_data["super_index"][0]
-            num_superpoint = np.unique(superpoint_layer0).shape[0]
-            superpoint_list = []
-            for _i in range(num_superpoint):
-                superpoint_indices = np.where(superpoint_layer0 == _i)[0]
-                superpoint_pcd = o3d.geometry.PointCloud()
-                superpoint_pcd.points = o3d.utility.Vector3dVector(anchor_coord[superpoint_indices])
-                superpoint_color = np.mean(anchor_color[superpoint_indices], axis=0)
-                superpoint_pcd.paint_uniform_color(superpoint_color)
-                superpoint_list.append(superpoint_pcd)
-            o3d.visualization.draw_geometries(superpoint_list)
+            o3d.visualization.draw_geometries([anchor_pcd, target_pcd])
+            # # Visualize by superpoint average
+            # superpoint_layer0 = p_superpoint_data["super_index"][0]
+            # num_superpoint = np.unique(superpoint_layer0).shape[0]
+            # superpoint_list = []
+            # for _i in range(num_superpoint):
+            #     superpoint_indices = np.where(superpoint_layer0 == _i)[0]
+            #     superpoint_pcd = o3d.geometry.PointCloud()
+            #     superpoint_pcd.points = o3d.utility.Vector3dVector(anchor_coord[superpoint_indices])
+            #     superpoint_color = np.mean(anchor_color[superpoint_indices], axis=0)
+            #     superpoint_pcd.paint_uniform_color(superpoint_color)
+            #     superpoint_list.append(superpoint_pcd)
+            # o3d.visualization.draw_geometries(superpoint_list)
 
         tmorp_data = {
             "target_coord": target_coord,
+            "target_normal": target_normal,
             "target_feat": target_feat,
             "target_super_index": target_super_index,
             "target_label": target_label,
             "anchor_coord": anchor_coord,
+            "anchor_normal": anchor_normal,
             "anchor_feat": anchor_feat,
             "anchor_super_index": anchor_super_index,
             "anchor_label": anchor_label,
@@ -447,14 +451,14 @@ if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--task_name", type=str, default="book_in_bookshelf", help="stack_can_in_cabinet, book_in_bookshelf, mug_on_rack_multi")
-    parser.add_argument("--data_type", type=str, default="rpdiff", help="real, rpdiff, superpoint")
+    parser.add_argument("--data_type", type=str, default="superpoint", help="real, rpdiff, superpoint")
     parser.add_argument("--filter_key", type=str, default=None)
     parser.add_argument("--vis", action="store_true")
     args = parser.parse_args()
     # Prepare path
     data_path_dict = {
         "stack_can_in_cabinet": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/can_in_cabinet_stack/task_name_stack_can_in_cabinet",
-        "book_in_bookshelf": "/home/harvey/Data/rpdiff_V2/book_in_bookshelf",
+        "book_in_bookshelf": "/home/harvey/Data/rpdiff_V3/book_in_bookshelf",
         "mug_on_rack_multi": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/mug_on_rack_multi_large_proc_gen_demos/task_name_mug_on_rack_multi",
     }
     task_name = args.task_name

@@ -1,3 +1,6 @@
+"""Utility function for 3D operations.
+"""
+
 from __future__ import annotations
 import open3d as o3d
 import copy
@@ -47,3 +50,31 @@ def check_collision(pcd_anchor: np.ndarray, pcd_target: np.ndarray, threshold=0.
     dists = np.linalg.norm(pcd_anchor[:, None, :] - pcd_target[None, :, :], axis=-1)
     min_dists = np.min(dists, axis=1)
     return np.any(min_dists < threshold)
+
+
+def visualize_point_pyramid(pos: np.ndarray | torch.Tensor, normal: np.ndarray | torch.Tensor | None, cluster_indices: list[np.ndarray] | list[torch.Tensor]):
+    """Visualize the point pyramid."""
+    if isinstance(pos, torch.Tensor):
+        pos = pos.cpu().numpy()
+    if isinstance(normal, torch.Tensor):
+        normal = normal.cpu().numpy()
+    if isinstance(cluster_indices[0], torch.Tensor):
+        cluster_indices = [c.cpu().numpy() for c in cluster_indices]
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(pos)
+    if normal is not None:
+        pcd.normals = o3d.utility.Vector3dVector(normal)
+    num_clusters = [np.unique(c).size for c in cluster_indices]
+    num_color = max(num_clusters)
+    color = np.random.rand(num_color, 3)
+    cum_cluster_index = cluster_indices[0]
+    for i, cluster_index in enumerate(cluster_indices):
+        cluster_index_mask = cluster_index != 0
+        cluster_index[cluster_index_mask] = cluster_index[cluster_index_mask] - np.min(cluster_index[cluster_index_mask])
+        # Map the cluster index
+        if i != 0:
+            for j in range(len(cluster_index)):
+                if cluster_index[j] != 0:
+                    cum_cluster_index[cum_cluster_index == j] = cluster_index[j]
+        pcd.colors = o3d.utility.Vector3dVector(color[cum_cluster_index])
+        o3d.visualization.draw_geometries([pcd])
