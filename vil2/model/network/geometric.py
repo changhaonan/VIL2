@@ -555,7 +555,7 @@ class DualSoftmaxReposition(nn.Module):
             return t
 
     def compute_matching_loss(self, conf_matrix, gt_correspondence=None, gt_matrix=None):
-        """conf_matrix: (bsize, N, M)   gt_correspondence: list of (L, 2)"""
+        """conf_matrix: (bsize, N, M);   gt_correspondence: list of (L, 2)"""
         if gt_matrix is None:
             assert gt_correspondence is not None
             gt_matrix = DualSoftmaxReposition.to_gt_correspondence_matrix(conf_matrix, gt_correspondence)
@@ -638,8 +638,8 @@ class DualSoftmaxReposition(nn.Module):
         try:
             R, t, condition = batch_arun(self._detach(coord_a_sampled), self._detach(coord_b_sampled), self._detach(w[..., None]))
         except:  # fail to get valid solution, this usually happens at the early stage of training
-            R = torch.eye(3)[None].repeat(bsize, 1, 1).type_as(conf_matrix).to(device)
-            t = torch.zeros(3, 1)[None].repeat(bsize, 1, 1).type_as(conf_matrix).to(device)
+            R = torch.eye(3)[None].repeat(bsize, 1, 1).type_as(conf_matrix).to(dev)
+            t = torch.zeros(3, 1)[None].repeat(bsize, 1, 1).type_as(conf_matrix).to(dev)
             condition = torch.zeros(bsize).type_as(conf_matrix)
 
         # filter unreliable solution with condition nnumber

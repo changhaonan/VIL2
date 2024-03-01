@@ -26,6 +26,15 @@ import open3d as o3d
 from sklearn.neighbors import NearestNeighbors
 
 
+def compute_corr_radius(pcd1: np.ndarray, pcd2: np.ndarray, radius: float = 0.1):
+    """Compute the correspondence matrix between two point clouds with radius
+    Correspondence matrix is a binary matrix, where each row represents the correspondence of a point in pcd1 to pcd2; nearest & within the radius is 1, otherwise 0.
+    """
+    dist_matrix = np.linalg.norm(pcd1[:, None, :3] - pcd2[None, :, :3], axis=-1)
+    corr_1to2 = np.where(dist_matrix <= radius)
+    return np.stack([corr_1to2[0], corr_1to2[1]], axis=-1)
+
+
 class PcdPairDataset(Dataset):
     """Dataset definition for point cloud like data."""
 
@@ -53,6 +62,7 @@ class PcdPairDataset(Dataset):
         rot_noise_level: float = 0.1,
         trans_noise_level: float = 0.1,
         rot_axis: str = "xy",
+        corr_radius: float = 0.1,
         **kwargs,
     ):
         # Set parameters
@@ -81,6 +91,7 @@ class PcdPairDataset(Dataset):
         else:
             self.image_augmentations = None
         self.rot_axis = rot_axis
+        self.corr_radius = corr_radius
         # Load data
         data_list = []
         for data_file in data_file_list:
@@ -204,12 +215,6 @@ class PcdPairDataset(Dataset):
             anchor_super_index = anchor_super_index[anchor_indices] - anchor_super_index[anchor_indices].min()
             anchor_feat = anchor_feat[anchor_indices]
 
-        # DEBUG
-        # anchor_pcd = o3d.geometry.PointCloud()
-        # anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord)
-        # anchor_pcd.normals = o3d.utility.Vector3dVector(anchor_normal)
-        # o3d.visualization.draw_geometries([anchor_pcd])
-
         # Move anchor & origin to center
         anchor_shift = np.eye(4)
         anchor_center = anchor_coord.mean(axis=0)
@@ -271,6 +276,11 @@ class PcdPairDataset(Dataset):
         if target_coord.shape[0] == 0 or np.max(np.abs(target_coord)) == 0:
             print("Target coord is zero")
 
+        # Compute corr
+        target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=self.rot_axis)
+        target_coord_goal = (target_pose_mat[:3, :3] @ target_coord.T).T + target_pose_mat[:3, 3]
+        corr = compute_corr_radius(target_coord_goal, anchor_coord, radius=self.corr_radius)
+
         # Return
         return {
             "target_coord": target_coord.astype(np.float32),
@@ -284,6 +294,7 @@ class PcdPairDataset(Dataset):
             "anchor_feat": anchor_feat.astype(np.float32),
             "anchor_label": anchor_label,
             "anchor_super_index": anchor_super_index,
+            "corr": corr,
             "anchor_pose": anchor_pose.astype(np.float32),
             "is_valid_crop": np.array([is_valid_crop]).astype(np.int64),
         }

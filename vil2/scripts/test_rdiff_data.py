@@ -130,7 +130,7 @@ if __name__ == "__main__":
             origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
 
             # Compute nearby point cloud
-            nearby_radius = 0.05
+            nearby_radius = 0.02
             nearby_indices = compute_nearby_pointcloud(
                 start_parent_pcd_o3d, normalized_pcd_list[0], radius=nearby_radius
             )

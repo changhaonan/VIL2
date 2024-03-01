@@ -7,7 +7,7 @@ ENV = dict(
     SEMANTIC_FEAT_TYPE="one_hot",  # random, clip, one_hot
     GOAL_TYPE="superpoint",  # rpdiff, superpoint
 )
-PREPROCESS = dict(GRID_SIZE=0.05, TARGET_RESCALE=3.0, NUM_POINT_LOW_BOUND=40, NUM_POINT_HIGH_BOUND=400, NEARBY_RADIUS=0.08, USE_SOFT_LABEL=True)
+PREPROCESS = dict(GRID_SIZE=0.02, TARGET_RESCALE=3.0, NUM_POINT_LOW_BOUND=40, NUM_POINT_HIGH_BOUND=400, NEARBY_RADIUS=0.03, USE_SOFT_LABEL=True)
 
 DATALOADER = dict(
     BATCH_SIZE=4,
@@ -48,6 +48,16 @@ MODEL = dict(
         NAME="PCDSEGNOISENET",
         INIT_ARGS=dict(
             RPTModel=dict(
+                grid_sizes=[0.1, 0.3],
+                depths=[2, 3, 3],
+                dec_depths=[1, 1],
+                hidden_dims=[128, 256, 256],  # 1+ dim are the same
+                n_heads=[8, 16, 16],
+                ks=[16, 24, 32],
+                in_dim=10,
+                fusion_projection_dim=512,
+            ),
+            RGTModel=dict(
                 grid_sizes=[0.1, 0.3],
                 depths=[2, 3, 3],
                 dec_depths=[1, 1],

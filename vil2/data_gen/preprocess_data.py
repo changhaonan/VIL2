@@ -17,26 +17,27 @@ import argparse
 from scipy.spatial.transform import Rotation as R
 
 
-def compute_nearby_pcd(pcd1, pcd2, radius: float = 0.1):
+def compute_nearby_pcd(pcd1: np.ndarray, pcd2: np.ndarray, radius: float = 0.1):
     """
     Compute the nearby points between two point clouds with radius;
     pcd1 is the target point cloud, pcd2 is the anchor point cloud.
     Return a list of nearby indices and distances.
     """
-    pcd_tree = o3d.geometry.KDTreeFlann(pcd1)
+    dist_matrix = np.linalg.norm(pcd1[:, None, :3] - pcd2[None, :, :3], axis=-1)
+    nearby_idx = np.where(dist_matrix <= radius)
     nearby_data = {}
-    for p in pcd2.points:
-        [_, idx, dist] = pcd_tree.search_radius_vector_3d(p, radius)
-        if len(idx) > 0:
-            nearby_idx = np.asarray(idx)
-            for i in nearby_idx:
-                distance = np.linalg.norm(p - np.asarray(pcd1.points)[i])
-                if i not in nearby_data:
-                    nearby_data[i] = distance
-                else:
-                    # Take min distance
-                    nearby_data[i] = min(nearby_data[i], distance)
+    for i, j in zip(nearby_idx[0], nearby_idx[1]):
+        nearby_data[i] = np.min(dist_matrix[i, :])
     return list(nearby_data.keys()), list(nearby_data.values())
+
+
+def compute_corr_radius(pcd1: np.ndarray, pcd2: np.ndarray, radius: float = 0.1):
+    """Compute the correspondence matrix between two point clouds with radius
+    Correspondence matrix is a binary matrix, where each row represents the correspondence of a point in pcd1 to pcd2; nearest & within the radius is 1, otherwise 0.
+    """
+    dist_matrix = np.linalg.norm(pcd1[:, None, :3] - pcd2[None, :, :3], axis=-1)
+    corr_1to2 = np.where(dist_matrix <= radius)
+    return np.stack([corr_1to2[0], corr_1to2[1]], axis=-1)
 
 
 def pose7d_to_mat(pose7d):
@@ -385,41 +386,72 @@ def build_dataset_superpoint(data_dir, cfg, task_name: str, vis: bool = False, f
             target_feat.append(c_superpoint_data[f_key])
         target_feat = np.concatenate(target_feat, axis=-1)
         target_super_index = np.vstack(c_superpoint_data["super_index"]).T
+        # Voxel Downsample
+        # FIXME: Downsample method still need to improve as super_index is also averaged
+        grid_size = cfg.PREPROCESS.GRID_SIZE
+        anchor_pcd = o3d.t.geometry.PointCloud()
+        anchor_pcd.point["positions"] = o3d.core.Tensor(anchor_coord, dtype=o3d.core.Dtype.Float32)
+        anchor_pcd.point["normals"] = o3d.core.Tensor(anchor_normal, dtype=o3d.core.Dtype.Float32)
+        anchor_pcd.point["features"] = o3d.core.Tensor(anchor_feat, dtype=o3d.core.Dtype.Float32)
+        anchor_pcd.point["super_index"] = o3d.core.Tensor(anchor_super_index, dtype=o3d.core.Dtype.Int32)
+        anchor_pcd = anchor_pcd.voxel_down_sample(voxel_size=grid_size)
+        anchor_coord = anchor_pcd.point["positions"].numpy()
+        anchor_normal = anchor_pcd.point["normals"].numpy()
+        anchor_feat = anchor_pcd.point["features"].numpy()
+        anchor_super_index = anchor_pcd.point["super_index"].numpy()
+
+        target_pcd = o3d.t.geometry.PointCloud()
+        target_pcd.point["positions"] = o3d.core.Tensor(target_coord, dtype=o3d.core.Dtype.Float32)
+        target_pcd.point["normals"] = o3d.core.Tensor(target_normal, dtype=o3d.core.Dtype.Float32)
+        target_pcd.point["features"] = o3d.core.Tensor(target_feat, dtype=o3d.core.Dtype.Float32)
+        target_pcd.point["super_index"] = o3d.core.Tensor(target_super_index, dtype=o3d.core.Dtype.Int32)
+        target_pcd = target_pcd.voxel_down_sample(voxel_size=grid_size)
+        target_coord = target_pcd.point["positions"].numpy()
+        target_normal = target_pcd.point["normals"].numpy()
+        target_feat = target_pcd.point["features"].numpy()
+        target_super_index = target_pcd.point["super_index"].numpy()
+
         # Compute nearby label
-        target_pcd = o3d.geometry.PointCloud()
-        target_pcd.points = o3d.utility.Vector3dVector(target_coord)
-        target_pcd.normals = o3d.utility.Vector3dVector(target_normal)
         target_label = -np.ones((target_coord.shape[0],), dtype=np.float32)  # -1: not nearby, 1: nearby
-        anchor_pcd = o3d.geometry.PointCloud()
-        anchor_pcd.normals = o3d.utility.Vector3dVector(anchor_normal)
-        anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord)
         nearyby_radius = cfg.PREPROCESS.NEARBY_RADIUS
         use_soft_label = cfg.PREPROCESS.USE_SOFT_LABEL
-        anchor_nearby_indices, anchor_nearby_distances = compute_nearby_pcd(anchor_pcd, target_pcd, radius=nearyby_radius)
+        anchor_nearby_indices, anchor_nearby_distances = compute_nearby_pcd(anchor_coord, target_coord, radius=nearyby_radius)
         anchor_label = -np.ones((anchor_coord.shape[0],), dtype=np.float32)  # -1: not nearby, 1: nearby
         if not use_soft_label:
             anchor_label[anchor_nearby_indices] = 1.0
         else:
             anchor_label[anchor_nearby_indices] = 2.0 * np.exp(-np.array(anchor_nearby_distances) / nearyby_radius) - 1.0
         if vis:
+            target_pcd = o3d.geometry.PointCloud()
+            target_pcd.points = o3d.utility.Vector3dVector(target_coord)
+            target_pcd.normals = o3d.utility.Vector3dVector(target_normal)
+            anchor_pcd = o3d.geometry.PointCloud()
+            anchor_pcd.normals = o3d.utility.Vector3dVector(anchor_normal)
+            anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord)
             # Visualize overall anchor
             anchor_color = np.zeros((anchor_coord.shape[0], 3))
             anchor_color[anchor_nearby_indices, :] = [1, 0, 0]
             anchor_pcd.normals = o3d.utility.Vector3dVector(anchor_normal)
             anchor_pcd.colors = o3d.utility.Vector3dVector(anchor_color)
-            o3d.visualization.draw_geometries([anchor_pcd, target_pcd])
-            # # Visualize by superpoint average
-            # superpoint_layer0 = p_superpoint_data["super_index"][0]
-            # num_superpoint = np.unique(superpoint_layer0).shape[0]
-            # superpoint_list = []
-            # for _i in range(num_superpoint):
-            #     superpoint_indices = np.where(superpoint_layer0 == _i)[0]
-            #     superpoint_pcd = o3d.geometry.PointCloud()
-            #     superpoint_pcd.points = o3d.utility.Vector3dVector(anchor_coord[superpoint_indices])
-            #     superpoint_color = np.mean(anchor_color[superpoint_indices], axis=0)
-            #     superpoint_pcd.paint_uniform_color(superpoint_color)
-            #     superpoint_list.append(superpoint_pcd)
-            # o3d.visualization.draw_geometries(superpoint_list)
+            o3d.visualization.draw_geometries([target_pcd])
+            # Visualize by superpoint average
+            superpoint_layer0 = anchor_super_index[:, 1]
+            num_superpoint = np.max(superpoint_layer0) + 1
+            superpoint_list = []
+            for _i in range(num_superpoint):
+                superpoint_indices = np.where(superpoint_layer0 == _i)[0]
+                if len(superpoint_indices) == 0:
+                    continue
+                superpoint_pcd = o3d.geometry.PointCloud()
+                superpoint_pcd.points = o3d.utility.Vector3dVector(anchor_coord[superpoint_indices])
+                # superpoint_color = np.mean(anchor_color[superpoint_indices], axis=0)
+                # superpoint_pcd.paint_uniform_color(superpoint_color)
+                random_color = np.random.uniform(0, 1, size=(3,))
+                superpoint_pcd.paint_uniform_color(random_color)
+                superpoint_list.append(superpoint_pcd)
+            o3d.visualization.draw_geometries(superpoint_list)
+        # Compute correspondence matrix
+        corr = compute_corr_radius(anchor_coord, target_coord, radius=nearyby_radius)
 
         tmorp_data = {
             "target_coord": target_coord,
@@ -432,6 +464,7 @@ def build_dataset_superpoint(data_dir, cfg, task_name: str, vis: bool = False, f
             "anchor_feat": anchor_feat,
             "anchor_super_index": anchor_super_index,
             "anchor_label": anchor_label,
+            "corr": corr,
         }
         for split, split_list in split_dict.items():
             if data_file in split_list:
