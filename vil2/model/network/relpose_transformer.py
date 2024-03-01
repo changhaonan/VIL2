@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import math
+import open3d as o3d
 import numpy as np
 import torch
 import torch.nn as nn
@@ -152,39 +153,71 @@ class RelPoseTransformer(nn.Module):
         )
         self.normalize_coord = True
 
-    def encode_cond(self, target_points, anchor_points):
+    def encode_cond(self, target_points, anchor_points, target_attrs=None, anchor_attrs=None):
         """
         Encode target and anchor pcd to features
         """
+        # Process feat
+        target_feat_list = [target_points[0], target_points[1]]
+        if "normal" in target_attrs:
+            target_normal = target_attrs["normal"]
+            target_feat_list.append(target_normal)
+        anchor_feat_list = [anchor_points[0], anchor_points[1]]
+        if "normal" in anchor_attrs:
+            anchor_normal = anchor_attrs["normal"]
+            anchor_feat_list.append(anchor_normal)
+        target_points = [target_points[0], torch.cat(target_feat_list, dim=1), target_points[2]]
+        anchor_points = [anchor_points[0], torch.cat(anchor_feat_list, dim=1), anchor_points[2]]
+
         if self.normalize_coord:
             # Normalize coord to unit cube
             target_coord, anchor_coord = target_points[0], anchor_points[0]
             target_offset, anchor_offset = target_points[2], anchor_points[2]
             # Convert to batch & mask
-            target_batch_index = offset2batch(target_offset)
-            target_coord, target_mask = to_dense_batch(target_coord, target_batch_index)
-            target_center = (target_coord.max(dim=1).values + target_coord.min(dim=1).values) / 2
-            target_scale = target_coord.max(dim=1).values - target_coord.min(dim=1).values
-            target_coord = (target_coord - target_center[:, None]) / target_scale[:, None]
-            target_points[0] = to_flat_batch(target_coord, target_mask)[0]
             anchor_batch_index = offset2batch(anchor_offset)
             anchor_coord, anchor_mask = to_dense_batch(anchor_coord, anchor_batch_index)
+            anchor_normal = to_dense_batch(anchor_normal, anchor_batch_index)[0] if "normal" in anchor_attrs else None
             anchor_center = (anchor_coord.max(dim=1).values + anchor_coord.min(dim=1).values) / 2
             anchor_scale = anchor_coord.max(dim=1).values - anchor_coord.min(dim=1).values
             anchor_coord = (anchor_coord - anchor_center[:, None]) / anchor_scale[:, None]
+            target_batch_index = offset2batch(target_offset)
+            target_coord, target_mask = to_dense_batch(target_coord, target_batch_index)
+            target_normal = to_dense_batch(target_normal, target_batch_index)[0] if "normal" in target_attrs else None
+            # target_center = (target_coord.max(dim=1).values + target_coord.min(dim=1).values) / 2
+            # target_scale = target_coord.max(dim=1).values - target_coord.min(dim=1).values
+            target_coord = (target_coord - anchor_center[:, None]) / anchor_scale[:, None]
+            # # DEBUG
+            anchor_coord_0 = anchor_coord[0].cpu().numpy()
+            anchor_normal_0 = anchor_normal[0].cpu().numpy() if anchor_normal is not None else None
+            target_coord_0 = target_coord[0].cpu().numpy()
+            target_normal_0 = target_normal[0].cpu().numpy() if target_normal is not None else None
+            anchor_pcd = o3d.geometry.PointCloud()
+            anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord_0)
+            if anchor_normal_0 is not None:
+                anchor_pcd.normals = o3d.utility.Vector3dVector(anchor_normal_0)
+            anchor_pcd.paint_uniform_color([1.0, 0.0, 0.0])
+            target_pcd = o3d.geometry.PointCloud()
+            target_pcd.points = o3d.utility.Vector3dVector(target_coord_0)
+            if target_normal_0 is not None:
+                target_pcd.normals = o3d.utility.Vector3dVector(target_normal_0)
+            target_pcd.paint_uniform_color([0.0, 0.0, 1.0])
+            o3d.visualization.draw_geometries([anchor_pcd, target_pcd])
+            # END DEBUG
+            target_points[0] = to_flat_batch(target_coord, target_mask)[0]
             anchor_points[0] = to_flat_batch(anchor_coord, anchor_mask)[0]
-        target_points, all_target_points, target_cluster_indices = self.target_pcd_transformer(target_points, return_full=True)
+
+        target_points, all_target_points, target_cluster_indices, target_attrs = self.target_pcd_transformer(target_points, return_full=True, **target_attrs)
         # Encode anchor pcd
-        anchor_points, all_anchor_points, anchor_cluster_indices = self.anchor_pcd_transformer(anchor_points, return_full=True)
+        anchor_points, all_anchor_points, anchor_cluster_indices, anchor_attrs = self.anchor_pcd_transformer(anchor_points, return_full=True, **anchor_attrs)
 
         # DEBUG:
-        # self.visualize_pcd_pyramids(all_anchor_points, anchor_cluster_indices)
+        # self.visualize_pcd_pyramids(all_anchor_points, anchor_cluster_indices, anchor_attrs)
         # Check the existence of nan
         if torch.isnan(target_points[1]).any() or torch.isnan(anchor_points[1]).any():
             print("Nan exists in the feature")
-        return target_points, anchor_points
+        return target_points, anchor_points, target_attrs, anchor_attrs
 
-    def forward(self, target_points: list[torch.Tensor], anchor_points: list[torch.Tensor]) -> torch.Tensor:
+    def forward(self, target_points: list[torch.Tensor], anchor_points: list[torch.Tensor], enc_target_attr, enc_anchor_attr) -> torch.Tensor:
         target_coord, target_feat, target_offset = target_points
         # Convert to batch & mask
         target_batch_index = offset2batch(target_offset)
@@ -230,31 +263,55 @@ class RelPoseTransformer(nn.Module):
             print("Nan exists in the pose")
         return pose_pred, status_pred
 
-    def visualize_pcd_pyramids(self, all_points, cluster_indices):
+    def visualize_pcd_pyramids(self, all_points, cluster_indices, point_attrs=None):
         coord, feat, _ = all_points[-1]
+        normal = point_attrs[-1]["normal"] if "normal" in point_attrs[-1] else None
         offsets = [a[2] for a in all_points[1:]]
         cluster_pyramid = [to_dense_batch(cluster_idex, offset2batch(offset))[0] for (cluster_idex, offset) in zip(cluster_indices, offsets)]
         # Reverse the anchor cluster pyramid
         cluster_pyramid = cluster_pyramid[::-1]
         coord = to_dense_batch(coord, offset2batch(offsets[-1]))[0]
+        normal = to_dense_batch(normal, offset2batch(offsets[-1]))[0] if normal is not None else None
         for i in range(coord.shape[0]):
-            visualize_point_pyramid(coord[i], None, [a[i] for a in cluster_pyramid])
+            normal_i = normal[i] if normal is not None else None
+            visualize_point_pyramid(coord[i], normal_i, [a[i] for a in cluster_pyramid])
+            if i >= 1:
+                break
 
-    def reposition(self, points, pose):
+    def reposition(self, points, normal, pose9d, rot_axis: str = "xy"):
         """
         Reposition the points based on the pose;
         point: [Coord, Normal, Feat, Offset]
         pose: [Batch, 16]
         """
-        coord, normal, feat, offset = points
+        coord, feat, offset = points
         batch_index = offset2batch(offset)
         coord, mask = to_dense_batch(coord, batch_index)
         normal, _ = to_dense_batch(normal, batch_index)
-        pose = pose.view(-1, 4, 4)
-        coord = torch.bmm(pose[:, :3, :3], coord) + pose[:, :3, 3][:, :, None]
-        normal = torch.bmm(pose[:, :3, :3], normal)
+
+        # Assemble the pose matrix
+        t = pose9d[:, 0:3]
+        r1 = pose9d[:, 3:6]
+        r2 = pose9d[:, 6:9]
+        # Normalize & Gram-Schmidt
+        r1 = r1 / (torch.norm(r1, dim=1, keepdim=True) + 1e-8)
+        r1_r2_dot = torch.sum(r1 * r2, dim=1, keepdim=True)
+        r2_orth = r2 - r1_r2_dot * r1
+        r2 = r2_orth / (torch.norm(r2_orth, dim=1, keepdim=True) + 1e-8)
+        r3 = torch.cross(r1, r2)
+        # Rotate
+        if rot_axis == "xy":
+            R = torch.stack([r1, r2, r3], dim=2)
+        elif rot_axis == "yz":
+            R = torch.stack([r3, r1, r2], dim=2)
+        elif rot_axis == "zx":
+            R = torch.stack([r2, r3, r1], dim=2)
+        R = R.permute(0, 2, 1)
+
+        coord = torch.bmm(coord, R) + t[:, None, :]
+        normal = torch.bmm(normal, R)
         # Convert to flat batch
         coord = to_flat_batch(coord, mask)[0]
         normal = to_flat_batch(normal, mask)[0]
-        new_points = [coord, normal, feat, offset]
-        return new_points
+        new_points = [coord, feat, offset]
+        return new_points, normal

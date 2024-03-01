@@ -1323,14 +1323,16 @@ class PointTransformerNetwork(nn.Module):
                     ),
                 )
 
-    def forward(self, points, return_full=False):
+    def forward(self, points, return_full=False, **point_attributes):
         points = self.patch_embed(points)
         cluster_indexes = []
+        attrs_lists = [point_attributes]
         all_points = [points]
         for i, stage in enumerate(self.enc_stages):
-            points, attrs = stage(points)
+            points, attrs = stage(points, **point_attributes)
             cluster_indexes.insert(0, attrs["cluster"])
             all_points.insert(0, points)
+            attrs_lists.insert(0, attrs)
 
         if not self.skip_dec:
             for i, dec_stage in enumerate(self.dec_stages):
@@ -1340,6 +1342,6 @@ class PointTransformerNetwork(nn.Module):
                 all_points[i + 1] = points
 
         if return_full:
-            return points, all_points, cluster_indexes
+            return points, all_points, cluster_indexes, attrs_lists
         else:
             return points

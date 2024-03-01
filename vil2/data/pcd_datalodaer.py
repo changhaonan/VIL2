@@ -7,8 +7,10 @@ class PcdPairCollator:
     def __call__(self, samples):
         target = {
             "target_coord": [],
+            "target_normal": [],
             "target_feat": [],
             "anchor_coord": [],
+            "anchor_normal": [],
             "anchor_feat": [],
             "target_pose": [],
             "target_batch_index": [],
@@ -23,9 +25,13 @@ class PcdPairCollator:
         num_target_cluster = 0
         for sample_id, item in enumerate(samples):
             target["target_coord"].append(item["target_coord"])  # (N, 3)
+            if item["target_normal"] is not None:
+                target["target_normal"].append(item["target_normal"])
             target["target_feat"].append(item["target_feat"])  # (N, 3)
             target["target_batch_index"].append(np.full([len(item["target_coord"])], fill_value=sample_id))  # (N,)
             target["anchor_coord"].append(item["anchor_coord"])  # (M, 3)
+            if item["anchor_normal"] is not None:
+                target["anchor_normal"].append(item["anchor_normal"])
             target["anchor_feat"].append(item["anchor_feat"])  # (M, 3)
             target["anchor_batch_index"].append(np.full([len(item["anchor_coord"])], fill_value=sample_id))  # (M,)
             target["target_pose"].append(item["target_pose"][None, :])  #

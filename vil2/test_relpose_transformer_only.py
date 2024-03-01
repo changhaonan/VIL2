@@ -92,43 +92,58 @@ if __name__ == "__main__":
     rpt_model.load(checkpoint_file)
     for i in range(20):
         batch = next(iter(val_data_loader))
-        pred_pose9d, pred_status = rpt_model.predict(batch=batch, target_pose=batch["target_pose"].cpu().numpy())
+        for k in range(3):
+            if k != 0:
+                batch["prev_pose9d"] = torch.from_numpy(prev_pose9d)
+            else:
+                prev_pose9d = None
+            pred_pose9d, pred_status = rpt_model.predict(batch=batch, target_pose=batch["target_pose"].cpu().numpy())
+            # Check the results
+            target_batch_idx = batch["target_batch_index"]
+            anchor_batch_idx = batch["anchor_batch_index"]
+            prev_pose9d_list = []
+            for j in range(pred_pose9d.shape[0]):
+                print(f"Prediction status: {pred_status[j]}")
+                target_idx = target_batch_idx == j
+                anchor_idx = anchor_batch_idx == j
+                target_coord = batch["target_coord"][target_idx].cpu().numpy()
+                anchor_coord = batch["anchor_coord"][anchor_idx].cpu().numpy()
+                target_pose = batch["target_pose"][j].cpu().numpy()
+                target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
+                # Visualize the results
+                target_pcd_o3d = o3d.geometry.PointCloud()
+                target_pcd_o3d.points = o3d.utility.Vector3dVector(target_coord)
+                target_pcd_o3d.paint_uniform_color([0.0, 0.0, 1.0])
+                pred_pose_mat = utils.pose9d_to_mat(pred_pose9d[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
+                if prev_pose9d is not None:
+                    prev_pose_mat = utils.pose9d_to_mat(prev_pose9d[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
+                    target_pcd_o3d.transform(prev_pose_mat)
+                    prev_pose_mat = pred_pose_mat @ prev_pose_mat
+                    prev_pose9d_list.append(utils.mat_to_pose9d(prev_pose_mat, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS))
+                else:
+                    prev_pose9d_list.append(pred_pose9d[j])
+                target_pcd_o3d.transform(pred_pose_mat)
 
-        # Check the results
-        target_batch_idx = batch["target_batch_index"]
-        anchor_batch_idx = batch["anchor_batch_index"]
-        for j in range(pred_pose9d.shape[0]):
-            print(f"Prediction status: {pred_status[j]}")
-            target_idx = target_batch_idx == j
-            anchor_idx = anchor_batch_idx == j
-            target_coord = batch["target_coord"][target_idx].cpu().numpy()
-            anchor_coord = batch["anchor_coord"][anchor_idx].cpu().numpy()
-            target_pose = batch["target_pose"][j].cpu().numpy()
-            target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
-            # Visualize the results
-            target_pcd_o3d = o3d.geometry.PointCloud()
-            target_pcd_o3d.points = o3d.utility.Vector3dVector(target_coord)
-            target_pcd_o3d.paint_uniform_color([0.0, 0.0, 1.0])
-            pred_pose_mat = utils.pose9d_to_mat(pred_pose9d[j], rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
-            target_pcd_o3d.transform(pred_pose_mat)
+                gt_target_pcd_o3d = o3d.geometry.PointCloud()
+                gt_target_pcd_o3d.points = o3d.utility.Vector3dVector(target_coord)
+                gt_target_pcd_o3d.paint_uniform_color([0.0, 1.0, 0.0])
+                gt_target_pcd_o3d.transform(target_pose_mat)
 
-            gt_target_pcd_o3d = o3d.geometry.PointCloud()
-            gt_target_pcd_o3d.points = o3d.utility.Vector3dVector(target_coord)
-            gt_target_pcd_o3d.paint_uniform_color([0.0, 1.0, 0.0])
-            gt_target_pcd_o3d.transform(target_pose_mat)
+                s_target_pcd_o3d = o3d.geometry.PointCloud()
+                s_target_pcd_o3d.points = o3d.utility.Vector3dVector(target_coord)
+                s_target_pcd_o3d.paint_uniform_color([1.0, 1.0, 0.0])
 
-            s_target_pcd_o3d = o3d.geometry.PointCloud()
-            s_target_pcd_o3d.points = o3d.utility.Vector3dVector(target_coord)
-            s_target_pcd_o3d.paint_uniform_color([1.0, 1.0, 0.0])
+                # Check numerical difference
+                trans_loss = np.linalg.norm(pred_pose9d[j, :3] - target_pose[:3])
+                rx_loss = np.linalg.norm(pred_pose9d[j, 3:6] - target_pose[3:6])
+                ry_loss = np.linalg.norm(pred_pose9d[j, 6:9] - target_pose[6:9])
+                print(f"Translation loss: {trans_loss}, Rotation loss: {rx_loss}, {ry_loss}")
 
-            # Check numerical difference
-            trans_loss = np.linalg.norm(pred_pose9d[j, :3] - target_pose[:3])
-            rx_loss = np.linalg.norm(pred_pose9d[j, 3:6] - target_pose[3:6])
-            ry_loss = np.linalg.norm(pred_pose9d[j, 6:9] - target_pose[6:9])
-            print(f"Translation loss: {trans_loss}, Rotation loss: {rx_loss}, {ry_loss}")
+                anchor_pcd_o3d = o3d.geometry.PointCloud()
+                anchor_pcd_o3d.points = o3d.utility.Vector3dVector(anchor_coord)
+                anchor_pcd_o3d.paint_uniform_color([1.0, 0.0, 0.0])
+                origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+                if j <= 4:
+                    o3d.visualization.draw_geometries([target_pcd_o3d, gt_target_pcd_o3d, s_target_pcd_o3d, anchor_pcd_o3d, origin])
 
-            anchor_pcd_o3d = o3d.geometry.PointCloud()
-            anchor_pcd_o3d.points = o3d.utility.Vector3dVector(anchor_coord)
-            anchor_pcd_o3d.paint_uniform_color([1.0, 0.0, 0.0])
-            origin = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
-            o3d.visualization.draw_geometries([target_pcd_o3d, gt_target_pcd_o3d, s_target_pcd_o3d, anchor_pcd_o3d, origin])
+            prev_pose9d = np.array(prev_pose9d_list)

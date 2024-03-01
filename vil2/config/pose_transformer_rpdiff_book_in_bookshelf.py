@@ -54,7 +54,7 @@ MODEL = dict(
                 hidden_dims=[128, 256, 256],  # 1+ dim are the same
                 n_heads=[8, 16, 16],
                 ks=[16, 24, 32],
-                in_dim=7,
+                in_dim=10,
                 fusion_projection_dim=512,
             ),
             PCDSEGNOISENET=dict(

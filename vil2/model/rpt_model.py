@@ -34,13 +34,14 @@ class LRelPoseTransformer(L.LightningModule):
     def __init__(self, pose_transformer: RelPoseTransformer, cfg=None) -> None:
         super().__init__()
         self.cfg = cfg
-        self.pose_transformer = pose_transformer
+        self.pose_transformer: RelPoseTransformer = pose_transformer
         self.lr = cfg.TRAIN.LR
         self.warm_up_step = cfg.TRAIN.WARM_UP_STEP
         self.start_time = time.time()
         # Logging
         self.batch_size = cfg.DATALOADER.BATCH_SIZE
         self.valid_crop_threshold = cfg.MODEL.VALID_CROP_THRESHOLD
+        self.rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
 
     def training_step(self, batch, batch_idx):
         loss, trans_loss, rx_loss, ry_loss, status_loss = self.criterion(batch)
@@ -92,27 +93,35 @@ class LRelPoseTransformer(L.LightningModule):
         rx_loss = F.mse_loss(pose9d_pred_valid[:, 3:6], pose9d_valid[:, 3:6])
         ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
         # sum
-        loss = trans_loss + rx_loss + ry_loss
+        loss = 10.0 * trans_loss + rx_loss + ry_loss  # Amplify trans loss
         return loss, trans_loss, rx_loss, ry_loss, torch.Tensor([0]).to(loss.device)
 
     def forward(self, batch) -> Any:
         # Assemble input
         target_coord = batch["target_coord"]
+        target_normal = batch["target_normal"]
         target_feat = batch["target_feat"]
         target_batch_idx = batch["target_batch_index"]
         target_offset = batch2offset(target_batch_idx)
         target_points = [target_coord, target_feat, target_offset]
         anchor_coord = batch["anchor_coord"]
+        anchor_normal = batch["anchor_normal"]
         anchor_feat = batch["anchor_feat"]
         anchor_batch_idx = batch["anchor_batch_index"]
         anchor_offset = batch2offset(anchor_batch_idx)
         anchor_points = [anchor_coord, anchor_feat, anchor_offset]
+        prev_pose9d = batch.get("prev_pose9d", None)
+
+        if prev_pose9d is not None:
+            target_points, target_normal = self.pose_transformer.reposition(target_points, target_normal, prev_pose9d, self.rot_axis)
 
         # Compute conditional features
-        enc_target_points, enc_anchor_points = self.pose_transformer.encode_cond(target_points, anchor_points)
+        enc_target_points, enc_anchor_points, enc_target_attr, enc_anchor_attr = self.pose_transformer.encode_cond(
+            target_points, anchor_points, target_attrs={"normal": target_normal}, anchor_attrs={"normal": anchor_normal}
+        )
 
         # forward
-        pred_pose9d, pred_status = self.pose_transformer(enc_target_points, enc_anchor_points)
+        pred_pose9d, pred_status = self.pose_transformer(enc_target_points, enc_anchor_points, enc_target_attr, enc_anchor_attr)
         return pred_pose9d.to(torch.float32), pred_status.to(torch.float32)
 
     def configure_optimizers(self):

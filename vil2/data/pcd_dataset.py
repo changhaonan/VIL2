@@ -244,9 +244,6 @@ class PcdPairDataset(Dataset):
         # Concat feat
         target_feat_list = []
         anchor_feat_list = []
-        if self.add_normals:
-            target_feat_list.append(target_normal)
-            anchor_feat_list.append(anchor_normal)
         if self.add_colors:
             target_feat_list.append(target_color)
             anchor_feat_list.append(anchor_color)
@@ -277,11 +274,13 @@ class PcdPairDataset(Dataset):
         # Return
         return {
             "target_coord": target_coord.astype(np.float32),
+            "target_normal": target_normal.astype(np.float32) if target_normal is not None else None,
             "target_feat": target_feat.astype(np.float32),
             "target_label": target_label,
             "target_super_index": target_super_index,
             "target_pose": target_pose.astype(np.float32),
             "anchor_coord": anchor_coord.astype(np.float32),
+            "anchor_normal": anchor_normal.astype(np.float32) if anchor_normal is not None else None,
             "anchor_feat": anchor_feat.astype(np.float32),
             "anchor_label": anchor_label,
             "anchor_super_index": anchor_super_index,
@@ -465,7 +464,7 @@ def random_segment_drop(coordinate, normal=None, color=None, label=None):
 
     total_points = len(coordinate)
     half_points = total_points * 0.5
-    radius = uniform(0.1, 0.3) * min(x_max - x_min, y_max - y_min, z_max - z_min)
+    radius = uniform(0.2, 0.4) * min(x_max - x_min, y_max - y_min, z_max - z_min)
     distances = np.linalg.norm(coordinate - drop_center, axis=1)
     # Count points inside the sphere
     inside_count = np.sum(distances < radius)
@@ -477,6 +476,7 @@ def random_segment_drop(coordinate, normal=None, color=None, label=None):
             mask = distances < radius
         new_points = coordinate[mask]
         # Duplicate points to make up for the dropped points
+        # print("Dropped points: ", total_points - len(new_points))
         num_points_to_add = total_points - len(new_points)
         indices_to_duplicate = np.random.choice(len(new_points), num_points_to_add)
         duplicated_points = new_points[indices_to_duplicate]
@@ -584,8 +584,10 @@ if __name__ == "__main__":
         data = dataset[random_idx]
         target_coord = data["target_coord"]
         anchor_coord = data["anchor_coord"]
+        anchor_normal = data["anchor_normal"]
         target_pose = data["target_pose"]
         target_feat = data["target_feat"]
+        target_normal = data["target_normal"]
         anchor_feat = data["anchor_feat"]
         anchor_label = data["anchor_label"]
         target_label = data["target_label"]
@@ -600,13 +602,13 @@ if __name__ == "__main__":
 
         utils.visualize_pcd_list(
             coordinate_list=[target_coord, anchor_coord],
-            normal_list=[target_feat[:, :3], anchor_feat[:, :3]],
+            normal_list=[target_normal, anchor_normal],
             color_list=[target_color, anchor_color],
             pose_list=[np.eye(4, dtype=np.float32), np.eye(4, dtype=np.float32)],
         )
         utils.visualize_pcd_list(
             coordinate_list=[target_coord, anchor_coord],
-            normal_list=[target_feat[:, :3], anchor_feat[:, :3]],
+            normal_list=[target_normal, anchor_normal],
             color_list=[target_color, anchor_color],
             pose_list=[target_pose_mat, np.eye(4, dtype=np.float32)],
         )
