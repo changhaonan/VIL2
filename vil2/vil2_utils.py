@@ -26,6 +26,7 @@ def build_dmorp_dataset(root_path, cfg):
     knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
     add_normals = cfg.DATALOADER.ADD_NORMALS
     add_colors = cfg.DATALOADER.ADD_COLORS
+    corr_radius = cfg.DATALOADER.CORR_RADIUS
     # Load dataset & data loader
     if cfg.ENV.GOAL_TYPE == "multimodal":
         dataset_folder = "dmorp_multimodal"
@@ -74,6 +75,7 @@ def build_dmorp_dataset(root_path, cfg):
         trans_noise_level=trans_noise_level,
         rot_axis=rot_axis,
         knn_k=knn_k,
+        corr_radius=corr_radius,
     )
     val_dataset = PcdPairDataset(
         data_file_list=[data_file_dict["val"]],
@@ -96,6 +98,7 @@ def build_dmorp_dataset(root_path, cfg):
         trans_noise_level=trans_noise_level,
         rot_axis=rot_axis,
         knn_k=knn_k,
+        corr_radius=corr_radius,
     )
     test_dataset = PcdPairDataset(
         data_file_list=[data_file_dict["test"]],
@@ -118,6 +121,7 @@ def build_dmorp_dataset(root_path, cfg):
         trans_noise_level=trans_noise_level,
         rot_axis=rot_axis,
         knn_k=knn_k,
+        corr_radius=corr_radius,
     )
     return train_dataset, val_dataset, test_dataset
 

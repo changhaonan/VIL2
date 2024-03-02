@@ -11,17 +11,19 @@ import torch.nn as nn
 from torch.optim.lr_scheduler import LambdaLR
 import open3d as o3d
 import os
+import cv2
 import torch
 import torch.nn.functional as F
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import time
-from vil2.model.network.geometric import batch2offset, to_dense_batch
+from vil2.model.network.geometric import batch2offset, to_dense_batch, offset2batch
 from vil2.model.network.rigpose_transformer import RigPoseTransformer
 import vil2.utils.misc_utils as utils
 from vil2.utils.pcd_utils import normalize_pcd, check_collision
 import torch_scatter
+import wandb
 
 # DataUtils
 from vil2.data.pcd_dataset import PcdPairDataset
@@ -42,14 +44,10 @@ class LRigPoseTransformer(L.LightningModule):
         self.batch_size = cfg.DATALOADER.BATCH_SIZE
         self.valid_crop_threshold = cfg.MODEL.VALID_CROP_THRESHOLD
         self.rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
+        self.sample_batch = None
 
     def training_step(self, batch, batch_idx):
-        loss, trans_loss, rx_loss, ry_loss, status_loss = self.criterion(batch)
-        # log
-        self.log("tr_status_loss", status_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("tr_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("tr_rx_loss", rx_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("tr_ry_loss", ry_loss, sync_dist=True, batch_size=self.batch_size)
+        loss = self.criterion(batch)
         # log
         self.log("train_loss", loss, sync_dist=True, batch_size=self.batch_size)
         elapsed_time = (time.time() - self.start_time) / 3600
@@ -57,44 +55,45 @@ class LRigPoseTransformer(L.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
-        loss, trans_loss, rx_loss, ry_loss, status_loss = self.criterion(batch)
+        loss = self.criterion(batch)
         # log
-        self.log("te_status_loss", status_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("te_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("te_rx_loss", rx_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("te_ry_loss", ry_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("test_loss", loss, sync_dist=True, batch_size=self.batch_size)
         elapsed_time = (time.time() - self.start_time) / 3600
         self.log("train_runtime(hrs)", elapsed_time, sync_dist=True, batch_size=self.batch_size)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, trans_loss, rx_loss, ry_loss, status_loss = self.criterion(batch)
+        if self.sample_batch is None:
+            self.sample_batch = batch
+        loss = self.criterion(batch)
         # log
-        self.log("v_status_loss", status_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("v_trans_loss", trans_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("v_rx_loss", rx_loss, sync_dist=True, batch_size=self.batch_size)
-        self.log("v_ry_loss", ry_loss, sync_dist=True, batch_size=self.batch_size)
         self.log("val_loss", loss, sync_dist=True, batch_size=self.batch_size)
         elapsed_time = (time.time() - self.start_time) / 3600
         self.log("train_runtime(hrs)", elapsed_time, sync_dist=True, batch_size=self.batch_size)
         return loss
 
+    def on_validation_epoch_end(self) -> None:
+        """Validate results by visualization"""
+        if (self.current_epoch + 1) % 1 == 0:
+            batch = self.sample_batch
+            anchor_batch_idx = batch["anchor_batch_index"]
+            anchor_coord = batch["anchor_coord"]
+            batch_anchor_coord = to_dense_batch(anchor_coord, anchor_batch_idx)[0]
+            target_batch_idx = batch["target_batch_index"]
+            target_coord = batch["target_coord"]
+            batch_target_coord = to_dense_batch(target_coord, target_batch_idx)[0]
+            conf_matrix, gt_corr, (pred_R, pred_t) = self.forward(batch)
+            # Visualize the result
+            for i in range(min(4, batch_anchor_coord.shape[0])):
+                image = self.view_result(batch_anchor_coord[i, :], batch_target_coord[i, :], pred_R[i, :], pred_t[i, :], conf_matrix[i, :], show_3d=False)
+                if image is not None:
+                    self.logger.experiment.log({"val_result": [wandb.Image(image, caption=f"val_result_{i}")]})
+
     def criterion(self, batch):
-        pose9d = batch["target_pose"]
-        is_valid_crop = batch["is_valid_crop"]
-        pred_pose9d, pred_status = self.forward(batch)
+        conf_matrix, gt_corr, (gt_R, gt_t) = self.forward(batch)
         # compute loss
-        # status_loss = F.cross_entropy(pred_status, is_valid_crop)
-        # mask out invalid crops
-        pose9d_valid = pose9d[is_valid_crop == 1]
-        pose9d_pred_valid = pred_pose9d[is_valid_crop == 1]
-        trans_loss = F.mse_loss(pose9d_pred_valid[:, :3], pose9d_valid[:, :3])
-        rx_loss = F.mse_loss(pose9d_pred_valid[:, 3:6], pose9d_valid[:, 3:6])
-        ry_loss = F.mse_loss(pose9d_pred_valid[:, 6:9], pose9d_valid[:, 6:9])
-        # sum
-        loss = 10.0 * trans_loss + rx_loss + ry_loss  # Amplify trans loss
-        return loss, trans_loss, rx_loss, ry_loss, torch.Tensor([0]).to(loss.device)
+        loss = self.pose_transformer.dual_softmax_reposition.compute_matching_loss(conf_matrix, gt_matrix=gt_corr)
+        return loss
 
     def forward(self, batch) -> Any:
         # Assemble input
@@ -125,17 +124,16 @@ class LRigPoseTransformer(L.LightningModule):
         corr_batch_idx = batch["corr_batch_index"]
         corr_offset = batch2offset(corr_batch_idx)
         gt_corr = to_dense_batch(gt_corr, corr_batch_idx)[0]
-        
-        conf_matrix = self.pose_transformer.match(enc_anchor_points, enc_target_points)
+
+        conf_matrix = self.pose_transformer.forward(enc_anchor_points, enc_target_points)
         gt_corr_matrix = self.pose_transformer.to_gt_correspondence_matrix(conf_matrix, gt_corr)
 
-        # [DEBUG] Test the gt correspondence
+        # [DEBUG] Output estimation for evaluation
+        R, t, condition = self.pose_transformer.dual_softmax_reposition.arun(
+            conf_matrix=conf_matrix, coord_a=target_coord, coord_b=anchor_coord, batch_index_a=offset2batch(target_offset), batch_index_b=offset2batch(anchor_offset)
+        )
 
-        self.pose_transformer.test_gt_corr(anchor_points, target_points, gt_corr_matrix)
-
-        # forward
-        pred_pose9d, pred_status = self.pose_transformer(enc_target_points, enc_anchor_points, enc_target_attr, enc_anchor_attr)
-        return pred_pose9d.to(torch.float32), pred_status.to(torch.float32)
+        return conf_matrix, gt_corr_matrix, (R, t)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
@@ -150,6 +148,53 @@ class LRigPoseTransformer(L.LightningModule):
 
         scheduler = LambdaLR(optimizer, lr_lambda=lr_foo)
         return [optimizer], [scheduler]
+
+    def view_result(self, anchor_coord: torch.Tensor, target_coord: torch.Tensor, R: torch.Tensor, t: torch.Tensor, corr: torch.Tensor, show_3d: bool = False):
+        """Visualize the prediction"""
+        target_coord = target_coord.detach().cpu().numpy()
+        anchor_coord = anchor_coord.detach().cpu().numpy()
+        R = R.detach().cpu().numpy()
+        t = t.detach().cpu().numpy()
+        corr = corr.detach().cpu().numpy()
+        # Transform
+        target_coord = (R @ target_coord.T).T + t
+        # Visualize
+        pcd = o3d.geometry.PointCloud()
+        combined_coord = np.concatenate([target_coord, anchor_coord], axis=0)
+        combined_color = np.zeros((combined_coord.shape[0], 3))
+        combined_color[: target_coord.shape[0], 0] = 1
+        combined_color[target_coord.shape[0] :, 2] = 1
+        pcd.points = o3d.utility.Vector3dVector(combined_coord)
+        pcd.colors = o3d.utility.Vector3dVector(combined_color)
+        # Draw correspondence
+        corr = (corr - corr.min()) / (corr.max() - corr.min() + 1e-8)  # Normalize
+        lines = []
+        colors = []
+        for i in range(corr.shape[0]):
+            for j in range(corr.shape[1]):
+                if corr[i, j] > 0.5:
+                    lines.append([i, j + target_coord.shape[0]])
+                    intensity = corr[i, j]
+                    colors.append([intensity, 0, 1 - intensity])
+        line_set = o3d.geometry.LineSet()
+        line_set.points = o3d.utility.Vector3dVector(combined_coord)
+        line_set.lines = o3d.utility.Vector2iVector(lines)
+        line_set.colors = o3d.utility.Vector3dVector(colors)
+
+        if not show_3d:
+            # Offscreen rendering
+            viewer = o3d.visualization.Visualizer()
+            viewer.create_window(width=540, height=540, visible=False)
+            viewer.add_geometry(pcd)
+            if len(lines) > 0:
+                viewer.add_geometry(line_set)
+            # Render image
+            image = viewer.capture_screen_float_buffer(do_render=True)
+            viewer.destroy_window()
+            return np.asarray(image)
+        else:
+            o3d.visualization.draw_geometries([pcd, line_set])
+            return None
 
 
 class RGTModel:
@@ -203,9 +248,7 @@ class RGTModel:
             dataloaders=test_data_loader,
         )
 
-    def predict(
-        self, target_coord: np.ndarray | None = None, target_feat: np.ndarray | None = None, anchor_coord: np.ndarray | None = None, anchor_feat: np.ndarray | None = None, batch=None, target_pose=None
-    ) -> Any:
+    def predict(self, target_coord=None, target_feat=None, anchor_coord=None, anchor_feat=None, batch=None, target_pose=None, vis: bool = False) -> Any:
         self.lightning_pose_transformer.eval()
         # Assemble batch
         if batch is None:
@@ -225,18 +268,23 @@ class RGTModel:
         # Put to device
         for key in batch.keys():
             batch[key] = batch[key].to(self.lightning_pose_transformer.device)
-        pred_pose9d, pred_status = self.lightning_pose_transformer(batch)
-        pred_status = torch.softmax(pred_status, dim=1)
-        pred_pose9d = pred_pose9d.detach().cpu().numpy()
-        pred_status = pred_status.detach().cpu().numpy()
-        if target_pose is not None:
-            trans_loss = np.mean(np.square(pred_pose9d[:, :3] - target_pose[:, :3]))
-            rx_loss = np.mean(np.square(pred_pose9d[:, 3:6] - target_pose[:, 3:6]))
-            ry_loss = np.mean(np.square(pred_pose9d[:, 6:9] - target_pose[:, 6:9]))
-            print(f"trans_loss: {trans_loss}, rx_loss: {rx_loss}, ry_loss: {ry_loss}")
-        # HACK: Add a small offset on z-axis
-        # pred_pose9d[:, 2] += 0.1
-        return pred_pose9d, pred_status
+        conf_matrix, gt_corr, (pred_R, pred_t) = self.lightning_pose_transformer(batch)
+        if vis:
+            anchor_batch_idx = batch["anchor_batch_index"]
+            anchor_coord = batch["anchor_coord"]
+            batch_anchor_coord = to_dense_batch(anchor_coord, anchor_batch_idx)[0]
+            target_batch_idx = batch["target_batch_index"]
+            target_coord = batch["target_coord"]
+            batch_target_coord = to_dense_batch(target_coord, target_batch_idx)[0]
+            # Visualize the result
+            for i in range(min(8, batch_anchor_coord.shape[0])):
+                self.lightning_pose_transformer.view_result(batch_anchor_coord[i, :], batch_target_coord[i, :], pred_R[i, :], pred_t[i, :], conf_matrix[i, :], show_3d=True)
+
+        conf_matrix = conf_matrix.detach().cpu().numpy()
+        gt_corr = gt_corr.detach().cpu().numpy()
+        pred_R = pred_R.detach().cpu().numpy()
+        pred_t = pred_t.detach().cpu().numpy()
+        return conf_matrix, gt_corr, (pred_R, pred_t)
 
     def load(self, checkpoint_path: str) -> None:
         print(f"Loading checkpoint from {checkpoint_path}")

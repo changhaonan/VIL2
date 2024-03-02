@@ -14,6 +14,7 @@ DATALOADER = dict(
     NUM_WORKERS=0,  # Set to 0 if using ilab
     ADD_NORMALS=True,
     ADD_COLORS=False,
+    CORR_RADIUS=0.05,
     AUGMENTATION=dict(
         IS_ELASTIC_DISTORTION=False,
         ELASTIC_DISTORTION_GRANULARITY=1.0,

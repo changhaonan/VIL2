@@ -21,7 +21,6 @@ from scipy.spatial.transform import Rotation as R
 from yaml import load
 from box import Box
 import copy
-from scipy.spatial.transform import Rotation as R
 import open3d as o3d
 from sklearn.neighbors import NearestNeighbors
 
@@ -189,8 +188,8 @@ class PcdPairDataset(Dataset):
                 anchor_nearby_size = (np.max(anchor_nearby, axis=0) - np.min(anchor_nearby, axis=0)) / 2.0
                 if crop_indicator > self.random_crop_prob:
                     crop_center = anchor_nearby.mean(axis=0) + (np.random.rand(3) * 2 * self.crop_noise - self.crop_noise)
-                    # crop_size = (0.9 + 0.2 * np.random.rand(1)) * anchor_nearby_size
-                    crop_size = anchor_nearby_size
+                    crop_size = (0.7 + 0.6 * np.random.rand(1)) * anchor_nearby_size
+                    # crop_size = anchor_nearby_size
                     is_valid_crop = True
                 else:
                     crop_center = np.random.rand(3) * (np.array([x_max, y_max, z_max]) - np.array([x_min, y_min, z_min])) + np.array([x_min, y_min, z_min])
@@ -281,6 +280,23 @@ class PcdPairDataset(Dataset):
         target_coord_goal = (target_pose_mat[:3, :3] @ target_coord.T).T + target_pose_mat[:3, 3]
         corr = compute_corr_radius(target_coord_goal, anchor_coord, radius=self.corr_radius)
 
+        # # # # DEBUG: check corr
+        # pcd = o3d.geometry.PointCloud()
+        # target_coord_goal = target_coord
+        # combined_coord = np.concatenate([target_coord_goal, anchor_coord], axis=0)
+        # combined_color = np.zeros((combined_coord.shape[0], 3))
+        # combined_color[: target_coord_goal.shape[0], 0] = 1
+        # combined_color[target_coord_goal.shape[0] :, 2] = 1
+        # pcd.points = o3d.utility.Vector3dVector(combined_coord)
+        # pcd.colors = o3d.utility.Vector3dVector(combined_color)
+        # lines = np.concatenate([corr[:, 0:1], corr[:, 1:2] + target_coord_goal.shape[0]], axis=1)
+        # line_set = o3d.geometry.LineSet()
+        # line_set.points = o3d.utility.Vector3dVector(combined_coord)
+        # line_set.lines = o3d.utility.Vector2iVector(lines)
+        # line_set.paint_uniform_color([1, 0, 1])
+        # # line sphere of corr_radius
+        # sphere = o3d.geometry.TriangleMesh.create_sphere(radius=self.corr_radius, resolution=20)
+        # o3d.visualization.draw_geometries([pcd, line_set, sphere])
         # Return
         return {
             "target_coord": target_coord.astype(np.float32),
@@ -538,6 +554,7 @@ if __name__ == "__main__":
     knn_k = cfg.DATALOADER.AUGMENTATION.KNN_K
     add_normals = cfg.DATALOADER.ADD_NORMALS
     add_colors = cfg.DATALOADER.ADD_COLORS
+    corr_radius = cfg.DATALOADER.CORR_RADIUS
 
     # Load dataset & data loader
     if cfg.ENV.GOAL_TYPE == "multimodal":
@@ -585,6 +602,7 @@ if __name__ == "__main__":
         trans_noise_level=trans_noise_level,
         rot_axis=rot_axis,
         knn_k=knn_k,
+        corr_radius=corr_radius,
     )
     dataset.set_mode("train")
 
@@ -606,8 +624,11 @@ if __name__ == "__main__":
         print(f"Number of target points: {len(target_coord)}, Number of fixed points: {len(anchor_coord)}, Crop valid: {is_valid_crop}")
 
         target_color = np.zeros_like(target_coord)
-        target_color[np.where(target_label == 1)[0], 0] = 1
-        anchor_color = anchor_label[:, None] * np.array([[0, 1, 0]]) + (1 - anchor_label[:, None]) * np.array([[1, 0, 0]])
+        # target_color[np.where(target_label == 1)[0], 0] = 1
+        target_color[:, 0] = 1.0
+        # anchor_color = anchor_label[:, None] * np.array([[0, 1, 0]]) + (1 - anchor_label[:, None]) * np.array([[1, 0, 0]])
+        anchor_color = np.zeros_like(anchor_coord)
+        anchor_color[:, 2] = 1.0
 
         target_pose_mat = utils.pose9d_to_mat(target_pose, rot_axis=cfg.DATALOADER.AUGMENTATION.ROT_AXIS)
 

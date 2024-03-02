@@ -9,7 +9,7 @@ import torch.nn as nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from torch.nn import TransformerDecoder, TransformerDecoderLayer
 from vil2.model.embeddings.pct import PointTransformerEncoderSmall, EncoderMLP, DropoutSampler
-from vil2.model.network.geometric import PointTransformerNetwork, to_dense_batch, offset2batch, to_flat_batch, DualSoftmaxReposition
+from vil2.model.network.geometric import PointTransformerNetwork, to_dense_batch, offset2batch, to_flat_batch, DualSoftmaxReposition, PointTransformer, knn
 from vil2.model.network.genpose_modules import Linear
 from vil2.utils.pcd_utils import visualize_point_pyramid, visualize_tensor_pcd
 
@@ -126,6 +126,28 @@ def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
 
+class SAMBlock(nn.Module):
+    """Decoder block like SAM"""
+
+    def __init__(self, hidden_dim, n_heads, dropout):
+        super().__init__()
+        self.query_attn = PointTransformer(embed_channels=hidden_dim, n_heads=n_heads, attn_drop_rate=dropout, drop_path_rate=dropout)
+        self.context_attn = PointTransformer(embed_channels=hidden_dim, n_heads=n_heads, attn_drop_rate=dropout, drop_path_rate=dropout)
+
+    def forward(self, query_points, context_points, knn_indices: dict):
+        query_coord, query_feat, query_offset = query_points
+        context_coord, context_feat, context_offset = context_points
+        # self-attention on query
+        query_feat = self.query_attn(feat=query_feat, coord=query_coord, knn_indexes=knn_indices["query2query"])
+        # cross-attention on query2context
+        query_feat = self.context_attn(query_feat=query_feat, coord=query_coord, context_feat=context_feat, context_coord=context_coord, knn_indexes=knn_indices["query2context"])
+        # cross-attention on context2query
+        context_feat = self.context_attn(query_feat=context_feat, coord=context_coord, context_feat=query_feat, context_coord=query_coord, knn_indexes=knn_indices["context2query"])
+        query_points = [query_coord, query_feat, query_offset]
+        context_points = [context_coord, context_feat, context_offset]
+        return query_points, context_points
+
+
 class RigPoseTransformer(nn.Module):
     """Rigister pose transformer network"""
 
@@ -135,25 +157,15 @@ class RigPoseTransformer(nn.Module):
         # Encode pcd features
         self.target_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=False)
         self.anchor_pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=False)
-        # Learnable embedding
-        self.pos_enc = PositionEmbeddingCoordsSine(pos_type="fourier", d_pos=hidden_dims[-1], gauss_scale=1.0, normalize=False)
-        self.pose_embedding = nn.Embedding(1, hidden_dims[-1])
-        self.status_embedding = nn.Embedding(1, hidden_dims[-1])
-        # Pose refiner
-        refine_decoder_layer = TransformerDecoderLayer(d_model=hidden_dims[-1], nhead=n_heads[0], dim_feedforward=hidden_dims[-1] * 4, dropout=0.1, activation="relu", batch_first=True)
-        self.decoder = TransformerDecoder(refine_decoder_layer, num_layers=dec_depths[0])
-        # Pose decoder
-        self.pose_proj = nn.Sequential(
-            nn.LayerNorm(hidden_dims[-1], elementwise_affine=False, eps=1e-6),
-            nn.Linear(hidden_dims[-1], 9),
-        )
-        self.status_proj = nn.Sequential(
-            nn.LayerNorm(hidden_dims[-1], elementwise_affine=False, eps=1e-6),
-            nn.Linear(hidden_dims[-1], 1),
-        )
+        #
+        self.sam_blocks = nn.ModuleList()
+        for i in range(2):
+            self.sam_blocks.append(SAMBlock(hidden_dim=hidden_dims[0], n_heads=n_heads[0], dropout=0.1))
         # Reposition
         self.dual_softmax_reposition = DualSoftmaxReposition(hidden_dim=hidden_dims[0], temperature=1.0)
         self.normalize_coord = True
+        self.query2query_knn = 16
+        self.query2context_knn = 64
 
     def encode_cond(self, target_points, anchor_points, target_attrs=None, anchor_attrs=None):
         """
@@ -185,26 +197,24 @@ class RigPoseTransformer(nn.Module):
             target_batch_index = offset2batch(target_offset)
             target_coord, target_mask = to_dense_batch(target_coord, target_batch_index)
             target_normal = to_dense_batch(target_normal, target_batch_index)[0] if "normal" in target_attrs else None
-            # target_center = (target_coord.max(dim=1).values + target_coord.min(dim=1).values) / 2
-            # target_scale = target_coord.max(dim=1).values - target_coord.min(dim=1).values
             target_coord = (target_coord - anchor_center[:, None]) / anchor_scale[:, None]
             # # DEBUG
-            anchor_coord_0 = anchor_coord[0].cpu().numpy()
-            anchor_normal_0 = anchor_normal[0].cpu().numpy() if anchor_normal is not None else None
-            target_coord_0 = target_coord[0].cpu().numpy()
-            target_normal_0 = target_normal[0].cpu().numpy() if target_normal is not None else None
-            anchor_pcd = o3d.geometry.PointCloud()
-            anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord_0)
-            if anchor_normal_0 is not None:
-                anchor_pcd.normals = o3d.utility.Vector3dVector(anchor_normal_0)
-            anchor_pcd.paint_uniform_color([1.0, 0.0, 0.0])
-            target_pcd = o3d.geometry.PointCloud()
-            target_pcd.points = o3d.utility.Vector3dVector(target_coord_0)
-            if target_normal_0 is not None:
-                target_pcd.normals = o3d.utility.Vector3dVector(target_normal_0)
-            target_pcd.paint_uniform_color([0.0, 0.0, 1.0])
-            o3d.visualization.draw_geometries([anchor_pcd, target_pcd])
-            # END DEBUG
+            # anchor_coord_0 = anchor_coord[0].cpu().numpy()
+            # anchor_normal_0 = anchor_normal[0].cpu().numpy() if anchor_normal is not None else None
+            # target_coord_0 = target_coord[0].cpu().numpy()
+            # target_normal_0 = target_normal[0].cpu().numpy() if target_normal is not None else None
+            # anchor_pcd = o3d.geometry.PointCloud()
+            # anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord_0)
+            # if anchor_normal_0 is not None:
+            #     anchor_pcd.normals = o3d.utility.Vector3dVector(anchor_normal_0)
+            # anchor_pcd.paint_uniform_color([1.0, 0.0, 0.0])
+            # target_pcd = o3d.geometry.PointCloud()
+            # target_pcd.points = o3d.utility.Vector3dVector(target_coord_0)
+            # if target_normal_0 is not None:
+            #     target_pcd.normals = o3d.utility.Vector3dVector(target_normal_0)
+            # target_pcd.paint_uniform_color([0.0, 0.0, 1.0])
+            # o3d.visualization.draw_geometries([anchor_pcd, target_pcd])
+            # # END DEBUG
             target_points[0] = to_flat_batch(target_coord, target_mask)[0]
             anchor_points[0] = to_flat_batch(anchor_coord, anchor_mask)[0]
 
@@ -218,52 +228,6 @@ class RigPoseTransformer(nn.Module):
         if torch.isnan(target_points[1]).any() or torch.isnan(anchor_points[1]).any():
             print("Nan exists in the feature")
         return target_points, anchor_points, target_attrs, anchor_attrs
-
-    def forward(self, target_points: list[torch.Tensor], anchor_points: list[torch.Tensor], enc_target_attr, enc_anchor_attr) -> torch.Tensor:
-        target_coord, target_feat, target_offset = target_points
-        # Convert to batch & mask
-        target_batch_index = offset2batch(target_offset)
-        target_feat, target_feat_mask = to_dense_batch(target_feat, target_batch_index)
-
-        pose_token = self.pose_embedding.weight[0].unsqueeze(0).expand(target_feat.size(0), -1)
-        status_token = self.status_embedding.weight[0].unsqueeze(0).expand(target_feat.size(0), -1)
-        target_feat = torch.cat((pose_token[:, None, :], status_token[:, None, :], target_feat), dim=1)
-        target_feat_mask = torch.cat((torch.ones([target_feat_mask.shape[0], 2], dtype=target_feat_mask.dtype, device=target_feat_mask.device), target_feat_mask), dim=1)
-        target_feat_padding_mask = target_feat_mask == 0
-        target_coord = to_dense_batch(target_coord, target_batch_index)[0]
-        target_pos_embedding = self.pos_enc(target_coord).permute(0, 2, 1)
-        target_feat[:, 2:, :] = target_feat[:, 2:, :] + target_pos_embedding
-
-        # Check the existence of nan
-        if torch.isnan(target_feat).any():
-            print("Nan exists in the feature")
-
-        # Do query
-        anchor_coord, anchor_feat, anchor_offset = anchor_points
-        anchor_batch_index = offset2batch(anchor_offset)
-        anchor_coord = to_dense_batch(anchor_coord, anchor_batch_index)[0]
-        anchor_pos_embedding = self.pos_enc(anchor_coord).permute(0, 2, 1)
-        anchor_feat, anchor_feat_mask = to_dense_batch(anchor_feat, anchor_batch_index)
-        anchor_feat_padding_mask = anchor_feat_mask == 0
-        anchor_feat = anchor_feat + anchor_pos_embedding
-        assert target_feat.shape[0] == anchor_feat.shape[0], "Batch size mismatch"
-
-        target_feat = self.decoder(target_feat, anchor_feat, tgt_mask=None, memory_mask=None, tgt_key_padding_mask=target_feat_padding_mask, memory_key_padding_mask=anchor_feat_padding_mask)
-
-        if torch.isnan(target_feat).any():
-            assert False, "Nan exists in the feature"
-        # Sanity check
-        if torch.isnan(target_feat).any():
-            print("Nan exists in the feature")
-
-        # Decode pose & status
-        pose_pred = self.pose_proj(target_feat[:, 0, :])
-        status_pred = self.status_proj(target_feat[:, 1, :])
-
-        # Sanity check
-        if torch.isnan(pose_pred).any():
-            print("Nan exists in the pose")
-        return pose_pred, status_pred
 
     def visualize_pcd_pyramids(self, all_points, cluster_indices, point_attrs=None):
         coord, feat, _ = all_points[-1]
@@ -280,45 +244,18 @@ class RigPoseTransformer(nn.Module):
             if i >= 1:
                 break
 
-    def reposition(self, points, normal, pose9d, rot_axis: str = "xy"):
-        """
-        Reposition the points based on the pose;
-        point: [Coord, Normal, Feat, Offset]
-        pose: [Batch, 16]
-        """
-        coord, feat, offset = points
-        batch_index = offset2batch(offset)
-        coord, mask = to_dense_batch(coord, batch_index)
-        normal, _ = to_dense_batch(normal, batch_index)
+    def forward(self, anchor_points, target_points):
+        anchor_coord, anchor_feat, anchor_offset = anchor_points
+        target_coord, target_feat, target_offset = target_points
+        # Conduct SAM-like matching
+        knn_indices = dict()
+        knn_indices["query2query"] = knn(query=target_coord, base=target_coord, query_offset=target_offset, base_offset=target_offset, k=self.query2query_knn)[0]
+        knn_indices["query2context"] = knn(query=target_coord, base=anchor_coord, query_offset=target_offset, base_offset=anchor_offset, k=self.query2context_knn)[0]
+        knn_indices["context2query"] = knn(query=anchor_coord, base=target_coord, query_offset=anchor_offset, base_offset=target_offset, k=self.query2context_knn)[0]
 
-        # Assemble the pose matrix
-        t = pose9d[:, 0:3]
-        r1 = pose9d[:, 3:6]
-        r2 = pose9d[:, 6:9]
-        # Normalize & Gram-Schmidt
-        r1 = r1 / (torch.norm(r1, dim=1, keepdim=True) + 1e-8)
-        r1_r2_dot = torch.sum(r1 * r2, dim=1, keepdim=True)
-        r2_orth = r2 - r1_r2_dot * r1
-        r2 = r2_orth / (torch.norm(r2_orth, dim=1, keepdim=True) + 1e-8)
-        r3 = torch.cross(r1, r2)
-        # Rotate
-        if rot_axis == "xy":
-            R = torch.stack([r1, r2, r3], dim=2)
-        elif rot_axis == "yz":
-            R = torch.stack([r3, r1, r2], dim=2)
-        elif rot_axis == "zx":
-            R = torch.stack([r2, r3, r1], dim=2)
-        R = R.permute(0, 2, 1)
+        for sam_block in self.sam_blocks:
+            target_points, anchor_points = sam_block(target_points, anchor_points, knn_indices)
 
-        coord = torch.bmm(coord, R) + t[:, None, :]
-        normal = torch.bmm(normal, R)
-        # Convert to flat batch
-        coord = to_flat_batch(coord, mask)[0]
-        normal = to_flat_batch(normal, mask)[0]
-        new_points = [coord, feat, offset]
-        return new_points, normal
-
-    def match(self, anchor_points, target_points):
         anchor_coord, anchor_feat, anchor_offset = anchor_points
         target_coord, target_feat, target_offset = target_points
         conf_matrix = self.dual_softmax_reposition.match(
@@ -340,4 +277,4 @@ class RigPoseTransformer(nn.Module):
         R, t, condition = self.dual_softmax_reposition.arun(
             conf_matrix=gt_corr, coord_a=target_coord, coord_b=anchor_coord, batch_index_a=offset2batch(target_offset), batch_index_b=offset2batch(anchor_offset)
         )
-        pass
+        return R, t, condition
