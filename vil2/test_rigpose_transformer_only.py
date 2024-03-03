@@ -75,9 +75,9 @@ if __name__ == "__main__":
     net_name = cfg.MODEL.NOISE_NET.NAME
     net_init_args = cfg.MODEL.NOISE_NET.INIT_ARGS[net_name]
     pose_transformer = RigPoseTransformer(**net_init_args)
-    rpt_model = RGTModel(cfg, pose_transformer)
+    rgt_model = RGTModel(cfg, pose_transformer)
 
-    model_name = rpt_model.experiment_name()
+    model_name = rgt_model.experiment_name()
     noise_net_name = cfg.MODEL.NOISE_NET.NAME
     save_dir = os.path.join(root_path, "test_data", task_name, "checkpoints", noise_net_name)
     save_path = os.path.join(save_dir, model_name)
@@ -89,7 +89,12 @@ if __name__ == "__main__":
     sorted_checkpoints = sorted(checkpoints, key=lambda x: float(x.split("=")[-1].split(".ckpt")[0]))
     checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
 
-    rpt_model.load(checkpoint_file)
+    rgt_model.load(checkpoint_file)
     for i in range(20):
         batch = next(iter(val_data_loader))
-        conf_matrix, gt_corr, (pred_R, pred_t) = rpt_model.predict(batch=batch, target_pose=batch["target_pose"].cpu().numpy(), vis=True)
+        for k in range(2):
+            print(f"Batch {i}, Iteration {k}...")
+            if k != 0:
+                batch["prev_R"] = torch.from_numpy(pred_R)
+                batch["prev_t"] = torch.from_numpy(pred_t)
+            conf_matrix, gt_corr, (pred_R, pred_t) = rgt_model.predict(batch=batch, target_pose=batch["target_pose"].cpu().numpy(), vis=True)

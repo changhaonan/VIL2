@@ -18,7 +18,7 @@ import lightning as L
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 import time
-from vil2.model.network.geometric import batch2offset, to_dense_batch, offset2batch
+from vil2.model.network.geometric import batch2offset, to_dense_batch, offset2batch, to_flat_batch
 from vil2.model.network.rigpose_transformer import RigPoseTransformer
 import vil2.utils.misc_utils as utils
 from vil2.utils.pcd_utils import normalize_pcd, check_collision
@@ -109,12 +109,18 @@ class LRigPoseTransformer(L.LightningModule):
         anchor_batch_idx = batch["anchor_batch_index"]
         anchor_offset = batch2offset(anchor_batch_idx)
         anchor_points = [anchor_coord, anchor_feat, anchor_offset]
-        prev_pose9d = batch.get("prev_pose9d", None)
+        prev_R = batch.get("prev_R", None)
+        prev_t = batch.get("prev_t", None)
 
-        if prev_pose9d is not None:
-            target_points, target_normal = self.pose_transformer.reposition(target_points, target_normal, prev_pose9d, self.rot_axis)
+        if prev_R is not None and prev_t is not None:
+            target_coord, target_mask = to_dense_batch(target_coord, target_batch_idx)
+            target_normal, _ = to_dense_batch(target_normal, target_batch_idx)
+            target_coord, target_normal = self.pose_transformer.reposition(target_coord, prev_R, prev_t, target_normal)
+            target_coord = to_flat_batch(target_coord, target_mask)[0]
+            target_normal = to_flat_batch(target_normal, target_mask)[0]
+            target_points = [target_coord, target_feat, target_offset]
 
-        # Compute conditional features
+        # Encode points
         enc_target_points, enc_anchor_points, enc_target_attr, enc_anchor_attr = self.pose_transformer.encode_cond(
             target_points, anchor_points, target_attrs={"normal": target_normal}, anchor_attrs={"normal": anchor_normal}
         )
@@ -128,11 +134,15 @@ class LRigPoseTransformer(L.LightningModule):
         conf_matrix = self.pose_transformer.forward(enc_anchor_points, enc_target_points)
         gt_corr_matrix = self.pose_transformer.to_gt_correspondence_matrix(conf_matrix, gt_corr)
 
-        # [DEBUG] Output estimation for evaluation
+        # Output estimation for evaluation
         R, t, condition = self.pose_transformer.dual_softmax_reposition.arun(
             conf_matrix=conf_matrix, coord_a=target_coord, coord_b=anchor_coord, batch_index_a=offset2batch(target_offset), batch_index_b=offset2batch(anchor_offset)
         )
 
+        # Combine with previous pose
+        if prev_R is not None and prev_t is not None:
+            t = torch.bmm(R, prev_t[:, :, None]).squeeze(-1) + t
+            R = torch.bmm(R, prev_R)
         return conf_matrix, gt_corr_matrix, (R, t)
 
     def configure_optimizers(self):
@@ -205,7 +215,7 @@ class RGTModel:
         # parameters
         # build model
         self.pose_transformer = pose_transformer
-        self.lightning_pose_transformer = LRigPoseTransformer(pose_transformer, cfg).to(torch.float32)
+        self.lpose_transformer = LRigPoseTransformer(pose_transformer, cfg).to(torch.float32)
         # parameters
         self.rot_axis = cfg.DATALOADER.AUGMENTATION.ROT_AXIS
         self.gradient_clip_val = cfg.TRAIN.GRADIENT_CLIP_VAL
@@ -228,7 +238,7 @@ class RGTModel:
             accelerator=accelerator,
             gradient_clip_val=self.gradient_clip_val,
         )
-        trainer.fit(self.lightning_pose_transformer, train_dataloaders=train_data_loader, val_dataloaders=val_data_loader)
+        trainer.fit(self.lpose_transformer, train_dataloaders=train_data_loader, val_dataloaders=val_data_loader)
 
     def test(self, test_data_loader, save_path: str):
         # Trainer
@@ -244,12 +254,12 @@ class RGTModel:
         sorted_checkpoints = sorted(checkpoints, key=lambda x: float(x.split("=")[-1].split(".ckpt")[0]))
         checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
         trainer.test(
-            self.lightning_pose_transformer.__class__.load_from_checkpoint(checkpoint_file, pose_transformer=self.pose_transformer, cfg=self.cfg),
+            self.lpose_transformer.__class__.load_from_checkpoint(checkpoint_file, pose_transformer=self.pose_transformer, cfg=self.cfg),
             dataloaders=test_data_loader,
         )
 
     def predict(self, target_coord=None, target_feat=None, anchor_coord=None, anchor_feat=None, batch=None, target_pose=None, vis: bool = False) -> Any:
-        self.lightning_pose_transformer.eval()
+        self.lpose_transformer.eval()
         # Assemble batch
         if batch is None:
             target_batch_idx = np.array([0] * target_coord.shape[0], dtype=np.int64)
@@ -267,8 +277,8 @@ class RGTModel:
                 batch[key] = torch.from_numpy(batch[key])
         # Put to device
         for key in batch.keys():
-            batch[key] = batch[key].to(self.lightning_pose_transformer.device)
-        conf_matrix, gt_corr, (pred_R, pred_t) = self.lightning_pose_transformer(batch)
+            batch[key] = batch[key].to(self.lpose_transformer.device)
+        conf_matrix, gt_corr, (pred_R, pred_t) = self.lpose_transformer(batch)
         if vis:
             anchor_batch_idx = batch["anchor_batch_index"]
             anchor_coord = batch["anchor_coord"]
@@ -278,7 +288,7 @@ class RGTModel:
             batch_target_coord = to_dense_batch(target_coord, target_batch_idx)[0]
             # Visualize the result
             for i in range(min(8, batch_anchor_coord.shape[0])):
-                self.lightning_pose_transformer.view_result(batch_anchor_coord[i, :], batch_target_coord[i, :], pred_R[i, :], pred_t[i, :], conf_matrix[i, :], show_3d=True)
+                self.lpose_transformer.view_result(batch_anchor_coord[i, :], batch_target_coord[i, :], pred_R[i, :], pred_t[i, :], conf_matrix[i, :], show_3d=True)
 
         conf_matrix = conf_matrix.detach().cpu().numpy()
         gt_corr = gt_corr.detach().cpu().numpy()
@@ -288,11 +298,11 @@ class RGTModel:
 
     def load(self, checkpoint_path: str) -> None:
         print(f"Loading checkpoint from {checkpoint_path}")
-        self.lightning_pose_transformer.load_state_dict(torch.load(checkpoint_path)["state_dict"])
+        self.lpose_transformer.load_state_dict(torch.load(checkpoint_path)["state_dict"])
 
     def save(self, save_path: str) -> None:
         print(f"Saving checkpoint to {save_path}")
-        torch.save(self.lightning_pose_transformer.state_dict(), save_path)
+        torch.save(self.lpose_transformer.state_dict(), save_path)
 
     def experiment_name(self):
         noise_net_name = self.cfg.MODEL.NOISE_NET.NAME
@@ -443,27 +453,3 @@ class RGTModel:
             collison_scores.append(collision)
         collison_scores = np.array(collison_scores)
         return collison_scores
-
-    def reposition(self, coord: torch.Tensor, pose_pred: torch.Tensor, rot_axis: str = "xy"):
-        """Reposition the points using the pose9d"""
-        t = pose_pred[:, 0:3]
-        r1 = pose_pred[:, 3:6]
-        r2 = pose_pred[:, 6:9]
-        # Normalize & Gram-Schmidt
-        r1 = r1 / (torch.norm(r1, dim=1, keepdim=True) + 1e-8)
-        r1_r2_dot = torch.sum(r1 * r2, dim=1, keepdim=True)
-        r2_orth = r2 - r1_r2_dot * r1
-        r2 = r2_orth / (torch.norm(r2_orth, dim=1, keepdim=True) + 1e-8)
-        r3 = torch.cross(r1, r2)
-        # Rotate
-        if rot_axis == "xy":
-            R = torch.stack([r1, r2, r3], dim=2)
-        elif rot_axis == "yz":
-            R = torch.stack([r3, r1, r2], dim=2)
-        elif rot_axis == "zx":
-            R = torch.stack([r2, r3, r1], dim=2)
-        R = R.permute(0, 2, 1)
-        # Reposition
-        coord = torch.bmm(coord, R)
-        coord = coord + t[:, None, :]
-        return coord
