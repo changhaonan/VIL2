@@ -387,29 +387,29 @@ def build_dataset_superpoint(data_dir, cfg, task_name: str, vis: bool = False, f
         target_feat = np.concatenate(target_feat, axis=-1)
         target_super_index = np.vstack(c_superpoint_data["super_index"]).T
         # Voxel Downsample
-        # FIXME: Downsample method still need to improve as super_index is also averaged
-        grid_size = cfg.PREPROCESS.GRID_SIZE
-        anchor_pcd = o3d.t.geometry.PointCloud()
-        anchor_pcd.point["positions"] = o3d.core.Tensor(anchor_coord, dtype=o3d.core.Dtype.Float32)
-        anchor_pcd.point["normals"] = o3d.core.Tensor(anchor_normal, dtype=o3d.core.Dtype.Float32)
-        anchor_pcd.point["features"] = o3d.core.Tensor(anchor_feat, dtype=o3d.core.Dtype.Float32)
-        anchor_pcd.point["super_index"] = o3d.core.Tensor(anchor_super_index, dtype=o3d.core.Dtype.Int32)
-        anchor_pcd = anchor_pcd.voxel_down_sample(voxel_size=grid_size)
-        anchor_coord = anchor_pcd.point["positions"].numpy()
-        anchor_normal = anchor_pcd.point["normals"].numpy()
-        anchor_feat = anchor_pcd.point["features"].numpy()
-        anchor_super_index = anchor_pcd.point["super_index"].numpy()
+        # # FIXME: Downsample method still need to improve as super_index is also averaged
+        # grid_size = cfg.PREPROCESS.GRID_SIZE
+        # anchor_pcd = o3d.t.geometry.PointCloud()
+        # anchor_pcd.point["positions"] = o3d.core.Tensor(anchor_coord, dtype=o3d.core.Dtype.Float32)
+        # anchor_pcd.point["normals"] = o3d.core.Tensor(anchor_normal, dtype=o3d.core.Dtype.Float32)
+        # anchor_pcd.point["features"] = o3d.core.Tensor(anchor_feat, dtype=o3d.core.Dtype.Float32)
+        # anchor_pcd.point["super_index"] = o3d.core.Tensor(anchor_super_index, dtype=o3d.core.Dtype.Int32)
+        # anchor_pcd = anchor_pcd.voxel_down_sample(voxel_size=grid_size)
+        # anchor_coord = anchor_pcd.point["positions"].numpy()
+        # anchor_normal = anchor_pcd.point["normals"].numpy()
+        # anchor_feat = anchor_pcd.point["features"].numpy()
+        # anchor_super_index = anchor_pcd.point["super_index"].numpy().astype(np.int64)
 
-        target_pcd = o3d.t.geometry.PointCloud()
-        target_pcd.point["positions"] = o3d.core.Tensor(target_coord, dtype=o3d.core.Dtype.Float32)
-        target_pcd.point["normals"] = o3d.core.Tensor(target_normal, dtype=o3d.core.Dtype.Float32)
-        target_pcd.point["features"] = o3d.core.Tensor(target_feat, dtype=o3d.core.Dtype.Float32)
-        target_pcd.point["super_index"] = o3d.core.Tensor(target_super_index, dtype=o3d.core.Dtype.Int32)
-        target_pcd = target_pcd.voxel_down_sample(voxel_size=grid_size)
-        target_coord = target_pcd.point["positions"].numpy()
-        target_normal = target_pcd.point["normals"].numpy()
-        target_feat = target_pcd.point["features"].numpy()
-        target_super_index = target_pcd.point["super_index"].numpy()
+        # target_pcd = o3d.t.geometry.PointCloud()
+        # target_pcd.point["positions"] = o3d.core.Tensor(target_coord, dtype=o3d.core.Dtype.Float32)
+        # target_pcd.point["normals"] = o3d.core.Tensor(target_normal, dtype=o3d.core.Dtype.Float32)
+        # target_pcd.point["features"] = o3d.core.Tensor(target_feat, dtype=o3d.core.Dtype.Float32)
+        # target_pcd.point["super_index"] = o3d.core.Tensor(target_super_index, dtype=o3d.core.Dtype.Int32)
+        # target_pcd = target_pcd.voxel_down_sample(voxel_size=grid_size)
+        # target_coord = target_pcd.point["positions"].numpy()
+        # target_normal = target_pcd.point["normals"].numpy()
+        # target_feat = target_pcd.point["features"].numpy()
+        # target_super_index = target_pcd.point["super_index"].numpy().astype(np.int64)
 
         # Compute nearby label
         target_label = -np.ones((target_coord.shape[0],), dtype=np.float32)  # -1: not nearby, 1: nearby
@@ -435,10 +435,11 @@ def build_dataset_superpoint(data_dir, cfg, task_name: str, vis: bool = False, f
             anchor_pcd.colors = o3d.utility.Vector3dVector(anchor_color)
             o3d.visualization.draw_geometries([target_pcd])
             # Visualize by superpoint average
-            superpoint_layer0 = anchor_super_index[:, 1]
+            superpoint_layer0 = anchor_super_index[:, 0]
             num_superpoint = np.max(superpoint_layer0) + 1
             superpoint_list = []
             for _i in range(num_superpoint):
+                print(f"Superpoint {_i} has {np.sum(superpoint_layer0 == _i)} points")
                 superpoint_indices = np.where(superpoint_layer0 == _i)[0]
                 if len(superpoint_indices) == 0:
                     continue
@@ -499,6 +500,7 @@ if __name__ == "__main__":
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cfg_file = os.path.join(root_dir, "config", f"pose_transformer_rpdiff_{task_name}.py")
     cfg = LazyConfig.load(cfg_file)
+    cfg.PREPROCESS.USE_SOFT_LABEL = False
     filter_key = args.filter_key
     vis = args.vis
     do_scaling = True

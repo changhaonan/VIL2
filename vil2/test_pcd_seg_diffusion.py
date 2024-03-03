@@ -43,6 +43,10 @@ if __name__ == "__main__":
     root_path = os.path.dirname((os.path.abspath(__file__)))
     cfg_file = os.path.join(root_path, "config", f"pose_transformer_rpdiff_{task_name}.py")
     cfg = LazyConfig.load(cfg_file)
+    cfg = LazyConfig.load(cfg_file)
+    cfg.MODEL.NOISE_NET.NAME = "PCDSAMNOISENET"
+    cfg.DATALOADER.AUGMENTATION.CROP_PCD = False
+    cfg.DATALOADER.BATCH_SIZE = 8
 
     # Use raw data
     # Prepare path
@@ -58,7 +62,6 @@ if __name__ == "__main__":
 
     # Load dataset & data loader
     train_dataset, val_dataset, test_dataset = build_dmorp_dataset(root_path, cfg)
-
     test_data_loader = torch.utils.data.DataLoader(test_dataset, batch_size=cfg.DATALOADER.BATCH_SIZE, shuffle=False, num_workers=cfg.DATALOADER.NUM_WORKERS, collate_fn=PcdPairCollator())
     train_data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=cfg.DATALOADER.BATCH_SIZE, shuffle=True, num_workers=cfg.DATALOADER.NUM_WORKERS, collate_fn=PcdPairCollator())
 
@@ -88,24 +91,4 @@ if __name__ == "__main__":
             continue
         # Extract one data from batch
         check_batch_idx = 1
-        pred_anchor_label, anchor_coord, anchor_super_index = pcdd_model.predict(batch=batch, check_batch_idx=check_batch_idx)
-
-        # Visualize
-        for check_idx in range(pred_anchor_label.shape[0]):
-            anchor_full_pcd = o3d.geometry.PointCloud()
-            anchor_full_pcd.points = o3d.utility.Vector3dVector(anchor_coord[check_idx])
-            anchor_full_pcd.paint_uniform_color([1, 0, 0])
-
-            super_point_list = []
-            for super_idx in np.unique(anchor_super_index[check_idx, :, 0]):
-                pcd_superpoint_idx = anchor_super_index[check_idx, :, 0] == super_idx
-                superpoint_coord = anchor_coord[check_idx][pcd_superpoint_idx]
-                superpoint_pcd = o3d.geometry.PointCloud()
-                superpoint_pcd.points = o3d.utility.Vector3dVector(superpoint_coord)
-                # Color by label3
-                super_idx = super_idx - np.min(anchor_super_index[check_idx, :, 0])
-                superpoint_label = pred_anchor_label[check_idx][super_idx]  # (-1, 1)
-                color = superpoint_label * np.array([0.0, 1.0, 0.0]) + (1 - superpoint_label) * np.array([1.0, 0.0, 0.0])
-                superpoint_pcd.paint_uniform_color(color)
-                super_point_list.append(superpoint_pcd)
-            o3d.visualization.draw_geometries(super_point_list)
+        pred_anchor_label = pcdd_model.predict(batch=batch, check_batch_idx=check_batch_idx, vis=True)

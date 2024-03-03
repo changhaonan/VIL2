@@ -196,177 +196,94 @@ class DiTBlock(nn.Module):
         return x
 
 
-class DiTFinalLayer(nn.Module):
-    """
-    The final layer of DiT.
-    """
-
-    def __init__(self, hidden_size, output_dim, out_channels):
-        super().__init__()
-        self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.linear = nn.Linear(hidden_size, output_dim, bias=True)
-        self.adaLN_modulation = nn.Sequential(nn.SiLU(), nn.Linear(hidden_size, 2 * hidden_size, bias=True))
-
-    def forward(self, x, c):
-        shift, scale = self.adaLN_modulation(c).chunk(2, dim=1)
-        x = modulate(self.norm_final(x), shift, scale)
-        x = self.linear(x)
-        return x
-
-
 class PcdSegNoiseNet(nn.Module):
     """Generate noise for point cloud diffusion process for segmentation."""
 
     def __init__(self, grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, **kwargs) -> None:
         super().__init__()
         num_denoise_layers = kwargs.get("num_denoise_layers", 3)
-        num_denoise_depths = kwargs.get("num_denoise_depths", 3)
-        condition_pooling = kwargs.get("condition_pooling", "max")  # max, mean
-        condition_strategy = kwargs.get("condition_strategy", "cross_attn")  # cross_attn, FiLM
         out_dim = kwargs.get("out_dim", 1)
-        self.condition_strategy = condition_strategy
-        self.condition_pooling = condition_pooling
-        max_timestep = kwargs.get("max_timestep", 200)
+        max_timestep = kwargs.get("max_timestep", 100)
+        self.normalize_coord = kwargs.get("normalize_coord", True)
         # Module
-        self.pcd_transformer = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=False)
-        self.conv1x1 = nn.ModuleList()
-        self.decoders = nn.ModuleList()
-        if self.condition_strategy == "concat":
-            self.latent_dim = hidden_dims[0]
-            hidden_dim_denoise = 2 * self.latent_dim
-            n_heads_denoise = hidden_dim_denoise // 32
-            for i in range(num_denoise_layers):
-                decoder_layer = TransformerDecoderLayer(d_model=hidden_dim_denoise, nhead=n_heads_denoise, dim_feedforward=2048, dropout=0.1, activation="relu", batch_first=True)
-                decoder = TransformerDecoder(decoder_layer, num_layers=num_denoise_depths)
-                self.decoders.insert(0, decoder)
-                self.conv1x1.insert(0, nn.Conv1d(hidden_dim_denoise, hidden_dim_denoise, 1))
-            self.linear_up = nn.Linear(out_dim, self.latent_dim)
-            self.final_proj = nn.Sequential(nn.LayerNorm(2 * self.latent_dim, elementwise_affine=False, eps=1e-6), nn.Linear(2 * self.latent_dim, out_dim))
-            self.time_embedding = nn.Embedding(max_timestep, 2 * self.latent_dim)
-            self.pos_enc = PositionEmbeddingCoordsSine(
-                pos_type="fourier",
-                d_pos=self.latent_dim * 2,
-                gauss_scale=1.0,
-                normalize=False,
-            )
-        elif self.condition_strategy == "FiLM":
-            self.latent_dim = hidden_dims[0]
-            hidden_dim_denoise = 2 * self.latent_dim
-            n_heads_denoise = hidden_dim_denoise // 32
-            for i in range(num_denoise_layers):
-                self.decoders.insert(0, DiTBlock(hidden_size=hidden_dim_denoise, num_heads=n_heads_denoise))
-            self.linear_up = nn.Linear(out_dim, self.latent_dim)
-            self.time_embedding = nn.Embedding(max_timestep, 2 * self.latent_dim)
-            self.final_proj = DiTFinalLayer(2 * self.latent_dim, out_dim, None)
-            self.pos_enc = PositionEmbeddingCoordsSine(
-                pos_type="fourier",
-                d_pos=self.latent_dim * 2,
-                gauss_scale=1.0,
-                normalize=False,
-            )
-        else:
-            raise NotImplementedError
+        self.pcd_encoder = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=False)
+        self.dit_blocks = nn.ModuleList()
+        self.latent_dim = hidden_dims[0]
+        hidden_dim_denoise = 2 * self.latent_dim
+        n_heads_denoise = hidden_dim_denoise // 32
+        for i in range(num_denoise_layers):
+            self.dit_blocks.insert(0, DiTBlock(hidden_size=hidden_dim_denoise, num_heads=n_heads_denoise))
+        self.time_embedding = nn.Embedding(max_timestep, 2 * self.latent_dim)
+        self.proj_up = nn.Sequential(nn.Linear(out_dim, 2 * self.latent_dim), nn.SiLU(), nn.Linear(2 * self.latent_dim, self.latent_dim))
+        self.proj_down = nn.Sequential(nn.Linear(2 * self.latent_dim, 2 * self.latent_dim), nn.SiLU(), nn.Linear(2 * self.latent_dim, out_dim))
+        self.pos_enc = PositionEmbeddingCoordsSine(pos_type="fourier", d_pos=self.latent_dim * 2, gauss_scale=1.0, normalize=False)
 
     def initialize_weights(self):
-        if self.condition_strategy == "FiLM":
-            # Zero-out adaLN modulation layers in DiT blocks:
-            for block in self.decoders:
-                nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
-                nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+        # Zero-out adaLN modulation layers in DiT blocks:
+        for block in self.dit_blocks:
+            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
+            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
 
-    def encode_pcd(self, points: list[torch.Tensor]) -> torch.Tensor:
+    def encode_pcd(self, points: list[torch.Tensor], attrs=None) -> torch.Tensor:
         """
         Encode point cloud into feat pyramid.
         Args:
             points (list[torch.Tensor]): coord, point, offset
         """
-        points = self.pcd_transformer(points)
+        # Assemble feat
+        feat_list = [points[0], points[1]]
+        if "normal" in attrs:
+            normal = attrs["normal"]
+            feat_list.append(normal)
+        points = [points[0], torch.cat(feat_list, dim=1), points[2]]
+
+        if self.normalize_coord:
+            # Normalize the coord to unit cube
+            coord, feat, offset = points
+            # Convert to batch & mask
+            batch_index = offset2batch(offset)
+            coord, mask = to_dense_batch(coord, batch_index)
+            normal = to_dense_batch(normal, batch_index) if "normal" in attrs else None
+            # Normalize the coord
+            center = coord.mean(dim=1, keepdim=True)
+            coord = coord - center
+            points[0] = to_flat_batch(coord, mask)[0]
+
+        points, all_points, cluster_indices, attrs = self.pcd_encoder(points, return_full=True)
+
+        # DEBUG: Visualize the point cloud pyramid
+        # self.visualize_pcd_pyramids(all_points, cluster_indices, attrs)
+        # Map to the second dense layer
         return points
 
-    def forward(self, noisy_t: torch.Tensor, points_c: list[torch.Tensor], t: int) -> torch.Tensor:
-        """
-        Args:
-            noisy_t (torch.Tensor): noisy point cloud attribute at time t
-            points (torch.Tensor): condition point cloud
-            t (int): diffusion time step
-        """
-        if self.condition_strategy == "concat":
-            return self.forward_concat(noisy_t, points_c, t)
-        elif self.condition_strategy == "FiLM":
-            return self.forward_FiLM(noisy_t, points_c, t)
-        else:
-            raise NotImplementedError
-
-    def forward_concat(self, noisy_t: torch.Tensor, points_c: list[torch.Tensor], t: int) -> torch.Tensor:
-        """
-        Args:
-            noisy_t (torch.Tensor): noisy point cloud attribute at time t
-            points (torch.Tensor): condition point cloud
-            t (int): diffusion time step
-        """
-        if len(t.shape) == 1:
-            t = t[:, None]
-        time_token = self.time_embedding(t)
-        # Convert to batch & mask
-        coord, feat_c, offset = points_c
-        batch_index = offset2batch(offset)
-        coord, _ = to_dense_batch(coord, batch_index)
-        noisy_t = self.linear_up(noisy_t)
-        noisy_t, _ = to_dense_batch(noisy_t, batch_index)
-        feat_c, batch_mask = to_dense_batch(feat_c, batch_index)
-        noisy_t = torch.cat((feat_c, noisy_t), dim=-1)  # Concatenate condition feature
-        noisy_t = torch.cat((time_token, noisy_t), dim=1)  # Concatenate time token
-        batch_mask = torch.cat((torch.ones([batch_mask.shape[0], 1], dtype=batch_mask.dtype, device=batch_mask.device), batch_mask), dim=1)
-        padding_mask = batch_mask == 0
-
-        # Sanity check
-        if torch.isnan(noisy_t).any():
-            print("Nan exists in the feature")
-        # Add positional encoding
-        pos_embedding = self.pos_enc(coord).permute(0, 2, 1)
-        for i in range(len(self.decoders)):
-            noisy_t[:, 1:, :] = noisy_t[:, 1:, :] + pos_embedding  # In segmentation task, we add positional encoding before each layer
-            noisy_t = self.decoders[i](noisy_t, noisy_t, memory_key_padding_mask=padding_mask, tgt_key_padding_mask=padding_mask)
-            # Sanity check
-            if torch.isnan(noisy_t).any():
-                print("Nan exists in the feature")
-        noisy_t = self.final_proj(noisy_t)
-        noisy_t = noisy_t[:, 1:]  # Remove time token
-        return noisy_t
-
-    def forward_FiLM(self, noisy_t: torch.Tensor, points_c: list[torch.Tensor], t: int) -> torch.Tensor:
+    def forward(self, noisy_t: torch.Tensor, points: list[torch.Tensor], t: int) -> torch.Tensor:
         """
         FiLM condition.
-        Args:
-            target_points (torch.Tensor): encoded target point cloud
-            target_coord_t (torch.Tensor): target coordinate at t
-            anchor_points (torch.Tensor): anchor point cloud in pyramid
-            t (int): diffusion time step
         """
         if len(t.shape) == 1:
             t = t[:, None]
         time_token = self.time_embedding(t).squeeze(1)
         # Convert to batch & mask
-        coord, feat_c, offset = points_c
+        coord, feat, offset = points
         batch_index = offset2batch(offset)
         coord, _ = to_dense_batch(coord, batch_index)
-        noisy_t = self.linear_up(noisy_t)
+        noisy_t = self.proj_up(noisy_t)
         noisy_t, _ = to_dense_batch(noisy_t, batch_index)
-        feat_c, batch_mask = to_dense_batch(feat_c, batch_index)
-        noisy_t = torch.cat((feat_c, noisy_t), dim=-1)  # Concatenate condition feature
+        feat, batch_mask = to_dense_batch(feat, batch_index)
+        noisy_t = torch.cat((feat, noisy_t), dim=-1)  # Concatenate condition feature
         padding_mask = batch_mask == 0
 
         # Add positional encoding
         pos_embedding = self.pos_enc(coord).permute(0, 2, 1)
         # Do DiT
-        for i in range(len(self.decoders)):
+        for i in range(len(self.dit_blocks)):
             noisy_t = noisy_t + pos_embedding  # In segmentation task, we add positional encoding before each layer
             # Mask out the padding
-            noisy_t = self.decoders[i](noisy_t, time_token, mask=padding_mask.unsqueeze(1))
+            noisy_t = self.dit_blocks[i](noisy_t, time_token, mask=padding_mask.unsqueeze(1))
             # Sanity check
             if torch.isnan(noisy_t).any():
                 print("Nan exists in the feature")
 
         # Decode
-        noisy_t = self.final_proj(noisy_t, time_token)
+        noisy_t = self.proj_down(noisy_t)
         return noisy_t

@@ -232,8 +232,8 @@ class PcdSAMNoiseNet(nn.Module):
         self.dit_blocks = nn.ModuleList()
         for i in range(num_dit_blocks):
             self.dit_blocks.append(DiTBlock(hidden_dims[1], n_heads[1]))
-        self.proj_down = nn.Linear(hidden_dims[1], out_dim)
-        self.proj_up = nn.Linear(out_dim, hidden_dims[1])  # To 1st layer
+        self.proj_up = nn.Sequential(nn.Linear(out_dim, 2 * hidden_dims[1]), nn.SiLU(), nn.Linear(2 * hidden_dims[1], hidden_dims[1]))  # To 1st layer
+        self.proj_down = nn.Sequential(nn.Linear(hidden_dims[1], 2 * hidden_dims[1]), nn.SiLU(), nn.Linear(2 * hidden_dims[1], out_dim))  # To 1st layer
         self.pos_enc = PositionEmbeddingCoordsSine(pos_type="fourier", d_pos=hidden_dims[1], gauss_scale=1.0, normalize=False)
 
     def initialize_weights(self):
@@ -270,7 +270,7 @@ class PcdSAMNoiseNet(nn.Module):
         _, all_points, cluster_indices, attrs = self.pcd_encoder(points, return_full=True)
 
         # DEBUG: Visualize the point cloud pyramid
-        self.visualize_pcd_pyramids(all_points, cluster_indices, attrs)
+        # self.visualize_pcd_pyramids(all_points, cluster_indices, attrs)
         # Map to the second dense layer
         points = all_points[-2]
         cluster_indexes = cluster_indices[-1]

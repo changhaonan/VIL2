@@ -33,7 +33,7 @@ if __name__ == "__main__":
     cfg_file = os.path.join(root_path, "config", f"pose_transformer_rpdiff_{task_name}.py")
     cfg = LazyConfig.load(cfg_file)
     cfg.MODEL.NOISE_NET.NAME = "PCDSAMNOISENET"
-    cfg.DATALOADER.AUGMENTATION.CROP_PCD = False
+    
     cfg.DATALOADER.BATCH_SIZE = 32
     # Load dataset & data loader
     train_dataset, val_dataset, test_dataset = build_dmorp_dataset(root_path, cfg)

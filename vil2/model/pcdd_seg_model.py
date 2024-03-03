@@ -32,7 +32,7 @@ from scipy.spatial.transform import Rotation as R
 
 
 class LPcdSegDiffusion(L.LightningModule):
-    """Lignthing module for PCD diffusion model"""
+    """Lignthing module for PCD diffusion model; This uses superpoint."""
 
     def __init__(self, pcd_noise_net: PcdSegNoiseNet, cfg: Box, **kwargs: Any) -> None:
         super().__init__()
@@ -63,16 +63,18 @@ class LPcdSegDiffusion(L.LightningModule):
     def criterion(self, batch):
         if self.sample_batch is None:
             self.sample_batch = batch
-        # Prepare data
+        # Assemble input
         coord = batch["anchor_coord"]
+        normal = batch["anchor_normal"]
         feat = batch["anchor_feat"]
+        label = batch["anchor_label"]
         batch_idx = batch["anchor_batch_index"]
         offset = batch2offset(batch_idx)
         points = [coord, feat, offset]
         label = batch["anchor_label"]
         super_index = batch["anchor_super_index"][:, self.superpoint_layer]  # Use selected layer
         # Do one-time encoding
-        enc_points = self.pcd_noise_net.encode_pcd(points)
+        enc_points = self.pcd_noise_net.encode_pcd(points, attrs={"normal": normal})
         # Scatter to super_index
         coord, feat, offset = enc_points
         super_label = torch_scatter.scatter(label, super_index, dim=0, reduce="mean").unsqueeze(1)
@@ -87,12 +89,7 @@ class LPcdSegDiffusion(L.LightningModule):
             # sample noise to add to actions
             noise = torch.randn(batch_label.shape, device=self.device)
             # sample a diffusion iteration for each data point
-            timesteps = torch.randint(
-                low=0,
-                high=self.noise_scheduler.config.num_train_timesteps,
-                size=(batch_label.shape[0], 1),
-                device=self.device,
-            ).long()
+            timesteps = torch.randint(low=0, high=self.noise_scheduler.config.num_train_timesteps, size=(batch_label.shape[0], 1), device=self.device).long()
             # add noisy actions
             noisy_label = self.noise_scheduler.add_noise(batch_label, noise, timesteps)
             noisy_label, _ = to_flat_batch(noisy_label, label_mask)
@@ -131,32 +128,38 @@ class LPcdSegDiffusion(L.LightningModule):
             super_index = batch["anchor_super_index"][:, self.superpoint_layer]  # Use the first super index
             super_label = torch_scatter.scatter(label, super_index, dim=0, reduce="mean").unsqueeze(1)
             super_batch_index = torch_scatter.scatter(batch_idx, super_index, dim=0, reduce="mean")
-            batch_label, super_mask = to_dense_batch(super_label, super_batch_index)
+            batch_super_label, super_mask = to_dense_batch(super_label, super_batch_index)
+            batch_label = to_dense_batch(label, batch_idx)[0]
             pred_label = self.forward(batch)
             # Visualize results
             anchor_coord = batch["anchor_coord"]
             batch_anchor_coord = to_dense_batch(anchor_coord, batch_idx)[0]
             batch_pred_label = to_dense_batch(pred_label, batch_idx)[0]
-            for i in range(min(batch_label.shape[0], 4)):
+            for i in range(min(batch_super_label.shape[0], 4)):
                 pred_label_i = pred_label[i]
                 anchord_coord_i = batch_anchor_coord[i]
                 pred_label_i = batch_pred_label[i]
-                image = self.view_result(anchord_coord_i, pred_label_i)
+                gt_label_i = batch_label[i][:, None]
+                pred_image = self.view_result(anchord_coord_i, pred_label_i)
+                gt_image = self.view_result(anchord_coord_i, gt_label_i)
+                # Concatenate image
+                concat_image = np.concatenate([gt_image, pred_image], axis=1)
                 # Log image in wandb
                 wandb_logger = self.logger.experiment
-                wandb_logger.log({f"val_label_image_{i}": [wandb.Image(image, caption=f"val_label_image_{i}")]})
+                wandb_logger.log({f"val_label_image": [wandb.Image(concat_image, caption=f"val_label_image_{i}")]})
 
     def forward(self, batch):
         """Inference for PCD diffusion model."""
-        # Prepare data
+        # Assemble input
         coord = batch["anchor_coord"]
+        normal = batch["anchor_normal"]
         feat = batch["anchor_feat"]
         batch_idx = batch["anchor_batch_index"]
         offset = batch2offset(batch_idx)
         points = [coord, feat, offset]
         super_index = batch["anchor_super_index"][:, self.superpoint_layer]  # Use selected layer
         # Do one-time encoding
-        enc_points = self.pcd_noise_net.encode_pcd(points)
+        enc_points = self.pcd_noise_net.encode_pcd(points, attrs={"normal": normal})
         # Scatter to super_index
         coord, feat, offset = enc_points
         super_coord = torch_scatter.scatter(coord, super_index, dim=0, reduce="mean")
@@ -167,17 +170,15 @@ class LPcdSegDiffusion(L.LightningModule):
 
         # Batchify
         batch_coord, super_index_mask = to_dense_batch(super_coord, super_batch_index)
-        B = batch_coord.shape[0]
         if self.diffusion_process == "ddpm":
             # initialize action from Guassian noise
             noisy_label = torch.randn((batch_coord.shape[0], batch_coord.shape[1], 1), device=self.device)
             for k in self.noise_scheduler.timesteps:
-                timesteps = torch.tensor([k], device=self.device).to(torch.long).repeat(B)
+                timesteps = torch.tensor([k], device=self.device).to(torch.long).repeat(batch_coord.shape[0])
                 noisy_label, _ = to_flat_batch(noisy_label, super_index_mask)
                 # predict noise residual
                 noise_pred = self.pcd_noise_net(noisy_label, super_points, timesteps)
                 noisy_label, _ = to_dense_batch(noisy_label, super_batch_index)
-                # Batchify
                 # inverse diffusion step (remove noise)
                 noisy_label = self.noise_scheduler.step(model_output=noise_pred, timestep=k, sample=noisy_label).prev_sample
         else:
@@ -197,13 +198,12 @@ class LPcdSegDiffusion(L.LightningModule):
                 lr_scale = 0.1 ** (self.warm_up_step - epoch)
             else:
                 lr_scale = 0.95**epoch
-
             return lr_scale
 
         scheduler = LambdaLR(optimizer, lr_lambda=lr_foo)
         return [optimizer], [scheduler]
 
-    def view_result(self, batch_coord: torch.Tensor, pred_label: torch.Tensor):
+    def view_result(self, batch_coord: torch.Tensor, pred_label: torch.Tensor, vis_3d: bool = False):
         """Render label image."""
         pred_label = pred_label.detach().cpu().numpy()
         batch_coord = batch_coord.detach().cpu().numpy()
@@ -215,14 +215,18 @@ class LPcdSegDiffusion(L.LightningModule):
         # Rotate the object for better view: rotate around y-axis for 90 degree & z-axis for -90 degree
         rot = R.from_euler("z", -90, degrees=True) * R.from_euler("y", -90, degrees=True)
         pcd.rotate(rot.as_matrix(), center=(0, 0, 0))
-        # Offscreen rendering
-        viewer = o3d.visualization.Visualizer()
-        viewer.create_window(width=540, height=540, visible=False)
-        viewer.add_geometry(pcd)
-        # Render image
-        image = viewer.capture_screen_float_buffer(do_render=True)
-        viewer.destroy_window()
-        return np.asarray(image)
+        if vis_3d:
+            o3d.visualization.draw_geometries([pcd])
+            return None
+        else:
+            # Offscreen rendering
+            viewer = o3d.visualization.Visualizer()
+            viewer.create_window(width=540, height=540, visible=False)
+            viewer.add_geometry(pcd)
+            # Render image
+            image = viewer.capture_screen_float_buffer(do_render=True)
+            viewer.destroy_window()
+            return np.asarray(image)
 
 
 class PCDDModel:
@@ -238,13 +242,7 @@ class PCDDModel:
 
     def train(self, num_epochs: int, train_data_loader, val_data_loader, save_path: str):
         # Checkpoint callback
-        checkpoint_callback = ModelCheckpoint(
-            monitor="val_loss",
-            dirpath=os.path.join(save_path, "checkpoints"),
-            filename="Dmorp_model-{epoch:02d}-{val_loss:.2f}",
-            save_top_k=3,
-            mode="min",
-        )
+        checkpoint_callback = ModelCheckpoint(monitor="val_loss", dirpath=os.path.join(save_path, "checkpoints"), filename="Dmorp_model-{epoch:02d}-{val_loss:.4f}", save_top_k=3, mode="min")
         # Trainer
         # If not mac, using ddp_find_unused_parameters_true
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
@@ -263,57 +261,38 @@ class PCDDModel:
     def test(self, test_data_loader, save_path: str):
         strategy = "ddp_find_unused_parameters_true" if os.uname().sysname != "Darwin" else "auto"
         os.makedirs(os.path.join(save_path, "logs"), exist_ok=True)
-        trainer = L.Trainer(
-            logger=WandbLogger(name=self.experiment_name(), project=self.logger_project, save_dir=os.path.join(save_path, "logs")),
-            strategy=strategy,
-        )
+        trainer = L.Trainer(logger=WandbLogger(name=self.experiment_name(), project=self.logger_project, save_dir=os.path.join(save_path, "logs")), strategy=strategy)
         checkpoint_path = f"{save_path}/checkpoints"
         # Select the best checkpoint
         checkpoints = os.listdir(checkpoint_path)
         sorted_checkpoints = sorted(checkpoints, key=lambda x: float(x.split("=")[-1].split(".ckpt")[0]))
         checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
         checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
-        trainer.test(
-            self.lpcd_noise_net.__class__.load_from_checkpoint(checkpoint_file, pcd_noise_net=self.pcd_noise_net, cfg=self.cfg),
-            dataloaders=test_data_loader,
-        )
+        trainer.test(self.lpcd_noise_net.__class__.load_from_checkpoint(checkpoint_file, pcd_noise_net=self.pcd_noise_net, cfg=self.cfg), dataloaders=test_data_loader)
 
     def predict(
-        self,
-        target_coord: np.ndarray | None = None,
-        target_feat: np.ndarray | None = None,
-        anchor_coord: np.ndarray | None = None,
-        anchor_feat: np.ndarray | None = None,
-        super_index: np.ndarray | None = None,
-        batch=None,
-        **kwargs,
-    ) -> Any:
+        self, anchor_coord: np.ndarray | None = None, anchor_normal: np.ndarray | None = None, anchor_feat: np.ndarray | None = None, super_index: np.ndarray | None = None, batch=None, **kwargs
+    ):
         self.lpcd_noise_net.eval()
         # Assemble batch
         if batch is None:
             batch_size = kwargs.get("batch_size", 2)
-            target_coord_list = []
-            target_feat_list = []
             anchor_coord_list = []
+            anchor_normal_list = []
             anchor_feat_list = []
             anchor_super_index_list = []
-            target_batch_idx_list = []
             anchor_batch_idx_list = []
             num_anchor_cluster = 0
             for i in range(batch_size):
-                target_coord_list.append(target_coord)
-                target_feat_list.append(target_feat)
                 anchor_coord_list.append(anchor_coord)
+                anchor_normal_list.append(anchor_normal)
                 anchor_feat_list.append(anchor_feat)
                 anchor_super_index_list.append(super_index + num_anchor_cluster)
-                target_batch_idx_list.append(np.array([i] * target_coord.shape[0], dtype=np.int64))
                 anchor_batch_idx_list.append(np.array([i] * anchor_coord.shape[0], dtype=np.int64))
                 num_anchor_cluster = num_anchor_cluster + np.max(super_index) + 1
             batch = {
-                "target_coord": np.concatenate(target_coord_list, axis=0),
-                "target_feat": np.concatenate(target_feat_list, axis=0),
-                "target_batch_index": np.concatenate(target_batch_idx_list, axis=0),
                 "anchor_coord": np.concatenate(anchor_coord_list, axis=0),
+                "anchor_normal": np.concatenate(anchor_normal_list, axis=0),
                 "anchor_feat": np.concatenate(anchor_feat_list, axis=0),
                 "anchor_super_index": np.concatenate(anchor_super_index_list, axis=0),
                 "anchor_batch_index": np.concatenate(anchor_batch_idx_list, axis=0),
@@ -324,42 +303,32 @@ class PCDDModel:
         else:
             check_batch_idx = kwargs.get("check_batch_idx", 0)
             batch_size = kwargs.get("batch_size", 2)
-            target_coord = batch["target_coord"]
-            target_feat = batch["target_feat"]
-            target_batch_index = batch["target_batch_index"]
-
-            target_coord_i = target_coord[target_batch_index == check_batch_idx]
-            target_feat_i = target_feat[target_batch_index == check_batch_idx]
             anchor_coord = batch["anchor_coord"]
+            anchor_normal = batch["anchor_normal"]
             anchor_feat = batch["anchor_feat"]
             anchor_batch_index = batch["anchor_batch_index"]
             anchor_super_index_i = batch["anchor_super_index"][anchor_batch_index == check_batch_idx]
             anchor_super_index_i[:, 0] = anchor_super_index_i[:, 0] - torch.min(anchor_super_index_i[:, 0])
             anchor_super_index_i[:, 1] = anchor_super_index_i[:, 1] - torch.min(anchor_super_index_i[:, 1])
             anchor_coord_i = anchor_coord[anchor_batch_index == check_batch_idx]
+            anchor_normal_i = anchor_normal[anchor_batch_index == check_batch_idx]
             anchor_feat_i = anchor_feat[anchor_batch_index == check_batch_idx]
-            target_coord_list = []
-            target_feat_list = []
             anchor_coord_list = []
+            anchor_normal_list = []
             anchor_super_index_list = []
             anchor_feat_list = []
-            target_batch_idx_list = []
             anchor_batch_idx_list = []
             num_anchor_cluster = 0
             for i in range(batch_size):
-                target_coord_list.append(target_coord_i)
-                target_feat_list.append(target_feat_i)
                 anchor_coord_list.append(anchor_coord_i)
+                anchor_normal_list.append(anchor_normal_i)
                 anchor_super_index_list.append(anchor_super_index_i + num_anchor_cluster)
                 anchor_feat_list.append(anchor_feat_i)
-                target_batch_idx_list.append(torch.tensor([i] * target_coord_i.shape[0], dtype=torch.int64))
                 anchor_batch_idx_list.append(torch.tensor([i] * anchor_coord_i.shape[0], dtype=torch.int64))
                 num_anchor_cluster = num_anchor_cluster + torch.max(anchor_super_index_i) + 1
             batch = {
-                "target_coord": torch.cat(target_coord_list, dim=0),
-                "target_feat": torch.cat(target_feat_list, dim=0),
-                "target_batch_index": torch.cat(target_batch_idx_list, dim=0),
                 "anchor_coord": torch.cat(anchor_coord_list, dim=0),
+                "anchor_normal": torch.cat(anchor_normal_list, dim=0),
                 "anchor_super_index": torch.cat(anchor_super_index_list, dim=0),
                 "anchor_feat": torch.cat(anchor_feat_list, dim=0),
                 "anchor_batch_index": torch.cat(anchor_batch_idx_list, dim=0),
@@ -368,13 +337,21 @@ class PCDDModel:
         for key in batch.keys():
             batch[key] = batch[key].to(self.lpcd_noise_net.device)
         pred_label = self.lpcd_noise_net(batch)
-        # Full points
-        anchor_coord = batch["anchor_coord"]
-        anchor_batch_index = batch["anchor_batch_index"]
-        anchor_batch_coord, anchor_coord_mask = to_dense_batch(anchor_coord, anchor_batch_index)
-        anchor_batch_super_index = batch["anchor_super_index"]
-        anchor_batch_super_index, _ = to_dense_batch(anchor_batch_super_index, anchor_batch_index)
-        return pred_label.detach().cpu().numpy(), anchor_batch_coord.detach().cpu().numpy(), anchor_batch_super_index.detach().cpu().numpy()
+        batch_idx = batch["anchor_batch_index"]
+        pred_label = to_dense_batch(pred_label, batch_idx)[0]  # to dense
+
+        vis = kwargs.get("vis", False)
+        if vis:
+            anchor_coord = batch["anchor_coord"]
+            anchor_batch_coord = to_dense_batch(anchor_coord, batch_idx)[0]
+            for i in range(min(pred_label.shape[0], 4)):
+                pred_label_i = pred_label[i]
+
+                anchord_coord_i = anchor_batch_coord[i]
+                pred_label_i = pred_label[i]
+                self.lpcd_noise_net.view_result(anchord_coord_i, pred_label_i, vis_3d=True)
+
+        return pred_label.detach().cpu().numpy()
 
     def load(self, checkpoint_path: str) -> None:
         print(f"Loading checkpoint from {checkpoint_path}")
