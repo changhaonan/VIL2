@@ -126,13 +126,15 @@ class LRigPoseTransformer(L.LightningModule):
         )
 
         # Compute correspondence
-        gt_corr = batch["corr"]
-        corr_batch_idx = batch["corr_batch_index"]
-        corr_offset = batch2offset(corr_batch_idx)
-        gt_corr = to_dense_batch(gt_corr, corr_batch_idx)[0]
-
         conf_matrix = self.pose_transformer.forward(enc_anchor_points, enc_target_points)
-        gt_corr_matrix = self.pose_transformer.to_gt_correspondence_matrix(conf_matrix, gt_corr)
+        if "corr" in batch:
+            gt_corr = batch["corr"]
+            corr_batch_idx = batch["corr_batch_index"]
+            corr_offset = batch2offset(corr_batch_idx)
+            gt_corr = to_dense_batch(gt_corr, corr_batch_idx)[0]
+            gt_corr_matrix = self.pose_transformer.to_gt_correspondence_matrix(conf_matrix, gt_corr)
+        else:
+            gt_corr_matrix = None
 
         # Output estimation for evaluation
         R, t, condition = self.pose_transformer.dual_softmax_reposition.arun(
@@ -258,7 +260,7 @@ class RGTModel:
             dataloaders=test_data_loader,
         )
 
-    def predict(self, target_coord=None, target_feat=None, anchor_coord=None, anchor_feat=None, batch=None, target_pose=None, vis: bool = False) -> Any:
+    def predict(self, target_coord=None, target_normal=None, target_feat=None, anchor_coord=None, anchor_normal=None, anchor_feat=None, batch=None, target_pose=None, vis: bool = False) -> Any:
         self.lpose_transformer.eval()
         # Assemble batch
         if batch is None:
@@ -266,9 +268,11 @@ class RGTModel:
             anchor_batch_idx = np.array([0] * anchor_coord.shape[0], dtype=np.int64)
             batch = {
                 "target_coord": target_coord,
+                "target_normal": target_normal,
                 "target_feat": target_feat,
                 "target_batch_index": target_batch_idx,
                 "anchor_coord": anchor_coord,
+                "anchor_normal": anchor_normal,
                 "anchor_feat": anchor_feat,
                 "anchor_batch_index": anchor_batch_idx,
             }
@@ -291,7 +295,7 @@ class RGTModel:
                 self.lpose_transformer.view_result(batch_anchor_coord[i, :], batch_target_coord[i, :], pred_R[i, :], pred_t[i, :], conf_matrix[i, :], show_3d=True)
 
         conf_matrix = conf_matrix.detach().cpu().numpy()
-        gt_corr = gt_corr.detach().cpu().numpy()
+        gt_corr = gt_corr.detach().cpu().numpy() if gt_corr is not None else None
         pred_R = pred_R.detach().cpu().numpy()
         pred_t = pred_t.detach().cpu().numpy()
         return conf_matrix, gt_corr, (pred_R, pred_t)

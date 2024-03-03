@@ -276,7 +276,7 @@ class PCDDModel:
         self.lpcd_noise_net.eval()
         # Assemble batch
         if batch is None:
-            batch_size = kwargs.get("batch_size", 2)
+            batch_size = kwargs.get("batch_size", 8)
             anchor_coord_list = []
             anchor_normal_list = []
             anchor_feat_list = []
@@ -302,7 +302,7 @@ class PCDDModel:
                 batch[key] = torch.from_numpy(batch[key])
         else:
             check_batch_idx = kwargs.get("check_batch_idx", 0)
-            batch_size = kwargs.get("batch_size", 2)
+            batch_size = kwargs.get("batch_size", 8)
             anchor_coord = batch["anchor_coord"]
             anchor_normal = batch["anchor_normal"]
             anchor_feat = batch["anchor_feat"]
@@ -340,18 +340,21 @@ class PCDDModel:
         batch_idx = batch["anchor_batch_index"]
         pred_label = to_dense_batch(pred_label, batch_idx)[0]  # to dense
 
+        anchor_coord = batch["anchor_coord"]
+        anchor_batch_coord = to_dense_batch(anchor_coord, batch_idx)[0]
+        anchor_normal = batch["anchor_normal"]
+        anchor_batch_normal = to_dense_batch(anchor_normal, batch_idx)[0]
+        anchor_feat = batch["anchor_feat"]
+        anchor_batch_feat = to_dense_batch(anchor_feat, batch_idx)[0]
         vis = kwargs.get("vis", False)
         if vis:
-            anchor_coord = batch["anchor_coord"]
-            anchor_batch_coord = to_dense_batch(anchor_coord, batch_idx)[0]
             for i in range(min(pred_label.shape[0], 4)):
                 pred_label_i = pred_label[i]
-
                 anchord_coord_i = anchor_batch_coord[i]
                 pred_label_i = pred_label[i]
                 self.lpcd_noise_net.view_result(anchord_coord_i, pred_label_i, vis_3d=True)
 
-        return pred_label.detach().cpu().numpy()
+        return pred_label.detach().cpu().numpy(), anchor_batch_coord.detach().cpu().numpy(), anchor_batch_normal.detach().cpu().numpy(), anchor_batch_feat.detach().cpu().numpy()
 
     def load(self, checkpoint_path: str) -> None:
         print(f"Loading checkpoint from {checkpoint_path}")
@@ -365,3 +368,25 @@ class PCDDModel:
         init_args = self.cfg.MODEL.NOISE_NET.INIT_ARGS[noise_net_name]
         crop_strategy = self.cfg.DATALOADER.AUGMENTATION.CROP_STRATEGY
         return f"PCDD_model_{crop_strategy}"
+
+    ############################### UTILS ################################
+    def seg_and_rank(self, coord, prob, **kwargs):
+        """Segment point and rank by probability"""
+        prob_thresh = 0.5
+        num_thresh = 100
+        seg_list = []
+        for i in range(coord.shape[0]):
+            prob_i = prob[i]
+            coord_i = coord[i]
+            coord_i_crop = coord_i[(prob_i >= prob_thresh).squeeze()]
+            if coord_i_crop.shape[0] < num_thresh:
+                continue
+            avg_prob = np.mean(prob_i[(prob_i >= prob_thresh).squeeze()])
+            seg_list.append({"coord": coord_i_crop, "prob": avg_prob})
+            for k, v in kwargs.items():
+                v_i = v[i]
+                v_i_crop = v_i[(prob_i >= prob_thresh).squeeze()]
+                seg_list[-1][k] = v_i_crop
+        # Sort by prob
+        seg_list = sorted(seg_list, key=lambda x: x["prob"], reverse=True)
+        return seg_list

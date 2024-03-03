@@ -91,4 +91,12 @@ if __name__ == "__main__":
             continue
         # Extract one data from batch
         check_batch_idx = 1
-        pred_anchor_label = pcdd_model.predict(batch=batch, check_batch_idx=check_batch_idx, vis=True)
+        pred_anchor_label, anchor_coord = pcdd_model.predict(batch=batch, check_batch_idx=check_batch_idx, vis=False)
+        seg_list = pcdd_model.seg_and_rank(anchor_coord, pred_anchor_label)
+
+        # Visualize
+        for seg in seg_list:
+            print(f"Seg prob: {seg['prob']}")
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(seg["coord"])
+            o3d.visualization.draw_geometries([pcd])
