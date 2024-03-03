@@ -110,7 +110,7 @@ class LPcdSAMDiffusion(L.LightningModule):
 
         # Encode points
         points, cluster_indexes, attrs = self.pcd_noise_net.encode_pcd(points, attrs={"normal": normal})
-        label = torch_scatter.scatter(label, cluster_indexes, dim=0, reduce="max").unsqueeze(1)
+        label = torch_scatter.scatter(label, cluster_indexes, dim=0, reduce="mean").unsqueeze(1)
         cluster_batch_index = torch_scatter.scatter(batch_idx, cluster_indexes, dim=0, reduce="mean")
         batch_label, label_mask = to_dense_batch(label, cluster_batch_index)
         # Scatter label to cluster

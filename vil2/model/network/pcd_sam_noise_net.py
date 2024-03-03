@@ -221,7 +221,7 @@ class PcdSAMNoiseNet(nn.Module):
         num_dit_blocks = kwargs.get("num_dit_blocks", 2)
         out_dim = kwargs.get("out_dim", 1)
         max_timestep = kwargs.get("max_timestep", 200)
-        self.seg_knn = kwargs.get("seg_knn", 16)
+        self.seg_knn = kwargs.get("seg_knn", 32)
         self.normalize_coord = True
         # Module
         self.pcd_encoder = PointTransformerNetwork(grid_sizes, depths, dec_depths, hidden_dims, n_heads, ks, in_dim, skip_dec=False)
@@ -270,7 +270,7 @@ class PcdSAMNoiseNet(nn.Module):
         _, all_points, cluster_indices, attrs = self.pcd_encoder(points, return_full=True)
 
         # DEBUG: Visualize the point cloud pyramid
-        # self.visualize_pcd_pyramids(all_points, cluster_indices, attrs)
+        self.visualize_pcd_pyramids(all_points, cluster_indices, attrs)
         # Map to the second dense layer
         points = all_points[-2]
         cluster_indexes = cluster_indices[-1]
