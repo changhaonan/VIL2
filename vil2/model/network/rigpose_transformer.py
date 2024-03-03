@@ -14,7 +14,7 @@ from vil2.model.network.genpose_modules import Linear
 from vil2.utils.pcd_utils import visualize_point_pyramid, visualize_tensor_pcd
 
 
-class SAMBlock(nn.Module):
+class PointSAMBlock(nn.Module):
     """Decoder block like SAM"""
 
     def __init__(self, hidden_dim, n_heads, dropout):
@@ -48,7 +48,7 @@ class RigPoseTransformer(nn.Module):
         #
         self.sam_blocks = nn.ModuleList()
         for i in range(2):
-            self.sam_blocks.append(SAMBlock(hidden_dim=hidden_dims[0], n_heads=n_heads[0], dropout=0.1))
+            self.sam_blocks.append(PointSAMBlock(hidden_dim=hidden_dims[0], n_heads=n_heads[0], dropout=0.1))
         # Reposition
         self.dual_softmax_reposition = DualSoftmaxReposition(hidden_dim=hidden_dims[0], temperature=1.0)
         self.normalize_coord = True
