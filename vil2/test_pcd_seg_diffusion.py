@@ -1,4 +1,4 @@
-"""Test pose transformer."""
+"""Test pcd segmentation diffusion."""
 
 import os
 import open3d as o3d
@@ -31,12 +31,7 @@ if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--seed", type=int, default=0)
     argparser.add_argument("--random_index", type=int, default=0)
-    argparser.add_argument(
-        "--task_name",
-        type=str,
-        default="book_in_bookshelf",
-        help="stack_can_in_cabinet, book_in_bookshelf, mug_on_rack_multi",
-    )
+    argparser.add_argument("--task_name", type=str, default="book_in_bookshelf", help="stack_can_in_cabinet, book_in_bookshelf, mug_on_rack_multi")
     args = argparser.parse_args()
     # Set seed
     torch.manual_seed(args.seed)
@@ -53,7 +48,7 @@ if __name__ == "__main__":
     # Prepare path
     data_path_dict = {
         "stack_can_in_cabinet": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/can_in_cabinet_stack/task_name_stack_can_in_cabinet",
-        "book_in_bookshelf": "/home/harvey/Data/rpdiff_V2/book_in_bookshelf",
+        "book_in_bookshelf": "/home/harvey/Data/rpdiff_V3/book_in_bookshelf",
         "mug_on_rack_multi": "/home/harvey/Project/VIL2/vil2/external/rpdiff/data/task_demos/mug_on_rack_multi_large_proc_gen_demos/task_name_mug_on_rack_multi",
     }
     data_format = "test"  # "rpdiff_fail" or "raw", "test"
@@ -64,20 +59,8 @@ if __name__ == "__main__":
     # Load dataset & data loader
     train_dataset, val_dataset, test_dataset = build_dmorp_dataset(root_path, cfg)
 
-    test_data_loader = torch.utils.data.DataLoader(
-        test_dataset,
-        batch_size=cfg.DATALOADER.BATCH_SIZE,
-        shuffle=False,
-        num_workers=cfg.DATALOADER.NUM_WORKERS,
-        collate_fn=PcdPairCollator(),
-    )
-    train_data_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=cfg.DATALOADER.BATCH_SIZE,
-        shuffle=True,
-        num_workers=cfg.DATALOADER.NUM_WORKERS,
-        collate_fn=PcdPairCollator(),
-    )
+    test_data_loader = torch.utils.data.DataLoader(test_dataset, batch_size=cfg.DATALOADER.BATCH_SIZE, shuffle=False, num_workers=cfg.DATALOADER.NUM_WORKERS, collate_fn=PcdPairCollator())
+    train_data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=cfg.DATALOADER.BATCH_SIZE, shuffle=True, num_workers=cfg.DATALOADER.NUM_WORKERS, collate_fn=PcdPairCollator())
 
     # Build model
     net_name = cfg.MODEL.NOISE_NET.NAME

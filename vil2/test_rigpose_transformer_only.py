@@ -31,18 +31,14 @@ if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--seed", type=int, default=0)
     argparser.add_argument("--random_index", type=int, default=0)
-    argparser.add_argument(
-        "--task_name",
-        type=str,
-        default="book_in_bookshelf",
-        help="stack_can_in_cabinet, book_in_bookshelf, mug_on_rack_multi",
-    )
+    argparser.add_argument("--task_name", type=str, default="book_in_bookshelf", help="stack_can_in_cabinet, book_in_bookshelf, mug_on_rack_multi")
     args = argparser.parse_args()
     # Set seed
     torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
     random.seed(args.seed)
     np.random.seed(args.seed)
-
     # Load config
     task_name = args.task_name
     root_path = os.path.dirname((os.path.abspath(__file__)))
@@ -55,21 +51,8 @@ if __name__ == "__main__":
 
     # Load dataset & data loader
     train_dataset, val_dataset, test_dataset = build_dmorp_dataset(root_path, cfg)
-
-    train_data_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=cfg.DATALOADER.BATCH_SIZE,
-        shuffle=True,
-        num_workers=cfg.DATALOADER.NUM_WORKERS,
-        collate_fn=PcdPairCollator(),
-    )
-    val_data_loader = torch.utils.data.DataLoader(
-        val_dataset,
-        batch_size=cfg.DATALOADER.BATCH_SIZE,
-        shuffle=False,
-        num_workers=cfg.DATALOADER.NUM_WORKERS,
-        collate_fn=PcdPairCollator(),
-    )
+    train_data_loader = torch.utils.data.DataLoader(train_dataset, batch_size=cfg.DATALOADER.BATCH_SIZE, shuffle=True, num_workers=cfg.DATALOADER.NUM_WORKERS, collate_fn=PcdPairCollator())
+    val_data_loader = torch.utils.data.DataLoader(val_dataset, batch_size=cfg.DATALOADER.BATCH_SIZE, shuffle=False, num_workers=cfg.DATALOADER.NUM_WORKERS, collate_fn=PcdPairCollator())
 
     # Build model
     net_name = cfg.MODEL.NOISE_NET.NAME

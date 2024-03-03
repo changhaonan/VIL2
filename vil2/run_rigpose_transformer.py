@@ -1,5 +1,6 @@
 """Run pose transformer."""
 
+import numpy as np
 import os
 import torch
 import pickle
@@ -26,7 +27,7 @@ if __name__ == "__main__":
     torch.cuda.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
     random.seed(args.seed)
-
+    np.random.seed(args.seed)
     # Load config
     task_name = args.task_name
     root_path = os.path.dirname((os.path.abspath(__file__)))
