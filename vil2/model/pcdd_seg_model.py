@@ -370,7 +370,7 @@ class PCDDModel:
         return f"PCDD_model_{crop_strategy}"
 
     ############################### UTILS ################################
-    def seg_and_rank(self, coord, prob, **kwargs):
+    def seg_and_rank(self, coord, prob, crop_strategy="none", **kwargs):
         """Segment point and rank by probability"""
         prob_thresh = 0.5
         num_thresh = 100
@@ -382,11 +382,25 @@ class PCDDModel:
             if coord_i_crop.shape[0] < num_thresh:
                 continue
             avg_prob = np.mean(prob_i[(prob_i >= prob_thresh).squeeze()])
-            seg_list.append({"coord": coord_i_crop, "prob": avg_prob})
-            for k, v in kwargs.items():
-                v_i = v[i]
-                v_i_crop = v_i[(prob_i >= prob_thresh).squeeze()]
-                seg_list[-1][k] = v_i_crop
+            if crop_strategy == "none":
+                seg_list.append({"coord": coord_i_crop, "prob": avg_prob})
+                for k, v in kwargs.items():
+                    v_i = v[i]
+                    v_i_crop = v_i[(prob_i >= prob_thresh).squeeze()]
+                    seg_list[-1][k] = v_i_crop
+            elif crop_strategy == "bbox":
+                # Compute bbox bounding crop
+                min_coord = np.min(coord_i_crop, axis=0)
+                max_coord = np.max(coord_i_crop, axis=0)
+                # Crop by bbox
+                crop_index = np.all((coord_i >= min_coord) & (coord_i <= max_coord), axis=1)
+                coord_i_crop_bbox = coord_i[crop_index]
+                seg_list.append({"coord": coord_i_crop_bbox, "prob": avg_prob})
+                for k, v in kwargs.items():
+                    v_i = v[i]
+                    v_i_crop = v_i[crop_index]
+                    seg_list[-1][k] = v_i_crop
+
         # Sort by prob
         seg_list = sorted(seg_list, key=lambda x: x["prob"], reverse=True)
         return seg_list

@@ -137,6 +137,10 @@ class LRigPoseTransformer(L.LightningModule):
             gt_corr_matrix = None
 
         # Output estimation for evaluation
+        # Biasing coord with normal
+        c = 0.1 * (target_coord.max() - target_coord.min())
+        target_coord = target_coord + c * target_normal
+        anchor_coord = anchor_coord + c * anchor_normal
         R, t, condition = self.pose_transformer.dual_softmax_reposition.arun(
             conf_matrix=conf_matrix, coord_a=target_coord, coord_b=anchor_coord, batch_index_a=offset2batch(target_offset), batch_index_b=offset2batch(anchor_offset)
         )

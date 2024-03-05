@@ -16,6 +16,7 @@ from vil2.model.rgt_model import RGTModel
 from detectron2.config import LazyConfig
 from torch.utils.data.dataset import random_split
 from vil2.vil2_utils import build_dmorp_dataset
+from vil2.utils.rpdiff_utils import preprocess_input_rpdiff
 import random
 
 
@@ -90,24 +91,42 @@ if __name__ == "__main__":
     checkpoint_file = os.path.join(checkpoint_path, sorted_checkpoints[0])
     act_model.load(checkpoint_file)
 
+    # Testing raw material
     for i in range(20):
         batch = next(iter(val_data_loader))
-
+        if i < 11:
+            continue
         # Perform segmentation
         check_batch_idx = 1
         pred_anchor_label, anchor_coord, anchor_normal, anchor_feat = seg_model.predict(batch=batch, check_batch_idx=check_batch_idx, vis=False)
-        seg_list = seg_model.seg_and_rank(anchor_coord, pred_anchor_label, normal=anchor_normal, feat=anchor_feat)
+        seg_list = seg_model.seg_and_rank(anchor_coord, pred_anchor_label, normal=anchor_normal, feat=anchor_feat, crop_strategy="bbox")
 
-        # Compute action
+        # Visualize
+        # for seg in seg_list:
+        #     print(f"Seg prob: {seg['prob']}")
+        #     pcd = o3d.geometry.PointCloud()
+        #     pcd.points = o3d.utility.Vector3dVector(seg["coord"])
+        #     o3d.visualization.draw_geometries([pcd])
+
+        # Prepare data
         target_batch_idx = batch["target_batch_index"]
         target_coord = batch["target_coord"][target_batch_idx == check_batch_idx].numpy()
         target_normal = batch["target_normal"][target_batch_idx == check_batch_idx].numpy()
         target_feat = batch["target_feat"][target_batch_idx == check_batch_idx].numpy()
+        # Cropped coord
         anchor_coord = seg_list[0]["coord"]
         anchor_normal = seg_list[0]["normal"]
         anchor_feat = seg_list[0]["feat"]
+        # Full coord
+        anchor_batch_idx = batch["anchor_batch_index"]
+        anchor_coord_full = batch["anchor_coord"][anchor_batch_idx == check_batch_idx].numpy()
+        anchor_normal_full = batch["anchor_normal"][anchor_batch_idx == check_batch_idx].numpy()
+        anchor_feat_full = batch["anchor_feat"][anchor_batch_idx == check_batch_idx].numpy()
 
-        for k in range(2):
+        # Move anchor to center
+        anchor_center = np.mean(anchor_coord, axis=0)
+        anchor_coord -= anchor_center
+        for k in range(1):
             print(f"Batch {i}, Iteration {k}...")
             if k != 0:
                 batch["prev_R"] = torch.from_numpy(pred_R)
@@ -115,3 +134,19 @@ if __name__ == "__main__":
             conf_matrix, gt_corr, (pred_R, pred_t) = act_model.predict(
                 target_coord=target_coord, target_normal=target_normal, target_feat=target_feat, anchor_coord=anchor_coord, anchor_normal=anchor_normal, anchor_feat=anchor_feat, vis=True
             )
+        # Visualize everything together
+        target_pcd = o3d.geometry.PointCloud()
+        target_pcd.points = o3d.utility.Vector3dVector(target_coord)
+        target_pcd.normals = o3d.utility.Vector3dVector(target_normal)
+        target_pcd.paint_uniform_color([1, 0, 0])
+        pose = np.eye(4)
+        pose[:3, :3] = pred_R
+        pose[:3, 3] = pred_t
+        target_pcd.transform(pose)
+        target_pcd.translate(anchor_center)
+
+        anchor_pcd = o3d.geometry.PointCloud()
+        anchor_pcd.points = o3d.utility.Vector3dVector(anchor_coord_full)
+        anchor_pcd.normals = o3d.utility.Vector3dVector(anchor_normal_full)
+        anchor_pcd.paint_uniform_color([0, 1, 0])
+        o3d.visualization.draw_geometries([target_pcd, anchor_pcd])

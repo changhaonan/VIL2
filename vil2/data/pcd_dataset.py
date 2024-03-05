@@ -17,6 +17,7 @@ import pickle
 from copy import deepcopy
 from random import random, sample, uniform
 import vil2.utils.misc_utils as utils
+import vil2.utils.pcd_utils as pcd_utils
 from scipy.spatial.transform import Rotation as R
 from yaml import load
 from box import Box
@@ -62,6 +63,7 @@ class PcdPairDataset(Dataset):
         trans_noise_level: float = 0.1,
         rot_axis: str = "xy",
         corr_radius: float = 0.1,
+        use_shape_complete: bool = True,
         **kwargs,
     ):
         # Set parameters
@@ -91,6 +93,7 @@ class PcdPairDataset(Dataset):
             self.image_augmentations = None
         self.rot_axis = rot_axis
         self.corr_radius = corr_radius
+        self.use_shape_complete = use_shape_complete
         # Load data
         data_list = []
         for data_file in data_file_list:
@@ -160,6 +163,10 @@ class PcdPairDataset(Dataset):
         else:
             target_color = None
             anchor_color = None
+        if self.use_shape_complete:
+            # Compute convex hull of target object
+            target_coord, target_normal = pcd_utils.complete_shape(target_coord, strategy="bbox", vis=False)
+            target_feat = np.zeros((target_coord.shape[0], target_feat.shape[1]), dtype=np.float32)
 
         # Augment data
         if self.mode == "train" or self.mode == "val":

@@ -36,7 +36,7 @@ if __name__ == "__main__":
     # Overriding config
     cfg.MODEL.NOISE_NET.NAME = "RGTModel"
     cfg.DATALOADER.AUGMENTATION.CROP_PCD = True
-    cfg.DATALOADER.BATCH_SIZE = 32
+    cfg.DATALOADER.BATCH_SIZE = 8
     # Load dataset & data loader
     train_dataset, val_dataset, test_dataset = build_dmorp_dataset(root_path, cfg)
 

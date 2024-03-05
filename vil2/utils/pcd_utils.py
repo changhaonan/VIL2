@@ -78,3 +78,77 @@ def visualize_point_pyramid(pos: np.ndarray | torch.Tensor, normal: np.ndarray |
                     cum_cluster_index[cum_cluster_index == j] = cluster_index[j]
         pcd.colors = o3d.utility.Vector3dVector(color[cum_cluster_index])
         o3d.visualization.draw_geometries([pcd])
+
+
+def create_box_point(center, extent, R, density=10):
+    """
+    Create a dense point cloud for a rotated 3D bounding box.
+
+    Parameters:
+    - center: Tuple or list (Cx, Cy, Cz) representing the center of the bounding box.
+    - extent: Tuple or list (L, W, H) representing the length, width, and height of the box.
+    - R: 3x3 numpy array representing the rotation matrix of the bounding box.
+    - density: Number of points to generate per unit length along each dimension.
+
+    Returns:
+    - points: A numpy array of points representing the dense point cloud.
+    """
+    L, W, H = extent
+    Cx, Cy, Cz = center
+
+    # Calculate the number of points to generate based on the density
+    num_points_L = int(L * density)
+    num_points_W = int(W * density)
+    num_points_H = int(H * density)
+
+    # Generate grid points
+    x = np.linspace(-L / 2, L / 2, num_points_L)
+    y = np.linspace(-W / 2, W / 2, num_points_W)
+    z = np.linspace(-H / 2, H / 2, num_points_H)
+
+    # Points on each face (ignore the ends to avoid duplicating corner points)
+    faces = []
+    # Top and bottom
+    for zz in (-H / 2, H / 2):
+        xx, yy = np.meshgrid(x, y)
+        zz = np.ones_like(xx) * zz
+        faces.append(np.vstack([xx.ravel(), yy.ravel(), zz.ravel()]).T)
+    # Left and right
+    for yy in (-W / 2, W / 2):
+        xx, zz = np.meshgrid(x, z)
+        yy = np.ones_like(xx) * yy
+        faces.append(np.vstack([xx.ravel(), yy.ravel(), zz.ravel()]).T)
+    # Front and back
+    for xx in (-L / 2, L / 2):
+        yy, zz = np.meshgrid(y, z)
+        xx = np.ones_like(yy) * xx
+        faces.append(np.vstack([xx.ravel(), yy.ravel(), zz.ravel()]).T)
+
+    # Combine all faces and apply rotation and translation
+    all_points = np.vstack(faces)
+    rotated_points = (R @ all_points.T).T  # Apply rotation
+    translated_points = rotated_points + np.array(center)  # Translate to center
+
+    return translated_points
+
+
+def complete_shape(coord: np.ndarray, padding: float = 0.1, strategy: str = "bbox", vis: bool = False, **kwargs):
+    """Complete a shape completion of point cloud. The completion will have a padding around the original shape."""
+    if strategy == "bbox":
+        # Compute minimal bounding box
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(coord)
+        bbox = pcd.get_minimal_oriented_bounding_box()
+        density = kwargs.get("density", 100)
+        box_points = create_box_point(bbox.center, bbox.extent, bbox.R, density=density)
+        box_pcd = o3d.geometry.PointCloud()
+        box_pcd.points = o3d.utility.Vector3dVector(box_points)
+        # compute normal
+        box_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+        if vis:
+            # transparence
+            box_pcd.paint_uniform_color([0.9, 0.1, 0.1])
+            o3d.visualization.draw_geometries([pcd, box_pcd])
+        return np.asarray(box_pcd.points), np.asarray(box_pcd.normals)
+    else:
+        raise ValueError(f"Invalid strategy: {strategy}")
